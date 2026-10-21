@@ -1,0 +1,41 @@
+# Android / Gradle
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+output-metadata.json
+
+# 签名材料（本仓库不存放密钥；如后续需要，按 RULES.md §10.3 单独约定）
+keystore/
+keystore.properties
+*.jks
+*.keystore
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# 本地调试产物（截图 / 界面层级转储 / 日志），随手生成、不入库
+/*.png
+/*.xml
+*.log
+crashlogs/
+.backup/
+
+# AI 协作工具的项目数据（会话记忆等）
+.workbuddy/
+.workbuddy-ai/
+
+# 测试与临时目录
+/tmp/

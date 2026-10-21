@@ -1,0 +1,24 @@
+# ktlint 配置（RULES §8.1：格式由工具卡住，不靠人自觉）
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{kt,kts}]
+# 120 而不是默认的 100：这个项目的注释承担了「为什么这么做」的解释责任（RULES §8.3），
+# 压到 100 会把一句完整的技术理由切碎，反而降低可读性
+max_line_length = 120
+# 中文注释里的全角标点与英文标点混排是常态，不让 ktlint 管标点风格
+ktlint_standard_function-signature = disabled
+ktlint_standard_filename = disabled
+# Compose 约定 @Composable 函数用 PascalCase（HomeScreen / PlayerScreen / FocusableCard…），
+# 标准命名规则不认识这个约定，会把它们全判成错误。普通函数仍须 camelCase，靠 code review 兜住
+ktlint_standard_function-naming = disabled
+
+[*.md]
+trim_trailing_whitespace = false

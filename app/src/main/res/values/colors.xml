@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 core:designsystem 的 TvDarkColors.background 保持一致，避免启动瞬间闪一下白底 -->
+    <color name="tv_background">#0B0F12</color>
+</resources>

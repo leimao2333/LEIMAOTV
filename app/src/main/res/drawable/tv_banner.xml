@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TV banner 规范尺寸 320×180：电视启动器里显示的就是这张，尺寸不对会被拉伸变形（SYS-08） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <path
+        android:fillColor="#0B0F12"
+        android:pathData="M0,0h320v180h-320z" />
+    <path
+        android:fillColor="#151B20"
+        android:pathData="M64,50h120v66h-120z" />
+    <path
+        android:fillColor="#7FD6FF"
+        android:pathData="M110,66L142,83L110,100z" />
+    <path
+        android:fillColor="#B0BEC7"
+        android:pathData="M108,120h32v6h-32z" />
+    <path
+        android:fillColor="#7FD6FF"
+        android:pathData="M204,74h84v7h-84z" />
+    <path
+        android:fillColor="#B0BEC7"
+        android:pathData="M204,90h60v6h-60z" />
+    <path
+        android:fillColor="#B0BEC7"
+        android:pathData="M204,104h72v6h-72z" />
+</vector>

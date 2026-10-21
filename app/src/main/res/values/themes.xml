@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Compose 全权接管 UI，这里只需要一个「没有 ActionBar、深色背景、横屏」的壳。
+      刻意不引 AppCompat：多一个依赖就多一份体积与主题冲突风险，而电视端用不到它的任何特性。
+    -->
+    <style name="Theme.LeimaoTv" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tv_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

@@ -1,0 +1,13 @@
+# 行尾统一按 LF 入库。CI 跑在 Linux 上，仓库里混进 CRLF 会让 ktlint 与 shell 脚本
+# 在不同机器上表现不一致（本地 Windows 的 core.autocrlf=true 只影响工作区，不该成为依赖）。
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF，否则老 cmd 解析会出错
+*.bat text eol=crlf
+
+# 二进制文件不参与行尾转换，避免被"修正"坏掉
+*.jar binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.apk binary

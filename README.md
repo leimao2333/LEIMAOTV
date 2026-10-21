@@ -8,7 +8,7 @@
 <img alt="minSdk" src="https://img.shields.io/badge/minSdk-21-blue?style=flat-square">
 <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-4A90D9?style=flat-square">
 <img alt="lang" src="https://img.shields.io/badge/Kotlin-Compose%20for%20TV-7F52FF?style=flat-square">
-<img alt="status" src="https://img.shields.io/badge/status-立项%20%2F%20待开工-lightgrey?style=flat-square">
+<img alt="status" src="https://img.shields.io/badge/status-M0%20skeleton%20done-3DDC84?style=flat-square">
 </p>
 
 ---
@@ -76,7 +76,8 @@
 
 ```
 :app                    组装层：Activity / 导航 / 主题注入
-:core:model             纯数据模型（Channel / Program / MediaItem / Source）
+:core:model             纯 Kotlin：Channel / ContentType / SearchScope / 白名单 / 启动落点判定
+:core:version           版本号单一来源（AppVersion / AppVersionNumber）
 :core:database          Room 实体与 DAO
 :core:network           HTTP、M3U/XMLTV 解析、源适配器
 :core:player            播放内核封装（Media3 统一接口，可换实现）
@@ -148,17 +149,20 @@
 
 ## 开发与构建
 
-> 工程骨架尚未落地（M0）。下面是目标形态，M0 完成后会补成可直接执行的步骤。
+工程骨架已落地（M0）：冷启动直达播放页（占位）、主页枢纽、模式切换、返回栈、
+焦点组件库、版本号单一来源都已跑通；**播放内核与真实内容仍待 M1**。
 
 ```bash
-# 目标形态
 ./gradlew :app:assembleDebug          # 调试包
-./gradlew :app:assembleRelease        # 发布包（按 ABI 拆分）
-./gradlew :app:testDebugUnitTest      # 单元测试
+./gradlew :app:assembleRelease        # 发布包（按 ABI 拆分在 M4 补）
+./gradlew test                        # 全部单测（含纯 Kotlin 模块）
+./gradlew ktlintCheck                 # 代码风格
 ```
 
-- 开发环境：Android Studio（最新稳定版）+ JDK 17 + Android SDK 35
-- 运行目标：Android TV 模拟器（1080p）或真机盒子（Android 7.0+）
+- 开发环境：JDK 17 + Android SDK 35（compileSdk 35 / minSdk 21 / targetSdk 35）+ Gradle 8.7
+- 运行目标：Android TV 模拟器（1080p）或真机盒子（Android 5.0+）
+- 调试包会种一条 `example.com` 演示源，用来走通「启动直达播放」这条链路；
+  其代码只在 `app/src/debug`，**正式包不含任何演示数据**
 
 ## 项目规则（迭代必读）
 

@@ -8,7 +8,7 @@
 
 图例：`- [ ]` 待办 / `- [x]` 已完成（末尾标版本）/ `⏸` 暂缓（标原因）
 
-当前进度：**0 / 79 条功能，4 / 4 项决策** ｜ 当前版本 `v0.1.0.0`（立项，未发版）｜ 下一里程碑 **M0**
+当前进度：**11 / 80 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ 下一里程碑 **M1**
 
 ---
 
@@ -28,60 +28,60 @@
 
 ---
 
-## 1. M0 工程骨架 → `v0.1.1.0`
+## 1. M0 工程骨架 → `v0.1.1.0` ✅ 已完成
 
 > 目标：**能装、能启动、遥控器能走通「播放页（占位）→ 主页 → 切模式」这条树**。
 > 不接任何真实内容，播放页放占位画面即可，但**启动路由必须已经按 RULES §6.6 搭好**（先落播放页，不是主页）。
 
-- [ ] **SYS-01** 多模块骨架 ｜ P0
-  - [ ] `settings.gradle.kts` 注册 `:app` + `core:{model,database,network,player,designsystem}` + `feature:{iptv,vod,search,settings}`
-  - [ ] `gradle/libs.versions.toml` 统一版本（Kotlin / Compose BOM / tv-material / Media3 / Room / OkHttp / Coil / WorkManager）
-  - [ ] 各模块 `build.gradle.kts` 与依赖方向约束（feature → core，禁止反向）
-  - [ ] `./gradlew :app:assembleDebug` 通过
-- [ ] **SYS-01** TV 清单与入口 ｜ P0
-  - [ ] `AndroidManifest`：`LEANBACK_LAUNCHER` + `android.software.leanback` + `touchscreen required=false`
-  - [ ] 横屏锁定、`android:banner` 资源
-  - [ ] 单 Activity + Compose NavHost
-  - [ ] **启动路由骨架**：`AppStartDestination` —— 合规提示未同意 → 提示页；否则 → 直播播放页（占位）；无源 → 添加源引导。**禁止**默认落主页（RULES §6.6）
-- [ ] **SYS-08** 品牌资源 ｜ P1
-  - [ ] 应用名（磊毛TV）、图标（含 TV banner 320×180）、启动图
-  - [ ] 主题色与 `TvTheme`（深色优先，电视环境默认暗色）
-- [ ] **SYS-09** 首次启动合规提示 ｜ P0
-  - [ ] 首启弹窗：本项目不提供任何源、请使用你有权访问的源（RULES §2.4）
-  - [ ] 同意后**立即重走落点判定、直达播放页**（不回主页）；设置页可再次查看
-- [ ] **SYS-02** TV 焦点组件库 ｜ P0
-  - [ ] `FocusableCard`（焦点描边 ≥3dp + 1.05 缩放，可配）
-  - [ ] `FocusRing`（统一焦点视觉，禁止各页自绘）
-  - [ ] `SafeAreaContainer`（四边 ≥5% 安全区）
-  - [ ] `TvTypography`（1080p 基准 + 全局字号缩放系数）
-- [ ] **HOME-01** 主页骨架 ｜ P0
-  - [ ] 左侧竖向导航（直播/电影/电视剧/动漫/综艺/体育/搜索/设置）
-  - [ ] 右侧内容区占位 + 焦点在导航与内容区之间左右移动
-  - [ ] 每个页面显式初始焦点（RULES §6.2）
-- [ ] **HOME-02** 模式开关 ｜ P0
-  - [ ] 导航栏顶部「直播 / 影视」开关项，OK 切换
-  - [ ] `ModeRepository` + `StateFlow<AppMode>`；内容区按模式渲染不同 feature 占位
-  - [ ] 切模式后焦点回到开关本身（不是内容区第一项）
-- [ ] **HOME-11** 播放页为根页的返回栈 ｜ P1
-  - [ ] 播放页 → 返回 → 主页；主页 → 返回 → 退出确认；子页返回回主页
-  - [ ] 播放页控制条可见时，返回先收起控制条
-  - [ ] 主页导航项「直播」回到播放页时**不重建播放器**（继续播当前频道）
-- [ ] **HOME-03** 模式记忆 ｜ P0
-  - [ ] DataStore 持久化「上次模式 + 上次导航项」，重启恢复
-- [ ] **HOME-07** 空态 ｜ P1
-  - [ ] 无源时的空态页 + 「去添加订阅源」可点入口（先跳占位页）
-  - [ ] 骨架屏组件（首屏未就绪时不白屏）
-- [ ] **SYS-03** 版本与更新日志骨架 ｜ P1
-  - [ ] `AppVersion`（`CURRENT_VERSION` + `CHANGELOG`），版本号按 RULES §10.2 四段式
-  - [ ] 应用内更新日志页，支持 `**加粗**` 渲染
-- [ ] **SYS-10** 版本号单一来源 ｜ P1
-  - [ ] `versionName` = `AppVersion.CURRENT_VERSION`，单测钉住两者逐字符相等
-  - [ ] `CHANGELOG.md` 与 `AppVersion.CHANGELOG` 条目一致性检查（写一条测试或 CI 脚本）
-  - [ ] README / 文档里不出现硬编码版本号
-- [ ] **SYS-05** CI ｜ P1
-  - [ ] GitHub Actions：`assembleDebug` + `testDebugUnitTest` + `ktlintCheck`
-  - [ ] PR 必须绿才可合并
-- [ ] **M0 验收**：TV 模拟器（1080p）冷启动**落在播放页占位**（不是主页）→ 返回主页 → 左右切模式 → 返回退出确认；截图存档
+- [x] **SYS-01** 多模块骨架 ｜ P0（v0.1.1.0）
+  - [x] `settings.gradle.kts` 注册 `:app` + `core:{model,version,database,network,player,designsystem}` + `feature:{iptv,vod,search,settings}`（共 11 个模块）
+  - [x] `gradle/libs.versions.toml` 统一版本（Kotlin / Compose BOM / tv-material / Media3 / Room / OkHttp / Coil / WorkManager）
+  - [x] 各模块 `build.gradle.kts` 与依赖方向约束（feature → core，禁止反向）
+  - [x] `./gradlew :app:assembleDebug` 通过
+- [x] **SYS-01** TV 清单与入口 ｜ P0（v0.1.1.0）
+  - [x] `AndroidManifest`：`LEANBACK_LAUNCHER` + `android.software.leanback` + `touchscreen required=false`
+  - [x] 横屏锁定、`android:banner` 资源
+  - [x] 单 Activity + Compose NavHost
+  - [x] **启动路由骨架**：`AppStartDestination` —— 合规提示未同意 → 提示页；否则 → 直播播放页（占位）；无源 → 添加源引导。**禁止**默认落主页（RULES §6.6）
+- [x] **SYS-08** 品牌资源 ｜ P1（v0.1.1.0）
+  - [x] 应用名（磊毛TV）、图标（含 TV banner 320×180）、启动图
+  - [x] 主题色与 `TvTheme`（深色优先，电视环境默认暗色）
+- [x] **SYS-09** 首次启动合规提示 ｜ P0（v0.1.1.0）
+  - [x] 首启弹窗：本项目不提供任何源、请使用你有权访问的源（RULES §2.4）
+  - [x] 同意后**立即重走落点判定、直达播放页**（不回主页）；设置页可再次查看
+- [x] **SYS-02** TV 焦点组件库 ｜ P0（v0.1.1.0）
+  - [x] `FocusableCard`（焦点描边 ≥3dp + 1.05 缩放，可配）
+  - [x] `FocusRing`（统一焦点视觉，禁止各页自绘）
+  - [x] `SafeAreaContainer`（四边 ≥5% 安全区）
+  - [x] `TvTypography`（1080p 基准 + 全局字号缩放系数）
+- [x] **HOME-01** 主页骨架 ｜ P0（v0.1.1.0）
+  - [x] 左侧竖向导航（直播/电影/电视剧/动漫/综艺/体育/搜索/设置）
+  - [x] 右侧内容区占位 + 焦点在导航与内容区之间左右移动
+  - [x] 每个页面显式初始焦点（RULES §6.2）
+- [x] **HOME-02** 模式开关 ｜ P0（v0.1.1.0）
+  - [x] 导航栏顶部「直播 / 影视」开关项，OK 切换
+  - [x] `ModeRepository` + `StateFlow<AppMode>`；内容区按模式渲染不同 feature 占位
+  - [x] 切模式后焦点回到开关本身（不是内容区第一项）
+- [x] **HOME-11** 播放页为根页的返回栈 ｜ P1（v0.1.1.0）
+  - [x] 播放页 → 返回 → 主页；主页 → 返回 → 退出确认；子页返回回主页
+  - [ ] 播放页控制条可见时，返回先收起控制条　← 随 PLAY-04 一起验（M1）
+  - [x] 主页导航项「直播」回到播放页时**不重建播放器**（继续播当前频道）
+- [x] **HOME-03** 模式记忆 ｜ P0（v0.1.1.0）
+  - [x] DataStore 持久化「上次模式 + 上次导航项」，重启恢复
+- [x] **HOME-07** 空态 ｜ P1（v0.1.1.0）
+  - [x] 无源时的空态页 + 「去添加订阅源」可点入口（先跳占位页）
+  - [x] 骨架屏组件（首屏未就绪时不白屏）
+- [x] **SYS-03** 版本与更新日志骨架 ｜ P1（v0.1.1.0）
+  - [x] `AppVersion`（`CURRENT_VERSION` + `CHANGELOG`），版本号按 RULES §10.2 四段式
+  - [x] 应用内更新日志页，支持 `**加粗**` 渲染
+- [x] **SYS-10** 版本号单一来源 ｜ P1（v0.1.1.0）
+  - [x] `versionName` = `AppVersion.CURRENT_VERSION`，单测钉住两者逐字符相等
+  - [x] `CHANGELOG.md` 与 `AppVersion.CHANGELOG` 条目一致性检查（写一条测试或 CI 脚本）
+  - [x] README / 文档里不出现硬编码版本号
+- [x] **SYS-05** CI ｜ P1（v0.1.1.0）
+  - [x] GitHub Actions：`assembleDebug` + `testDebugUnitTest` + `ktlintCheck`
+  - [x] PR 必须绿才可合并
+- [x] **M0 验收**：TV 模拟器（1080p）冷启动**落在播放页占位**（不是主页）→ 返回主页 → 左右切模式 → 返回退出确认；截图存档（v0.1.1.0）
 
 ---
 
@@ -252,6 +252,11 @@
 - [ ] **SET-05** 缓存管理 ｜ P1
 - [ ] **SET-07** 检查更新 ｜ P1
   - [ ] 读 GitHub Release，附件名精确匹配（RULES §10.4）
+- [ ] **SET-08** 开机自启动开关 ｜ P2
+  - [ ] `AndroidManifest` 注册 `RECEIVE_BOOT_COMPLETED` 权限与 `BootCompletedReceiver`（接收器内默认不拉起）
+  - [ ] DataStore 持久化「开机自启动」开关；接收器仅在开关开启时启动 App（落地走 §6.6 启动判定）
+  - [ ] 设置页开关项（遥控器可操作），**默认关闭**
+  - [ ] 21~23 兼容分支确认（开机广播行为一致；部分 TV 系统另有自带自启动管理，文档注明）
 - [ ] **SYS-04** 崩溃本地留档 ｜ P2
 - [ ] **SYS-06** 性能基准 ｜ P2
   - [ ] Macrobenchmark 覆盖 RULES §7 全部指标

@@ -57,7 +57,7 @@ class ChangelogSyncTest {
     }
 
     private companion object {
-        /** 标题形如 `## v0.1.1.0（2026-10-21，M0 开发中，未发版）` */
+        /** 标题形如 `## v0.1.1.0（2026-10-21）`，括号内日期后可跟补充说明 */
         val HEADING = Regex("""^##\s+v(\d+\.\d+\.\d+\.\d+)（(\d{4}-\d{2}-\d{2})""")
     }
 }

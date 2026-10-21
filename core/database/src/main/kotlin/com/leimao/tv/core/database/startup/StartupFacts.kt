@@ -15,27 +15,41 @@ data class StartupFacts(
 )
 
 interface StartupFactsReader {
-    /**
-     * @param lastChannelIdHint 从 DataStore 读到的「上次频道 id」，一次读一个键。
-     *   这里会再验证它是否还存在 —— 不存在就返回 null，落点自然降级。
-     */
-    suspend fun read(lastChannelIdHint: Long?): StartupFacts
+    suspend fun read(): StartupFacts
 }
 
 class RoomStartupFactsReader(
     private val database: LeimaoDatabase,
 ) : StartupFactsReader {
-    override suspend fun read(lastChannelIdHint: Long?): StartupFacts {
+    /**
+     * 读启动事实。
+     *
+     * **命中「上次看过的台」时只发一条查询**：history 与 channel / source 的 join 能取到 id，
+     * 就同时证明了「有启用的源」「频道已解析」两件事，后面两个优先级根本不用再查。
+     * 冷启动的每一毫秒都算在 §7 的 2 秒红线里，省下来的三次查询不是洁癖。
+     */
+    override suspend fun read(): StartupFacts {
+        val lastChannelId = database.historyDao().latestChannelId()
+        if (lastChannelId != null) {
+            return StartupFacts(
+                hasEnabledSource = true,
+                channelsParsed = true,
+                lastChannelId = lastChannelId,
+                favoriteChannelId = null,
+                firstChannelId = null,
+            )
+        }
+
         val sourceDao = database.sourceDao()
         val channelDao = database.channelDao()
+        val hasEnabledSource = sourceDao.countEnabled() > 0
 
         return StartupFacts(
-            hasEnabledSource = sourceDao.countEnabled() > 0,
+            hasEnabledSource = hasEnabledSource,
             // 有源但一个频道都没有 = 「解析尚未完成」，落点走播放页骨架 + 载入提示（§6.6 降级 3）
             channelsParsed = channelDao.count() > 0,
-            lastChannelId = lastChannelIdHint?.let { channelDao.existingIdOrNull(it) },
-            // 收藏表随 LIVE-14 进来，在那之前「收藏第一个」这一级恒为空，直接跳到下一级
-            favoriteChannelId = null,
+            lastChannelId = null,
+            favoriteChannelId = database.favoriteDao().firstFavoriteChannelId(),
             firstChannelId = channelDao.firstChannelId(),
         )
     }

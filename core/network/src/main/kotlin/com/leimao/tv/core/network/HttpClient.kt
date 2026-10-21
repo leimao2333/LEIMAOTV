@@ -17,23 +17,58 @@ data class RequestHeaders(
             referer?.let { put("Referer", it) }
             basicAuth?.let { put("Authorization", it.toHeaderValue()) }
         }
+
+    companion object {
+        val NONE = RequestHeaders()
+    }
 }
 
 data class BasicAuth(val username: String, val password: String) {
     fun toHeaderValue(): String =
         "Basic " +
             android.util.Base64.encodeToString(
-                "$username:$password".toByteArray(),
+                "$username:$password".toByteArray(Charsets.UTF_8),
                 android.util.Base64.NO_WRAP,
             )
 }
 
 /**
- * 统一的 HTTP 入口。M1 用 OkHttp 实现（RULES §4：超时 / 重试 / UA / Referer 注入都收在这里）。
- * 现在只有契约，没有实现 —— M0 不联网。
+ * 抓取的结局。
+ *
+ * 为什么不用「抛异常 + 上层 catch」：用户需要知道**为什么**失败 —— 超时、404、还是内容不是
+ * 播放列表，对应三种完全不同的处置（换个时间重试 / 地址写错了 / 这个源不适用）。
+ * 把这些折成一句「加载失败」，等于把排查成本转移给用户。
+ */
+sealed interface FetchOutcome {
+    data class Success(val text: String) : FetchOutcome
+
+    data class Failure(
+        val kind: FetchErrorKind,
+        /** 只放对用户有意义的信息（HTTP 状态码 / 异常类型），**不放完整地址**（RULES §2.5） */
+        val detail: String? = null,
+    ) : FetchOutcome
+}
+
+enum class FetchErrorKind {
+    /** 连不上或读超时：稍后重试有意义 */
+    TIMEOUT,
+
+    /** 服务端回了非 2xx：多半是地址过期或需要鉴权 */
+    HTTP,
+
+    /** DNS / 连接被拒 / TLS 失败 */
+    NETWORK,
+
+    /** 通了但内容为空 */
+    EMPTY,
+}
+
+/**
+ * 统一的 HTTP 入口。超时 / UA / Referer / 认证注入都收在这里（RULES §4），
+ * 解析器与源刷新都只依赖这个接口，测试时可以换成假实现。
  */
 interface HttpClient {
-    suspend fun getText(url: String, headers: RequestHeaders = RequestHeaders()): String
+    suspend fun fetch(url: String, headers: RequestHeaders = RequestHeaders.NONE): FetchOutcome
 }
 
 /**

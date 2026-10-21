@@ -31,6 +31,9 @@ include(":core:model")
 include(":core:version")
 include(":core:database")
 include(":core:network")
+// 「抓取 → 解析 → 合并 → 落库」的编排只该有一份：源管理页的刷新与启动/定时刷新都调它，
+// 放在 feature 里会变成两个 feature 各写一遍（RULES §5.1 禁止 feature 互相依赖）
+include(":core:data")
 include(":core:player")
 include(":core:designsystem")
 

@@ -57,6 +57,9 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:version"))
     implementation(project(":core:database"))
+    // :core:data 是「抓取 → 解析 → 合并 → 落库」的编排层，:app 只调它的入口
+    implementation(project(":core:data"))
+    implementation(project(":core:network"))
     implementation(project(":core:designsystem"))
     implementation(project(":core:player"))
 

@@ -26,7 +26,6 @@ import com.leimao.tv.feature.iptv.PlayerScreen
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.SettingsScreen
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -125,8 +124,9 @@ private fun HomeRoute(
         onModeChange = { next -> scope.launch { container.settings.setMode(next) } },
         onOpenPlayer = {
             scope.launch {
-                // 回播放页时继续播上次那个台，不重建播放器（§6.4 最后一条）
-                val lastChannelId = container.settings.lastChannelId.first()
+                // 回播放页时继续播上次那个台，不重建播放器（§6.4 最后一条）。
+                // 「上次」的真相在 history 表里（LIVE-15），不再另存一份
+                val lastChannelId = container.historyRepository.latestChannelId()
                 navController.navigate(TvRoute.player(lastChannelId))
             }
         },
@@ -158,7 +158,8 @@ private fun PlayerRoute(
         channel = found
         if (found != null) {
             container.player.play(found.streamUrl)
-            container.settings.setLastChannelId(found.id)
+            // 记住「刚看了这个台」：启动落点优先级 #1 读的就是这条记录（§6.6）
+            container.historyRepository.touch(found.id, System.currentTimeMillis())
         }
     }
 

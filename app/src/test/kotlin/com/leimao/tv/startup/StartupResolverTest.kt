@@ -24,7 +24,7 @@ class StartupResolverTest {
             val facts = FakeFactsReader(parsed(source = true))
             val resolver =
                 StartupResolver(
-                    settings = FakeSettingsStore(complianceAgreed = false, lastChannelId = 7L),
+                    settings = FakeSettingsStore(complianceAgreed = false),
                     factsReader = facts,
                 )
 
@@ -49,7 +49,7 @@ class StartupResolverTest {
         runTest {
             val resolver =
                 StartupResolver(
-                    settings = FakeSettingsStore(complianceAgreed = true, lastChannelId = 7L),
+                    settings = FakeSettingsStore(complianceAgreed = true),
                     factsReader = FakeFactsReader(parsed(source = true, lastChannelId = 7L)),
                 )
 
@@ -98,7 +98,7 @@ class StartupResolverTest {
         var readCount = 0
             private set
 
-        override suspend fun read(lastChannelIdHint: Long?): StartupFacts {
+        override suspend fun read(): StartupFacts {
             readCount++
             return facts
         }
@@ -106,16 +106,13 @@ class StartupResolverTest {
 
     private class FakeSettingsStore(
         complianceAgreed: Boolean,
-        lastChannelId: Long? = null,
     ) : SettingsStore {
         private val agreedFlow = MutableStateFlow(complianceAgreed)
         private val modeFlow = MutableStateFlow(AppMode.LIVE)
-        private val lastChannelFlow = MutableStateFlow(lastChannelId)
         private val lastSectionFlow = MutableStateFlow<String?>(null)
 
         override val complianceAgreed: Flow<Boolean> = agreedFlow
         override val mode: Flow<AppMode> = modeFlow
-        override val lastChannelId: Flow<Long?> = lastChannelFlow
         override val lastSection: Flow<String?> = lastSectionFlow
 
         override suspend fun setComplianceAgreed(agreed: Boolean) {
@@ -124,10 +121,6 @@ class StartupResolverTest {
 
         override suspend fun setMode(mode: AppMode) {
             modeFlow.value = mode
-        }
-
-        override suspend fun setLastChannelId(id: Long?) {
-            lastChannelFlow.value = id
         }
 
         override suspend fun setLastSection(section: String?) {

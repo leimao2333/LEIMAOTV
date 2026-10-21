@@ -22,8 +22,9 @@ class StartupResolver(
             return StartDestination.ComplianceNotice
         }
 
-        val lastChannelHint = settings.lastChannelId.first()
-        val facts = factsReader.read(lastChannelHint)
+        // 「上次看的台」在 history 表里查：一条命中索引的 join，同时证明了
+        // 「有启用的源」「频道已解析」，比先读 DataStore 再校验少一次 IO
+        val facts = factsReader.read()
 
         return resolveStartDestination(
             StartupSnapshot(

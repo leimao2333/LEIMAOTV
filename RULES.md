@@ -99,11 +99,12 @@
 | 项 | 规定 |
 |---|---|
 | 语言 | Kotlin（禁止新引入 Java 业务代码；已有 Java 依赖除外） |
+| 最低版本 | **minSdk 21（Android 5.0）**。21~23 必须单独维护兼容分支（通知渠道 / Scoped Storage 前的存储路径 / TV 清单差异），**禁止**以「反正没几台」为由删掉分支 |
 | UI | Jetpack Compose for TV（`androidx.tv:tv-material`）。**禁止**混用 Leanback 的 `BrowseFragment` 体系 |
-| 播放 | Media3/ExoPlayer 为唯一默认内核；其它内核必须封装在 `core:player` 的同一接口后面，可按设置切换 |
+| 播放 | Media3/ExoPlayer 为默认内核；**VLC(libvlc) 内置作软解兜底**（D-02）；两个内核都必须封装在 `core:player` 的同一接口后面，可按设置切换 |
 | 版本管理 | 依赖版本统一写在 `gradle/libs.versions.toml`，**禁止**在模块里硬编码版本号 |
 | 依赖升级 | 单独一个 PR，附「为什么要升 / 影响面 / 回归了什么」；与功能改动**不得混在一个 PR** |
-| 许可证 | 只允许 Apache-2.0 / MIT / BSD / LGPL（LGPL 必须动态链接、可替换）。**禁止** GPL / AGPL 依赖进入主工程 |
+| 许可证 | 本项目自身为 **Apache-2.0**（见 `LICENSE`）。依赖只允许 Apache-2.0 / MIT / BSD / LGPL（LGPL 必须动态链接、可替换，内置的 VLC 即属此类）。**禁止** GPL / AGPL 依赖进入主工程 |
 | 体积 | 每引入一个 > 5 MB 的 native 依赖，必须在 PR 里写明体积代价与替代方案 |
 | 混淆 | release 必须开启 R8；播放器 / 序列化相关 keep 规则写在 `consumer-rules.pro` 并注释原因 |
 

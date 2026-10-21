@@ -5,7 +5,8 @@
 
 <p align="left">
 <img alt="platform" src="https://img.shields.io/badge/platform-Android%20TV-3DDC84?style=flat-square">
-<img alt="minSdk" src="https://img.shields.io/badge/minSdk-24-blue?style=flat-square">
+<img alt="minSdk" src="https://img.shields.io/badge/minSdk-21-blue?style=flat-square">
+<img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-4A90D9?style=flat-square">
 <img alt="lang" src="https://img.shields.io/badge/Kotlin-Compose%20for%20TV-7F52FF?style=flat-square">
 <img alt="status" src="https://img.shields.io/badge/status-立项%20%2F%20待开工-lightgrey?style=flat-square">
 </p>
@@ -64,11 +65,12 @@
 |---|---|---|
 | UI | **Jetpack Compose for TV**（`androidx.tv:tv-material`） | 电视端焦点体系原生支持；与手机端 Compose 代码可复用 |
 | 播放 | **Media3 / ExoPlayer** | HLS(m3u8)、TS、MP4、FLV(可选) 一把梭；硬解优先 |
-| 兜底内核 | VLC(libvlc) / IJK（P2，可选模块） | 部分盒子硬解不全，需要软解兜底 |
+| 兜底内核 | **VLC(libvlc) 内置**（LGPL，动态链接、可替换）；IJK 只留接口不实现 | 部分盒子硬解不全，需要软解兜底（D-02 已定） |
 | 数据 | Room + DataStore | 频道、分组、EPG、收藏、观看记录；设置走 DataStore |
 | 网络 | OkHttp（沿用手机端 `HttpClient`） | 统一超时 / 重试 / UA / Referer 注入 |
 | 后台 | WorkManager | 订阅源与 EPG 的定时刷新 |
 | 语言 | Kotlin（协程 + Flow） | 与手机端一致 |
+| 最低版本 | **minSdk 21（Android 5.0）** | 覆盖 5.0 以上全部设备；21~23 的通知 / 存储 / TV 清单差异单独写兼容分支（D-01 已定） |
 
 ## 模块结构（计划）
 
@@ -162,6 +164,15 @@
 
 **所有改动都必须先读 [RULES.md](RULES.md)。** 它定义了内容合规红线、搜索白名单硬规则、模块边界、
 TV 交互规范、性能红线、提交与发版流程 —— 与本文件冲突时，以 RULES.md 为准。
+
+## 许可证
+
+本项目以 **Apache-2.0** 授权，全文见 [LICENSE](LICENSE)。可以自由使用、修改、分发（含商用），
+但需保留版权与许可声明，并在修改过的文件里注明变更。
+
+唯一需要单独对待的是内置的 **VLC(libvlc)**：它是 **LGPL-2.1+**，本项目以**动态链接**方式使用其 `.so`，
+不静态合并、不修改其源码，使用者可自行替换该库文件 —— 这样既满足 LGPL 的可替换要求，
+也不影响主工程整体按 Apache-2.0 分发（见 [RULES.md](RULES.md) §4）。
 
 ## 免责声明
 

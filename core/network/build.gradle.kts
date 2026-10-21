@@ -22,4 +22,10 @@ android {
 
 dependencies {
     api(project(":core:model"))
+
+    // 解析器本体只要 JDK；OkHttp 只用于真正的抓取（HttpClient 实现），
+    // 解析器保持「输入字符串、输出频道」的纯函数形态，单测不需要网络
+    api(libs.okhttp)
+
+    testImplementation(libs.junit)
 }

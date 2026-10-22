@@ -56,4 +56,11 @@ class DescribeEpgTest {
         val text = describeEpg(EpgImportResult.Failed(EpgFailure.BROKEN_XML, "eof"))
         assertTrue(text, text.contains("损坏"))
     }
+
+    @Test
+    fun `抓取订阅地址失败时说抓取失败`() {
+        val text = describeEpg(EpgImportResult.Failed(EpgFailure.NETWORK, "HTTP 404"))
+        assertTrue(text, text.contains("抓取失败"))
+        assertTrue(text, text.contains("404"))
+    }
 }

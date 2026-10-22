@@ -9,6 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.leimao.tv.core.database.dao.ChannelDao
 import com.leimao.tv.core.database.dao.ChannelLineDao
 import com.leimao.tv.core.database.dao.EpgDao
+import com.leimao.tv.core.database.dao.EpgSourceDao
 import com.leimao.tv.core.database.dao.FavoriteDao
 import com.leimao.tv.core.database.dao.HistoryDao
 import com.leimao.tv.core.database.dao.SourceDao
@@ -16,6 +17,7 @@ import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.entity.ChannelLineEntity
 import com.leimao.tv.core.database.entity.EpgChannelEntity
 import com.leimao.tv.core.database.entity.EpgProgrammeEntity
+import com.leimao.tv.core.database.entity.EpgSourceEntity
 import com.leimao.tv.core.database.entity.FavoriteEntity
 import com.leimao.tv.core.database.entity.HistoryEntity
 import com.leimao.tv.core.database.entity.SourceEntity
@@ -40,8 +42,9 @@ import com.leimao.tv.core.database.entity.SourceEntity
         HistoryEntity::class,
         EpgChannelEntity::class,
         EpgProgrammeEntity::class,
+        EpgSourceEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -56,6 +59,8 @@ abstract class LeimaoDatabase : RoomDatabase() {
     abstract fun historyDao(): HistoryDao
 
     abstract fun epgDao(): EpgDao
+
+    abstract fun epgSourceDao(): EpgSourceDao
 
     companion object {
         private const val DB_NAME = "leimao-tv.db"
@@ -172,9 +177,32 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 3 → 4：加节目单订阅地址表（LIVE-23）。
+         *
+         * 仍是纯加法：节目单的频道/节目表不动，只多一张「这个 XMLTV 从哪个 URL 抓」的表，
+         * 供定时刷新用。已有数据一行都不搬。
+         */
+        val MIGRATION_3_4: Migration =
+            object : Migration(3, 4) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `epg_source` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`url` TEXT NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, " +
+                            "`lastRefreshNote` TEXT)",
+                    )
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS `index_epg_source_url` " +
+                            "ON `epg_source` (`url`)",
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

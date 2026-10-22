@@ -22,6 +22,9 @@ class LeimaoTvApplication :
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // EPG 定时刷新（LIVE-23）：幂等注册，用 UPDATE 覆盖旧周期。没有配置节目单
+        // 订阅地址时 Worker 会空跑直接退出，不产生任何打扰。
+        EpgRefreshWorker.schedule(this)
     }
 
     override fun newImageLoader(): ImageLoader =

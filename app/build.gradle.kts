@@ -75,6 +75,8 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     // 台标图片的内存 / 磁盘上限在 LeimaoTvApplication 里统一配置（RULES §7）
     implementation(libs.coil.compose)
+    // EPG 定时刷新（LIVE-23）：系统级周期任务，进程被杀也能唤醒
+    implementation(libs.androidx.work.runtime.ktx)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

@@ -1,8 +1,10 @@
 package com.leimao.tv.core.database.repository
 
 import com.leimao.tv.core.database.dao.EpgDao
+import com.leimao.tv.core.database.dao.EpgSourceDao
 import com.leimao.tv.core.database.entity.EpgChannelEntity
 import com.leimao.tv.core.database.entity.EpgProgrammeEntity
+import com.leimao.tv.core.database.entity.EpgSourceEntity
 import com.leimao.tv.core.model.epg.EpgGuide
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
@@ -32,6 +34,7 @@ data class NowNext(
  */
 class EpgRepository(
     private val dao: EpgDao,
+    private val sourceDao: EpgSourceDao,
 ) {
     suspend fun replaceAll(guide: EpgGuide) {
         dao.replaceAll(
@@ -104,4 +107,36 @@ class EpgRepository(
             title = title,
             description = description,
         )
+
+    // ---- 订阅地址（LIVE-23）----
+
+    /** 记录（或更新）节目单订阅地址。返回落库后的源。 */
+    suspend fun saveSource(url: String, updatedAt: Long): EpgSourceEntity {
+        val existing = sourceDao.first()
+        val entity =
+            EpgSourceEntity(
+                id = existing?.id ?: 0,
+                url = url,
+                updatedAt = updatedAt,
+                lastRefreshNote = existing?.lastRefreshNote,
+            )
+        sourceDao.upsert(entity)
+        return sourceDao.first() ?: entity
+    }
+
+    /** 当前订阅地址，没有返回 null。 */
+    suspend fun sourceUrl(): String? = sourceDao.first()?.url
+
+    /** 刷新结果落库：更新「上次更新时间」与失败原因。 */
+    suspend fun markRefreshed(url: String, updatedAt: Long, note: String?) {
+        val existing = sourceDao.first()
+        sourceDao.upsert(
+            EpgSourceEntity(
+                id = existing?.id ?: 0,
+                url = url,
+                updatedAt = updatedAt,
+                lastRefreshNote = note,
+            ),
+        )
+    }
 }

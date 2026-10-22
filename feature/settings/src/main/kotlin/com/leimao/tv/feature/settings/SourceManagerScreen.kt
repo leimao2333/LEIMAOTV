@@ -83,13 +83,16 @@ fun SourceManagerScreen(
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var addingEpg by remember { mutableStateOf(false) }
     var epgSummary by remember { mutableStateOf<EpgImportSummary?>(null) }
+    var epgSourceUrl by remember { mutableStateOf<String?>(null) }
 
     val firstActionFocus = remember { FocusRequester() }
 
     suspend fun reload() {
         sources = sourceRepository.list()
         epgSummary = epgRepository?.summary()
+        epgSourceUrl = epgRepository?.sourceUrl()
     }
 
     LaunchedEffect(Unit) {
@@ -192,6 +195,11 @@ fun SourceManagerScreen(
                             Text(text = "导入节目单", style = TvText.current.label)
                         }
                     }
+                    if (epgImporter != null) {
+                        FocusableCard(onClick = { addingEpg = true }) {
+                            Text(text = "节目单订阅地址", style = TvText.current.label)
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -204,6 +212,13 @@ fun SourceManagerScreen(
                             } else {
                                 "节目单：尚未导入（支持 XMLTV 的 .xml）"
                             },
+                        style = TvText.current.hint,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                epgSourceUrl?.let { url ->
+                    Text(
+                        text = "节目单订阅：${maskUrl(url)} · 每天自动刷新",
                         style = TvText.current.hint,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -279,6 +294,26 @@ fun SourceManagerScreen(
                     busy = false
                     reload()
                     if (result is RefreshResult.Done) onSourcesChanged()
+                }
+            },
+        )
+    }
+
+    if (addingEpg) {
+        AddEpgSourceDialog(
+            onDismiss = { addingEpg = false },
+            onConfirm = { url ->
+                addingEpg = false
+                val importer = epgImporter ?: return@AddEpgSourceDialog
+                scope.launch {
+                    busy = true
+                    // 先登记地址（定时刷新靠它），再立刻抓一次
+                    epgRepository?.saveSource(url, System.currentTimeMillis())
+                    val result = importer.importUrl(url)
+                    status = describeEpg(result)
+                    busy = false
+                    reload()
+                    if (result is EpgImportResult.Done) onSourcesChanged()
                 }
             },
         )
@@ -411,6 +446,7 @@ internal fun describeEpg(result: EpgImportResult): String =
         is EpgImportResult.Failed ->
             when (result.reason) {
                 EpgFailure.CANNOT_READ -> "导入失败：文件打不开（${result.detail ?: "没有读取权限"}）"
+                EpgFailure.NETWORK -> "抓取失败：${result.detail ?: "无法连接节目单地址"}"
                 EpgFailure.NOT_XMLTV -> "导入失败：这个文件不是 XMLTV 节目单（没解析出频道或节目）"
                 EpgFailure.BROKEN_XML -> "导入失败：节目单中途损坏，只读到半份（${result.detail ?: "解析出错"}）"
             }

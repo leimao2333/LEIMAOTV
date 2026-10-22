@@ -75,9 +75,9 @@ class AppContainer(context: Context) {
     val startupFacts: StartupFactsReader = RoomStartupFactsReader(database)
 
     /** 节目单（LIVE-20）：整份导入、只读查询当前/下一档 */
-    val epgRepository: EpgRepository = EpgRepository(database.epgDao())
+    val epgRepository: EpgRepository = EpgRepository(database.epgDao(), database.epgSourceDao())
 
-    val epgImporter: EpgImporter = EpgImporter(epgRepository)
+    val epgImporter: EpgImporter = EpgImporter(epgRepository, httpClient)
 
     val startupResolver = StartupResolver(settings, startupFacts)
 

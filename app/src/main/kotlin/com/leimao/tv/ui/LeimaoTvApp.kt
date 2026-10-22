@@ -1,6 +1,8 @@
 package com.leimao.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -9,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -55,97 +58,116 @@ import kotlinx.coroutines.launch
 fun LeimaoTvApp(
     container: AppContainer,
     startDestination: StartDestination,
+    menuSignal: Int,
     onExitApp: () -> Unit,
 ) {
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
     val startRoute = remember(startDestination) { startDestination.toRoute() }
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
 
-    NavHost(navController = navController, startDestination = startRoute) {
-        composable(TvRoute.COMPLIANCE) {
-            ComplianceScreen(
-                onAgree = {
-                    scope.launch {
-                        container.settings.setComplianceAgreed(true)
-                        // 同意后立刻重走落点判定，直接去该去的地方 —— 不许绕回主页（§6.6）
-                        val next = container.startupResolver.resolve()
-                        navController.replaceStackWith(next.toRoute())
-                    }
-                },
-                onDecline = onExitApp,
-            )
+    // 全局菜单（HOME-08）：菜单键信号一到就 toggle。信号来自 Activity 层（任意页面、
+    // 任意 Dialog 之上的最外层），所以这里不依赖某个页面的按键处理。
+    LaunchedEffect(menuSignal) {
+        if (menuSignal > 0) menuOpen = !menuOpen
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        NavHost(navController = navController, startDestination = startRoute) {
+            composable(TvRoute.COMPLIANCE) {
+                ComplianceScreen(
+                    onAgree = {
+                        scope.launch {
+                            container.settings.setComplianceAgreed(true)
+                            // 同意后立刻重走落点判定，直接去该去的地方 —— 不许绕回主页（§6.6）
+                            val next = container.startupResolver.resolve()
+                            navController.replaceStackWith(next.toRoute())
+                        }
+                    },
+                    onDecline = onExitApp,
+                )
+            }
+
+            composable(TvRoute.ADD_SOURCE) {
+                SourceManagerRoute(
+                    container = container,
+                    navController = navController,
+                    isFirstRun = true,
+                    onExitApp = onExitApp,
+                )
+            }
+
+            composable(route = TvRoute.PLAYER, arguments = playerArguments) { entry ->
+                PlayerRoute(
+                    container = container,
+                    channelId = TvRoute.channelIdFrom(entry.arguments?.getLong(ARG_CHANNEL_ID) ?: -1L),
+                    loadingChannels = entry.arguments?.getBoolean(ARG_LOADING) ?: false,
+                    onBackToHome = { navController.replaceStackWith(TvRoute.HOME) },
+                    onOpenSourceManager = { navController.navigate(TvRoute.SETTINGS) },
+                )
+            }
+
+            composable(TvRoute.HOME) {
+                HomeRoute(container = container, navController = navController, onExitApp = onExitApp)
+            }
+
+            composable(TvRoute.SEARCH) {
+                val mode by container.settings.mode.collectAsStateWithLifecycle(initialValue = AppMode.LIVE)
+                BackHandler { navController.popBackStack() }
+                SearchScreen(
+                    scope = if (mode == AppMode.LIVE) SearchScope.IPTV else SearchScope.VOD,
+                )
+            }
+
+            composable(TvRoute.SETTINGS) {
+                BackHandler { navController.popBackStack() }
+                SettingsScreen(
+                    onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
+                    onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
+                    onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
+                    onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
+                    onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
+                )
+            }
+
+            composable(TvRoute.SOURCE_MANAGER) {
+                SourceManagerRoute(
+                    container = container,
+                    navController = navController,
+                    isFirstRun = false,
+                    onExitApp = onExitApp,
+                )
+            }
+
+            composable(TvRoute.CHANGELOG) {
+                BackHandler { navController.popBackStack() }
+                ChangelogScreen()
+            }
+
+            composable(TvRoute.LICENSE) {
+                BackHandler { navController.popBackStack() }
+                LicenseScreen()
+            }
+
+            composable(TvRoute.PLAYBACK_SETTINGS) {
+                BackHandler { navController.popBackStack() }
+                PlaybackSettingsRoute(container = container)
+            }
+
+            composable(TvRoute.REFRESH_SETTINGS) {
+                BackHandler { navController.popBackStack() }
+                RefreshSettingsRoute(container = container)
+            }
         }
 
-        composable(TvRoute.ADD_SOURCE) {
-            SourceManagerRoute(
-                container = container,
-                navController = navController,
-                isFirstRun = true,
-                onExitApp = onExitApp,
-            )
-        }
-
-        composable(route = TvRoute.PLAYER, arguments = playerArguments) { entry ->
-            PlayerRoute(
-                container = container,
-                channelId = TvRoute.channelIdFrom(entry.arguments?.getLong(ARG_CHANNEL_ID) ?: -1L),
-                loadingChannels = entry.arguments?.getBoolean(ARG_LOADING) ?: false,
-                onBackToHome = { navController.replaceStackWith(TvRoute.HOME) },
-                onOpenSourceManager = { navController.navigate(TvRoute.SETTINGS) },
-            )
-        }
-
-        composable(TvRoute.HOME) {
-            HomeRoute(container = container, navController = navController, onExitApp = onExitApp)
-        }
-
-        composable(TvRoute.SEARCH) {
-            val mode by container.settings.mode.collectAsStateWithLifecycle(initialValue = AppMode.LIVE)
-            BackHandler { navController.popBackStack() }
-            SearchScreen(
-                scope = if (mode == AppMode.LIVE) SearchScope.IPTV else SearchScope.VOD,
-            )
-        }
-
-        composable(TvRoute.SETTINGS) {
-            BackHandler { navController.popBackStack() }
-            SettingsScreen(
-                onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
-                onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
-                onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
-                onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
-                onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
-            )
-        }
-
-        composable(TvRoute.SOURCE_MANAGER) {
-            SourceManagerRoute(
-                container = container,
-                navController = navController,
-                isFirstRun = false,
-                onExitApp = onExitApp,
-            )
-        }
-
-        composable(TvRoute.CHANGELOG) {
-            BackHandler { navController.popBackStack() }
-            ChangelogScreen()
-        }
-
-        composable(TvRoute.LICENSE) {
-            BackHandler { navController.popBackStack() }
-            LicenseScreen()
-        }
-
-        composable(TvRoute.PLAYBACK_SETTINGS) {
-            BackHandler { navController.popBackStack() }
-            PlaybackSettingsRoute(container = container)
-        }
-
-        composable(TvRoute.REFRESH_SETTINGS) {
-            BackHandler { navController.popBackStack() }
-            RefreshSettingsRoute(container = container)
-        }
+        GlobalMenuOverlay(
+            open = menuOpen,
+            onOpenSearch = { navController.navigate(TvRoute.SEARCH) },
+            onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
+            onOpenSettings = { navController.navigate(TvRoute.SETTINGS) },
+            onExit = onExitApp,
+            onDismiss = { menuOpen = false },
+        )
     }
 }
 

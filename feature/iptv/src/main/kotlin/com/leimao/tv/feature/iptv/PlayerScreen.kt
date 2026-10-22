@@ -127,7 +127,7 @@ data class PlayerUiState(
  * | ← / → | 切线路 | 同上 |
  * | 数字键 | 输入频道号（2s 内无输入自动跳转） | 输入频道号 |
  * | OK | 呼出控制条 | 触发当前焦点按钮 |
- * | 菜单 | 收藏 / 取消收藏 | 收藏 / 取消收藏 |
+ * | 菜单 | 全局菜单（搜索 / 源管理 / 设置 / 退出，HOME-08） | 同左 |
  * | 返回 | 回主页 | 先收起控制条 |
  *
  * 为什么方向键要分两套含义：既要「按一下就换台」（§6.5 的直播语义），
@@ -283,7 +283,6 @@ fun PlayerScreen(
                         onBack = onBack,
                         onSwitchChannel = onSwitchChannel,
                         onSwitchLine = onSwitchLine,
-                        onToggleFavorite = onToggleFavorite,
                         onDigit = { digit -> numberBuffer = (numberBuffer + digit).take(MAX_NUMBER_DIGITS) },
                     )
                 },
@@ -369,7 +368,7 @@ fun PlayerScreen(
                         // 按键提示只在控制条收起、HUD 还亮着的时候露出：
                         // 控制条里已经有按钮了，再并排一行说明只会抢注意力；
                         // HUD 退掉后它就是纯噪音，必须跟着一起消失
-                        text = "↑↓ 换台　数字键 输入频道号　←→ 切线路　OK 控制条　菜单 收藏",
+                        text = "↑↓ 换台　数字键 输入频道号　←→ 切线路　OK 控制条　菜单 全局菜单",
                         style = TvText.current.hint,
                         color = Color(0x99FFFFFF),
                         modifier = Modifier.alpha(hudAlpha),
@@ -662,7 +661,6 @@ private fun handleKey(
     onBack: () -> Unit,
     onSwitchChannel: (Int) -> Unit,
     onSwitchLine: (Int) -> Unit,
-    onToggleFavorite: () -> Unit,
     onDigit: (Char) -> Unit,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
@@ -687,10 +685,8 @@ private fun handleKey(
             true
         }
 
-        Key.Menu -> {
-            onToggleFavorite()
-            true
-        }
+        // 菜单键不在这里处理：它在 Activity 层被拦截，统一呼出全局菜单（HOME-08）。
+        // 收藏入口保留在控制条按钮里，语义不变、位置更明确。
 
         Key.DirectionUp, Key.DirectionDown -> {
             if (controlsVisible) {

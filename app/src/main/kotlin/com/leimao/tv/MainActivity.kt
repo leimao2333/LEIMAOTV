@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.tv.material3.MaterialTheme
@@ -60,6 +61,15 @@ internal object KeyRemap {
  * 这也是为什么这里是 `produceState` 而不是「先进主页再跳播放页」。
  */
 class MainActivity : ComponentActivity() {
+    /**
+     * 全局菜单（HOME-08）的信号量：菜单键按下一次就 +1。
+     *
+     * 为什么用信号量而不是布尔开关：菜单「是否打开」这个状态归 Compose 管（返回键收起、
+     * 选中项收起都要改它），Activity 若也持有一份就会两份状态打架。信号量只表达
+     * 「有人按了菜单键」这个事实，Compose 端观察到变化后自行 toggle，两边各管各的。
+     */
+    private val menuSignal = mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as LeimaoTvApplication).container
@@ -87,6 +97,7 @@ class MainActivity : ComponentActivity() {
                         LeimaoTvApp(
                             container = container,
                             startDestination = resolved,
+                            menuSignal = menuSignal.intValue,
                             onExitApp = { finish() },
                         )
                 }
@@ -107,6 +118,16 @@ class MainActivity : ComponentActivity() {
         // （窗口没焦点，或输入法把键吃掉了）
         if (event.action == KeyEvent.ACTION_DOWN) {
             Log.d(TAG, "KEY keyCode=${event.keyCode} scan=${event.scanCode} source=${event.source}")
+        }
+
+        // 菜单键在任意页面呼出全局菜单（HOME-08）：这里无条件拦截，事件不再下发给
+        // 焦点系统 / 各页面的 onPreviewKeyEvent —— 播放页等地方的菜单键逻辑因此永远不命中。
+        if (event.keyCode == KeyEvent.KEYCODE_MENU) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                Log.d(TAG, "MENU key -> toggle global menu")
+                menuSignal.intValue += 1
+            }
+            return true
         }
 
         val target = KeyRemap.targetOf(event.keyCode) ?: return super.dispatchKeyEvent(event)

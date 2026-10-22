@@ -228,11 +228,13 @@ private fun HomeRoute(
 
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var recentChannels by remember { mutableStateOf<List<Channel>>(emptyList()) }
 
     // 主页每次回到前台都刷新一次列表：用户可能刚在源管理里加完源
     LaunchedEffect(Unit) {
         channels = container.channelRepository.listFromEnabledSources()
         favoriteIds = container.favoriteRepository.favoriteChannelIds().toSet()
+        recentChannels = container.historyRepository.recent()
     }
 
     HomeScreen(
@@ -253,6 +255,7 @@ private fun HomeRoute(
         },
         channels = channels,
         favoriteIds = favoriteIds,
+        recentChannels = recentChannels,
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },

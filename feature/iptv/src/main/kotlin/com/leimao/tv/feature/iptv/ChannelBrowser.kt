@@ -58,6 +58,8 @@ fun ChannelBrowser(
     autoFocus: Boolean = true,
     initialFocusRequester: FocusRequester? = null,
     recentChannels: List<Channel> = emptyList(),
+    /** 外部请求「跳转到某个分组」（HOME-06 分组快捷入口）。变化时列表切到该分组。 */
+    pendingGroup: String? = null,
 ) {
     // 「最近观看」作为虚拟分组插在最前（LIVE-15）。它和真实分组并列出现在左侧分组栏，
     // 只是数据来源不同：真实分组来自全集切片，它是 history 表的一份倒序查询。
@@ -87,6 +89,13 @@ fun ChannelBrowser(
         allGroups.firstOrNull { group -> group.channels.any { it.id == selectedChannelId } }?.name
             ?: allGroups.first().name
     var activeGroup by rememberSaveable(allGroups) { mutableStateOf(selectedGroupName) }
+
+    // 外部请求跳转分组：分组快捷入口点中某个分组时，把列表切过去（HOME-06）。
+    // 只在分组真实存在时才切，避免外部传了个已不存在的分组名导致列表错乱。
+    LaunchedEffect(pendingGroup) {
+        val target = pendingGroup ?: return@LaunchedEffect
+        if (allGroups.any { it.name == target }) activeGroup = target
+    }
 
     val activeChannels = allGroups.firstOrNull { it.name == activeGroup }?.channels ?: allGroups.first().channels
     val listState = rememberLazyListState()

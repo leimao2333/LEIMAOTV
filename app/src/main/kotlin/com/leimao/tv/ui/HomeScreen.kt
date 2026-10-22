@@ -2,6 +2,7 @@ package com.leimao.tv.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -25,7 +28,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.MaterialTheme
@@ -37,6 +42,7 @@ import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.SearchScope
 import com.leimao.tv.feature.iptv.ChannelBrowser
+import com.leimao.tv.feature.iptv.ChannelLogo
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.SettingsScreen
@@ -93,6 +99,7 @@ fun HomeScreen(
     onOpenPlayer: () -> Unit,
     channels: List<Channel>,
     favoriteIds: Set<Long>,
+    recentChannels: List<Channel>,
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
@@ -167,6 +174,7 @@ fun HomeScreen(
                         onOpenPlayer = onOpenPlayer,
                         channels = channels,
                         favoriteIds = favoriteIds,
+                        recentChannels = recentChannels,
                         onOpenChannel = onOpenChannel,
                         onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
@@ -195,6 +203,7 @@ private fun ContentArea(
     onOpenPlayer: () -> Unit,
     channels: List<Channel>,
     favoriteIds: Set<Long>,
+    recentChannels: List<Channel>,
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
@@ -219,6 +228,7 @@ private fun ContentArea(
                 mode = mode,
                 channels = channels,
                 favoriteIds = favoriteIds,
+                recentChannels = recentChannels,
                 onOpenPlayer = onOpenPlayer,
                 onOpenChannel = onOpenChannel,
             )
@@ -246,15 +256,27 @@ private fun ContentArea(
  *
  * 这里是「主动挑台」的入口：分组 + 频道列表。启动时不经过它（启动直达播放，§6.6），
  * 所以它可以慢一点、可以一次把 5000 条频道都列出来，不占冷启动的预算。
+ *
+ * HOME-06 在完整列表上方加了三块快捷入口，都是「一眼看到、一键直达」：
+ * - 收藏频道：用户主动收藏过的台，横向一行；
+ * - 最近观看：history 表里最近的台，横向一行；
+ * - 分组快捷入口：所有分组名一行，点中后下方完整列表切到该分组。
  */
 @Composable
 private fun LiveSectionContent(
     mode: AppMode,
     channels: List<Channel>,
     favoriteIds: Set<Long>,
+    recentChannels: List<Channel>,
     onOpenPlayer: () -> Unit,
     onOpenChannel: (Long) -> Unit,
 ) {
+    // 收藏频道 = 全量里被收藏的那批。不做独立查询：收藏 id 已经拿到，在已加载的全量里切一刀即可，
+    // 且天然按频道顺序排列（收藏列表该按「列表顺序」而不是「收藏时间」排，用户找台更顺手）。
+    val favoriteChannels = remember(channels, favoriteIds) { channels.filter { it.id in favoriteIds } }
+    // 分组快捷入口要跳转的目标分组。null = 未触发；点中后传给 ChannelBrowser，它切完即用。
+    var pendingGroup by rememberSaveable { mutableStateOf<String?>(null) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
             text = if (mode == AppMode.LIVE) "直播" else "直播（影视模式下也可切回）",
@@ -281,7 +303,46 @@ private fun LiveSectionContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        if (channels.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            QuickRow(
+                title = "收藏频道",
+                emptyHint = "还没有收藏。播放时打开控制条点「收藏」，或在下方列表里选台。",
+                items = favoriteChannels,
+                itemKey = { it.id },
+            ) { channel ->
+                ChannelChip(channel = channel, isFavorite = true, onClick = { onOpenChannel(channel.id) })
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            QuickRow(
+                title = "最近观看",
+                emptyHint = "还没有观看记录。随便打开一个台就有了。",
+                items = recentChannels,
+                itemKey = { it.id },
+            ) { channel ->
+                ChannelChip(
+                    channel = channel,
+                    isFavorite = channel.id in favoriteIds,
+                    onClick = { onOpenChannel(channel.id) },
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            QuickRow(
+                title = "分组",
+                emptyHint = null,
+                items = remember(channels) { groupChannels(channels) },
+                itemKey = { it.name },
+            ) { group ->
+                GroupChip(name = group.name, count = group.channels.size) { pendingGroup = group.name }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         if (channels.isNotEmpty()) {
             ChannelBrowser(
@@ -289,7 +350,109 @@ private fun LiveSectionContent(
                 selectedChannelId = null,
                 onChannelClick = { channel -> onOpenChannel(channel.id) },
                 favoriteIds = favoriteIds,
+                pendingGroup = pendingGroup,
                 modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * 一个快捷区块：标题 + 横向一行卡片。内容为空时用一句提示顶替，而不是空白 ——
+ * 否则用户会以为「这个区块坏了没加载出来」。
+ */
+@Composable
+private fun <T> QuickRow(
+    title: String,
+    emptyHint: String?,
+    items: List<T>,
+    itemKey: (T) -> Any,
+    itemContent: @Composable (T) -> Unit,
+) {
+    Column {
+        Text(
+            text = title,
+            style = TvText.current.title,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (items.isEmpty() && emptyHint != null) {
+            Text(
+                text = emptyHint,
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(items = items, key = itemKey) { item ->
+                    itemContent(item)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 快捷区块里的一个频道卡：台标 + 名字（+ ★ 收藏标记）。固定宽度，横向排开。
+ * 点击直达播放 —— 这是快捷入口的唯一动作，不搞二级菜单。
+ */
+@Composable
+private fun ChannelChip(
+    channel: Channel,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+) {
+    FocusableCard(
+        onClick = onClick,
+        modifier = Modifier.width(200.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ChannelLogo(logoUrl = channel.logoUrl)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = channel.name,
+                style = TvText.current.label,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (isFavorite) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(text = "★", style = TvText.current.hint, color = MATERIAL_GOLD)
+            }
+        }
+    }
+}
+
+/**
+ * 分组快捷入口卡：分组名 + 台数。点中后把下方完整列表切到该分组（HOME-06）。
+ */
+@Composable
+private fun GroupChip(
+    name: String,
+    count: Int,
+    onClick: () -> Unit,
+) {
+    FocusableCard(
+        onClick = onClick,
+        modifier = Modifier.width(160.dp),
+    ) {
+        Column {
+            Text(
+                text = name,
+                style = TvText.current.label,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "$count 个台",
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -381,3 +544,6 @@ private fun ExitConfirmDialog(
         }
     }
 }
+
+/** 收藏星标色。与频道列表/抽屉里的 ★ 同色（LIVE-14）。 */
+private val MATERIAL_GOLD = Color(0xFFE6B422)

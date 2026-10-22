@@ -104,6 +104,11 @@ data class PlayerUiState(
     val loadingChannels: Boolean = false,
     val programme: ProgrammeLine? = null,
     /**
+     * 最近观看（LIVE-15）：按观看时间倒序的频道，抽屉里作为「最近观看」分组展示。
+     * 独立于 groups，因为它不是按分组切片的全集，而是 history 表的一份查询。
+     */
+    val recentChannels: List<Channel> = emptyList(),
+    /**
      * 当前频道的节目单（时间窗内的，已排序）。节目单网格（LIVE-22）直接用这一份，
      * 打开时不再查一次库 —— 顶部「正在播 / 下一档」用的也是它，两处同一个数据源就不会打架。
      */
@@ -616,6 +621,7 @@ private fun ChannelDrawer(
                     selectedChannelId = state.channel?.id,
                     onChannelClick = onSelect,
                     favoriteIds = state.favoriteIds,
+                    recentChannels = state.recentChannels,
                     modifier = Modifier.weight(1f),
                     initialFocusRequester = firstChannelFocus,
                 )

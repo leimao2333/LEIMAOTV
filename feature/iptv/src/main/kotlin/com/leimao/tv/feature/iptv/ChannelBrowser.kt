@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -56,8 +57,22 @@ fun ChannelBrowser(
     favoriteIds: Set<Long> = emptySet(),
     autoFocus: Boolean = true,
     initialFocusRequester: FocusRequester? = null,
+    recentChannels: List<Channel> = emptyList(),
 ) {
-    if (groups.isEmpty()) {
+    // 「最近观看」作为虚拟分组插在最前（LIVE-15）。它和真实分组并列出现在左侧分组栏，
+    // 只是数据来源不同：真实分组来自全集切片，它是 history 表的一份倒序查询。
+    val allGroups =
+        remember(groups, recentChannels) {
+            val recent =
+                if (recentChannels.isEmpty()) {
+                    emptyList()
+                } else {
+                    listOf(ChannelGroup(RECENT_GROUP_NAME, recentChannels))
+                }
+            recent + groups
+        }
+
+    if (allGroups.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = "还没有频道",
@@ -69,11 +84,11 @@ fun ChannelBrowser(
     }
 
     val selectedGroupName =
-        groups.firstOrNull { group -> group.channels.any { it.id == selectedChannelId } }?.name
-            ?: groups.first().name
-    var activeGroup by rememberSaveable(groups) { mutableStateOf(selectedGroupName) }
+        allGroups.firstOrNull { group -> group.channels.any { it.id == selectedChannelId } }?.name
+            ?: allGroups.first().name
+    var activeGroup by rememberSaveable(allGroups) { mutableStateOf(selectedGroupName) }
 
-    val activeChannels = groups.firstOrNull { it.name == activeGroup }?.channels ?: groups.first().channels
+    val activeChannels = allGroups.firstOrNull { it.name == activeGroup }?.channels ?: allGroups.first().channels
     val listState = rememberLazyListState()
 
     // 播放页呼出抽屉时，焦点应该直接落在「正在看的台」上，而不是列表顶部
@@ -97,7 +112,7 @@ fun ChannelBrowser(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             state = rememberLazyListState(),
         ) {
-            items(items = groups, key = { it.name }) { group ->
+            items(items = allGroups, key = { it.name }) { group ->
                 val isActive = group.name == activeGroup
                 FocusableCard(
                     onClick = { activeGroup = group.name },
@@ -220,3 +235,6 @@ fun ChannelLogo(
 }
 
 private val MATERIAL_GOLD = Color(0xFFE6B422)
+
+/** 抽屉里「最近观看」虚拟分组的名字（LIVE-15）。 */
+private const val RECENT_GROUP_NAME = "最近观看"

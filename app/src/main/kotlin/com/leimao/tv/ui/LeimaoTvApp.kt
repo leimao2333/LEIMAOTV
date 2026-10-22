@@ -260,9 +260,14 @@ private fun PlayerRoute(
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var current by remember { mutableStateOf<Channel?>(null) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var recentChannels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var programme by remember { mutableStateOf<ProgrammeLine?>(null) }
     var epgProgrammes by remember { mutableStateOf<List<EpgProgramme>>(emptyList()) }
     val scope = rememberCoroutineScope()
+
+    suspend fun refreshRecent() {
+        recentChannels = container.historyRepository.recent()
+    }
 
     suspend fun startChannel(targetId: Long) {
         val channel =
@@ -285,11 +290,14 @@ private fun PlayerRoute(
         )
         // 记住「刚看了这个台」：启动落点优先级 #1 读的就是这条记录（§6.6）
         container.historyRepository.touch(channel.id, System.currentTimeMillis())
+        // 最近观看分组要跟着换台更新，否则抽屉里的「最近观看」一直是旧名单
+        refreshRecent()
     }
 
     LaunchedEffect(Unit) {
         channels = container.channelRepository.listFromEnabledSources()
         favoriteIds = container.favoriteRepository.favoriteChannelIds().toSet()
+        refreshRecent()
 
         // 落点已经由 StartupResolver 算过；这里只处理「当时没算出来、现在有频道了」
         val target = channelId ?: container.historyRepository.latestChannelId() ?: channels.firstOrNull()?.id
@@ -334,6 +342,7 @@ private fun PlayerRoute(
                 favoriteIds = favoriteIds,
                 loadingChannels = loadingChannels && channels.isEmpty(),
                 programme = programme,
+                recentChannels = recentChannels,
                 epgProgrammes = epgProgrammes,
             ),
         videoPlayer = (container.player as? VideoSurfaceHost)?.videoPlayer,

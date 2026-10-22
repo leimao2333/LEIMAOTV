@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.1.4.0"
+    const val CURRENT_VERSION: String = "0.1.5.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,15 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.1.5.0",
+                date = "2026-10-22",
+                changes =
+                    listOf(
+                        "新增自动刷新：直播源可按 6/12/24 小时定时更新，也可关闭",
+                        "应用启动时会在后台自动更新一次源，不影响正在播的内容",
+                    ),
+            ),
             VersionEntry(
                 version = "0.1.4.0",
                 date = "2026-10-22",

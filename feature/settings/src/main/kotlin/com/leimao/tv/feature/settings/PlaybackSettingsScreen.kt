@@ -1,25 +1,21 @@
 package com.leimao.tv.feature.settings
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.PlaybackSettings
@@ -117,49 +113,4 @@ private fun SectionTitle(text: String) {
         style = TvText.current.title,
         color = MaterialTheme.colorScheme.onBackground,
     )
-}
-
-/**
- * 单选行：与 [SettingRow] 的区别是带「已选」态（左侧打勾 + 高亮描边），
- * 用于档位、步长这类「多选一」的配置，而不是「点一下跳走」的入口。
- */
-@Composable
-private fun ChoiceRow(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    FocusableCard(
-        onClick = onClick,
-        modifier = modifier,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = TvText.current.label,
-                    color =
-                        if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = subtitle,
-                    style = TvText.current.hint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = if (selected) "✓" else "",
-                style = TvText.current.label,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
 }

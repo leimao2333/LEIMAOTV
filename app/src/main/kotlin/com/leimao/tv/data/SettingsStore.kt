@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.leimao.tv.core.data.RefreshInterval
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.PlaybackSettings
@@ -33,6 +34,9 @@ interface SettingsStore {
     /** 播放设置（SET-01）。整包读写，避免一项项散落成多个 Flow */
     val playbackSettings: Flow<PlaybackSettings>
 
+    /** 自动刷新周期（LIVE-07）。关闭 / 6 / 12 / 24 小时 */
+    val refreshInterval: Flow<RefreshInterval>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
@@ -40,6 +44,8 @@ interface SettingsStore {
     suspend fun setLastSection(section: String?)
 
     suspend fun setPlaybackSettings(settings: PlaybackSettings)
+
+    suspend fun setRefreshInterval(interval: RefreshInterval)
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -65,6 +71,11 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
             )
         }
 
+    override val refreshInterval: Flow<RefreshInterval> =
+        context.tvSettings.data.map { prefs ->
+            RefreshInterval.fromName(prefs[KEY_REFRESH_INTERVAL])
+        }
+
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
     }
@@ -86,11 +97,16 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         }
     }
 
+    override suspend fun setRefreshInterval(interval: RefreshInterval) {
+        context.tvSettings.edit { it[KEY_REFRESH_INTERVAL] = interval.name }
+    }
+
     private companion object {
         val KEY_COMPLIANCE_AGREED = booleanPreferencesKey("compliance_agreed")
         val KEY_MODE = stringPreferencesKey("app_mode")
         val KEY_LAST_SECTION = stringPreferencesKey("last_section")
         val KEY_BUFFER_PROFILE = stringPreferencesKey("buffer_profile")
         val KEY_SEEK_STEP_MS = longPreferencesKey("seek_step_ms")
+        val KEY_REFRESH_INTERVAL = stringPreferencesKey("refresh_interval")
     }
 }

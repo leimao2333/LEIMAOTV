@@ -5,6 +5,9 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.leimao.tv.core.data.RefreshInterval
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * 应用入口：只做两件事 —— 建容器、配图片加载器。
@@ -25,6 +28,29 @@ class LeimaoTvApplication :
         // EPG 定时刷新（LIVE-23）：幂等注册，用 UPDATE 覆盖旧周期。没有配置节目单
         // 订阅地址时 Worker 会空跑直接退出，不产生任何打扰。
         EpgRefreshWorker.schedule(this)
+        // 直播源定时刷新（LIVE-07）：按设置里的周期注册（默认 24h，关闭则取消）。
+        // 启动还额外异步刷一次，保证列表不过期 —— 但绝不能阻塞冷启动落点（§6.6），
+        // 所以放 applicationScope 里 fire-and-forget，落点判定照常走。
+        scheduleSourceRefresh()
+        kickOffInitialRefresh()
+    }
+
+    private fun scheduleSourceRefresh() {
+        // onCreate 里同步读一次 DataStore 首值拿刷新周期：只读一个轻量 key、只跑一次，
+        // 代价可忽略；读失败（异常）由 getOrElse 兜回默认档。
+        val interval =
+            runCatching {
+                kotlinx.coroutines.runBlocking { container.settings.refreshInterval.first() }
+            }.getOrElse { RefreshInterval.DEFAULT }
+        SourceRefreshWorker.schedule(this, interval)
+    }
+
+    private fun kickOffInitialRefresh() {
+        container.applicationScope.launch {
+            // 首启无源时 refreshAll 返回空列表，无副作用；有源则后台补齐，
+            // 播放页已经在播「上次的台」，不会被这次刷新打断。
+            container.sourceRefresher.refreshAll()
+        }
     }
 
     override fun newImageLoader(): ImageLoader =

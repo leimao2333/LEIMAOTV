@@ -17,6 +17,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.leimao.tv.AppContainer
+import com.leimao.tv.SourceRefreshWorker
+import com.leimao.tv.core.data.RefreshInterval
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.SearchScope
@@ -39,6 +41,7 @@ import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.LicenseScreen
 import com.leimao.tv.feature.settings.PlaybackSettingsScreen
+import com.leimao.tv.feature.settings.RefreshSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
 import kotlinx.coroutines.delay
@@ -108,6 +111,7 @@ fun LeimaoTvApp(
             BackHandler { navController.popBackStack() }
             SettingsScreen(
                 onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
+                onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
                 onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
                 onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
                 onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
@@ -137,7 +141,32 @@ fun LeimaoTvApp(
             BackHandler { navController.popBackStack() }
             PlaybackSettingsRoute(container = container)
         }
+
+        composable(TvRoute.REFRESH_SETTINGS) {
+            BackHandler { navController.popBackStack() }
+            RefreshSettingsRoute(container = container)
+        }
     }
+}
+
+@Composable
+private fun RefreshSettingsRoute(container: AppContainer) {
+    val interval by
+        container.settings.refreshInterval.collectAsStateWithLifecycle(
+            initialValue = RefreshInterval.DEFAULT,
+        )
+    val scope = rememberCoroutineScope()
+
+    RefreshSettingsScreen(
+        interval = interval,
+        onIntervalChange = { next ->
+            scope.launch {
+                container.settings.setRefreshInterval(next)
+                // 改周期要立刻反映到 WorkManager：注册新周期或取消（关闭时）
+                SourceRefreshWorker.schedule(container.appContext, next)
+            }
+        },
+    )
 }
 
 @Composable
@@ -207,6 +236,7 @@ private fun HomeRoute(
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
         onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
         onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
+        onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
         onExit = onExitApp,
     )
 }

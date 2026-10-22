@@ -35,6 +35,7 @@ import com.leimao.tv.feature.settings.changelog.renderBoldMarkdown
 @Composable
 fun SettingsScreen(
     onOpenPlaybackSettings: () -> Unit,
+    onOpenRefreshSettings: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenLicense: () -> Unit,
@@ -74,6 +75,12 @@ fun SettingsScreen(
             title = "源管理",
             subtitle = "添加订阅源、单源刷新、本地导入（SET-03）",
             onClick = onOpenSourceManager,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingRow(
+            title = "自动刷新",
+            subtitle = "直播源多久自动更新一次（LIVE-07）",
+            onClick = onOpenRefreshSettings,
         )
         Spacer(modifier = Modifier.height(12.dp))
         SettingRow(

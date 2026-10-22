@@ -21,6 +21,7 @@ import com.leimao.tv.core.model.playlist.MergedChannel
 import com.leimao.tv.core.network.AppHttp
 import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
+import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
 import com.leimao.tv.data.DataStoreSettingsStore
@@ -29,6 +30,8 @@ import com.leimao.tv.startup.StartupResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 /**
  * 手写依赖容器。
@@ -97,6 +100,19 @@ class AppContainer(context: Context) {
     /**
      * 播放器实例挂在应用层，不随页面销毁（架构设计 §2）。
      * 正因为它在容器里，「切模式不断流」和「从影视回来接着播」才不需要额外逻辑。
+     *
+     * 缓冲档位（SET-01）在构建时读一次：LoadControl 是 ExoPlayer 构造期参数，
+     * 中途改档要重建内核，代价大且会打断播放。故档位变更**下次启动生效**，设置页会明说。
+     * 这里用 `runBlocking` 同步读首值 —— 只在容器构造这一次，读的是 DataStore 首屏，
+     * 冷启动预算里可忽略（真正的播放起播仍走异步）。
      */
-    val player: PlayerController = Media3PlayerController(appContext, AppHttp.client)
+    val player: PlayerController =
+        Media3PlayerController(
+            context = appContext,
+            okHttpClient = AppHttp.client,
+            bufferProfile = currentBufferProfile(settings),
+        )
+
+    private fun currentBufferProfile(settings: SettingsStore): BufferProfile =
+        runBlocking { settings.playbackSettings.first().bufferProfile }
 }

@@ -5,9 +5,12 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.leimao.tv.core.model.AppMode
+import com.leimao.tv.core.player.BufferProfile
+import com.leimao.tv.core.player.PlaybackSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -27,11 +30,16 @@ interface SettingsStore {
     /** 上次停在主页的哪个导航项（HOME-03 的「主页内落点记忆」），null 表示从未选过 */
     val lastSection: Flow<String?>
 
+    /** 播放设置（SET-01）。整包读写，避免一项项散落成多个 Flow */
+    val playbackSettings: Flow<PlaybackSettings>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
 
     suspend fun setLastSection(section: String?)
+
+    suspend fun setPlaybackSettings(settings: PlaybackSettings)
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -49,6 +57,14 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
     override val lastSection: Flow<String?> =
         context.tvSettings.data.map { it[KEY_LAST_SECTION] }
 
+    override val playbackSettings: Flow<PlaybackSettings> =
+        context.tvSettings.data.map { prefs ->
+            PlaybackSettings(
+                bufferProfile = BufferProfile.fromName(prefs[KEY_BUFFER_PROFILE]),
+                seekIncrementMs = prefs[KEY_SEEK_STEP_MS] ?: PlaybackSettings.DEFAULT.seekIncrementMs,
+            )
+        }
+
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
     }
@@ -63,9 +79,18 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         }
     }
 
+    override suspend fun setPlaybackSettings(settings: PlaybackSettings) {
+        context.tvSettings.edit { prefs ->
+            prefs[KEY_BUFFER_PROFILE] = settings.bufferProfile.name
+            prefs[KEY_SEEK_STEP_MS] = settings.seekIncrementMs
+        }
+    }
+
     private companion object {
         val KEY_COMPLIANCE_AGREED = booleanPreferencesKey("compliance_agreed")
         val KEY_MODE = stringPreferencesKey("app_mode")
         val KEY_LAST_SECTION = stringPreferencesKey("last_section")
+        val KEY_BUFFER_PROFILE = stringPreferencesKey("buffer_profile")
+        val KEY_SEEK_STEP_MS = longPreferencesKey("seek_step_ms")
     }
 }

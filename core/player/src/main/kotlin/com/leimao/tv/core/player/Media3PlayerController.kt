@@ -6,7 +6,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -38,6 +37,7 @@ class Media3PlayerController(
     private val context: Context,
     private val okHttpClient: OkHttpClient,
     private val retryLimit: Int = PLAYBACK_RETRY_LIMIT,
+    private val bufferProfile: BufferProfile = BufferProfile.BALANCED,
 ) : PlayerController,
     VideoSurfaceHost {
     private val _state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
@@ -225,41 +225,13 @@ class Media3PlayerController(
                     // 硬解初始化失败时退到系统软解，这是 PLAY-02 在 Media3 内能做到的兜底
                     .setEnableDecoderFallback(true),
             )
-            .setLoadControl(liveLoadControl())
+            // 缓冲档位由设置页（SET-01）决定，默认均衡档
+            .setLoadControl(bufferProfile.loadControl())
             .build()
 
     companion object {
         /** 单条线路上连续重连的次数上限；再失败就该换线了（PLAY-08） */
         const val PLAYBACK_RETRY_LIMIT = 3
-
-        /** 维持缓冲的下限：低于它就要重新攒，否则画面已经在抖了 */
-        private const val MIN_BUFFER_MS = 5_000
-
-        /** 缓冲上限：压住内存与延迟，直播不需要攒太多 */
-        private const val MAX_BUFFER_MS = 20_000
-
-        /** 起播前要攒够的时长：再大就明显影响「换台到出画 ≤ 1.5s」（§7） */
-        private const val BUFFER_FOR_PLAYBACK_MS = 500
-
-        /** 卡顿后重新起播的门槛：断一下能马上接上，而不是彻底回到起播流程 */
-        private const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 1_000
-
-        /**
-         * 直播缓冲档位（PLAY-03）：起播要快，但不能一断就卡。
-         *
-         * 四个值都用常量命名，而不是在实参上挂行内注释 —— 那种写法会被 ktlint 判违规，
-         * 而且改名时漏改注释比漏改常量更难发现。
-         */
-        fun liveLoadControl(): DefaultLoadControl =
-            DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    MIN_BUFFER_MS,
-                    MAX_BUFFER_MS,
-                    BUFFER_FOR_PLAYBACK_MS,
-                    BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
-                )
-                .setPrioritizeTimeOverSizeThresholds(true)
-                .build()
 
         /** 错误码到人话的映射：UI 上直接显示，用户才知道该换线还是该检查网络 */
         fun describe(error: PlaybackException): String =

@@ -28,6 +28,7 @@ import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.network.BasicAuth
 import com.leimao.tv.core.network.RequestHeaders
 import com.leimao.tv.core.player.PlaybackRequest
+import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.core.player.VideoSurfaceHost
 import com.leimao.tv.feature.iptv.PlayerScreen
 import com.leimao.tv.feature.iptv.PlayerUiState
@@ -37,6 +38,7 @@ import com.leimao.tv.feature.iptv.neighborOf
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.LicenseScreen
+import com.leimao.tv.feature.settings.PlaybackSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
 import kotlinx.coroutines.delay
@@ -105,6 +107,7 @@ fun LeimaoTvApp(
         composable(TvRoute.SETTINGS) {
             BackHandler { navController.popBackStack() }
             SettingsScreen(
+                onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
                 onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
                 onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
                 onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
@@ -129,7 +132,31 @@ fun LeimaoTvApp(
             BackHandler { navController.popBackStack() }
             LicenseScreen()
         }
+
+        composable(TvRoute.PLAYBACK_SETTINGS) {
+            BackHandler { navController.popBackStack() }
+            PlaybackSettingsRoute(container = container)
+        }
     }
+}
+
+@Composable
+private fun PlaybackSettingsRoute(container: AppContainer) {
+    val settings by
+        container.settings.playbackSettings.collectAsStateWithLifecycle(
+            initialValue = PlaybackSettings.DEFAULT,
+        )
+    val scope = rememberCoroutineScope()
+
+    PlaybackSettingsScreen(
+        settings = settings,
+        onBufferProfileChange = { profile ->
+            scope.launch { container.settings.setPlaybackSettings(settings.copy(bufferProfile = profile)) }
+        },
+        onSeekStepChange = { step ->
+            scope.launch { container.settings.setPlaybackSettings(settings.copy(seekIncrementMs = step.millis)) }
+        },
+    )
 }
 
 @Composable
@@ -179,6 +206,7 @@ private fun HomeRoute(
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
         onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
+        onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
         onExit = onExitApp,
     )
 }

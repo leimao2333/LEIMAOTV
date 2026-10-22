@@ -97,6 +97,7 @@ fun HomeScreen(
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenLicense: () -> Unit,
+    onOpenPlaybackSettings: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -169,6 +170,7 @@ fun HomeScreen(
                         onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
                         onOpenLicense = onOpenLicense,
+                        onOpenPlaybackSettings = onOpenPlaybackSettings,
                     )
                 }
             }
@@ -195,6 +197,7 @@ private fun ContentArea(
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenLicense: () -> Unit,
+    onOpenPlaybackSettings: () -> Unit,
 ) {
     // 分区与模式必须自洽：模式是内容的「大前提」，分区只是它下面的入口。
     // 两者不一致时以模式为准 —— 否则切模式会出现「影视模式下还显示直播分区」的错位
@@ -224,6 +227,7 @@ private fun ContentArea(
             )
         HomeSection.SETTINGS ->
             SettingsScreen(
+                onOpenPlaybackSettings = onOpenPlaybackSettings,
                 onOpenChangelog = onOpenChangelog,
                 onOpenSourceManager = onOpenSourceManager,
                 onOpenLicense = onOpenLicense,

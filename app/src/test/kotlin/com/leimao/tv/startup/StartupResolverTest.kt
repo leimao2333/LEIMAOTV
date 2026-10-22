@@ -4,6 +4,7 @@ import com.leimao.tv.core.database.startup.StartupFacts
 import com.leimao.tv.core.database.startup.StartupFactsReader
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.startup.StartDestination
+import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.data.SettingsStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -110,10 +111,12 @@ class StartupResolverTest {
         private val agreedFlow = MutableStateFlow(complianceAgreed)
         private val modeFlow = MutableStateFlow(AppMode.LIVE)
         private val lastSectionFlow = MutableStateFlow<String?>(null)
+        private val playbackSettingsFlow = MutableStateFlow(PlaybackSettings.DEFAULT)
 
         override val complianceAgreed: Flow<Boolean> = agreedFlow
         override val mode: Flow<AppMode> = modeFlow
         override val lastSection: Flow<String?> = lastSectionFlow
+        override val playbackSettings: Flow<PlaybackSettings> = playbackSettingsFlow
 
         override suspend fun setComplianceAgreed(agreed: Boolean) {
             agreedFlow.value = agreed
@@ -125,6 +128,10 @@ class StartupResolverTest {
 
         override suspend fun setLastSection(section: String?) {
             lastSectionFlow.value = section
+        }
+
+        override suspend fun setPlaybackSettings(settings: PlaybackSettings) {
+            playbackSettingsFlow.value = settings
         }
     }
 }

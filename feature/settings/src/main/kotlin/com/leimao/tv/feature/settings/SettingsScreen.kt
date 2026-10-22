@@ -34,6 +34,7 @@ import com.leimao.tv.feature.settings.changelog.renderBoldMarkdown
  */
 @Composable
 fun SettingsScreen(
+    onOpenPlaybackSettings: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenLicense: () -> Unit,
@@ -58,9 +59,9 @@ fun SettingsScreen(
 
         SettingRow(
             title = "播放设置",
-            subtitle = "默认内核 / 缓冲档位 / 快进步长 —— M1 先固定为直播档（SET-01）",
+            subtitle = "缓冲档位 / 快进步长 / 默认内核（SET-01）",
             modifier = Modifier.focusRequester(firstFocus),
-            onClick = { },
+            onClick = onOpenPlaybackSettings,
         )
         Spacer(modifier = Modifier.height(12.dp))
         SettingRow(

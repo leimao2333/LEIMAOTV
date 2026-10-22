@@ -32,6 +32,8 @@ dependencies {
     // 源管理页要读写源、要触发刷新（SET-03 / LIVE-03 / LIVE-04）
     implementation(project(":core:database"))
     implementation(project(":core:data"))
+    // 播放设置页要展示缓冲档位 / 快进步长（SET-01）
+    implementation(project(":core:player"))
     // SAF 选文件要 ActivityResultContracts
     api(libs.androidx.activity.compose)
 

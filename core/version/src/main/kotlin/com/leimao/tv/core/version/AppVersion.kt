@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.1.3.0"
+    const val CURRENT_VERSION: String = "0.1.4.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,15 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.1.4.0",
+                date = "2026-10-22",
+                changes =
+                    listOf(
+                        "新增播放设置：可调缓冲档位（低延迟/均衡/抗卡顿）与快进步长",
+                        "缓冲档位改动后下次启动生效，设置页已明确标注",
+                    ),
+            ),
             VersionEntry(
                 version = "0.1.3.0",
                 date = "2026-10-22",

@@ -30,4 +30,6 @@ dependencies {
     api(libs.androidx.media3.exoplayer.hls)
     api(libs.androidx.media3.datasource.okhttp)
     api(libs.okhttp)
+
+    testImplementation(libs.junit)
 }

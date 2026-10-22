@@ -36,6 +36,7 @@ import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.iptv.neighborOf
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
+import com.leimao.tv.feature.settings.LicenseScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
 import kotlinx.coroutines.delay
@@ -106,6 +107,7 @@ fun LeimaoTvApp(
             SettingsScreen(
                 onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
                 onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
+                onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
             )
         }
 
@@ -121,6 +123,11 @@ fun LeimaoTvApp(
         composable(TvRoute.CHANGELOG) {
             BackHandler { navController.popBackStack() }
             ChangelogScreen()
+        }
+
+        composable(TvRoute.LICENSE) {
+            BackHandler { navController.popBackStack() }
+            LicenseScreen()
         }
     }
 }
@@ -171,6 +178,7 @@ private fun HomeRoute(
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
+        onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
         onExit = onExitApp,
     )
 }

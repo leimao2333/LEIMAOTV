@@ -14,6 +14,7 @@ object TvRoute {
     const val SEARCH = "search"
     const val SETTINGS = "settings"
     const val CHANGELOG = "changelog"
+    const val LICENSE = "license"
 
     /** 播放页带两个查询参数：频道 id（-1 = 尚未确定）与是否仍在载入频道。 */
     const val PLAYER = "player?channelId={channelId}&loading={loading}"

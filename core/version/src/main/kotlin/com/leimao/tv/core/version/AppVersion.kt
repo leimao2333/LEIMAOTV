@@ -92,6 +92,7 @@ object AppVersion {
                 changes =
                     listOf(
                         "添加源时能配 Referer 与 Basic 认证了（收在「高级」里，默认不展开）",
+                        "「关于」里新增开源许可详情页，可查看本应用与内置内核的许可说明",
                     ),
             ),
             VersionEntry(

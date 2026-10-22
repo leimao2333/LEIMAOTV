@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -35,6 +36,7 @@ import com.leimao.tv.feature.settings.changelog.renderBoldMarkdown
 fun SettingsScreen(
     onOpenChangelog: () -> Unit,
     onOpenSourceManager: () -> Unit,
+    onOpenLicense: () -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
 ) {
@@ -96,7 +98,7 @@ fun SettingsScreen(
         SettingRow(
             title = "开源许可",
             subtitle = "Apache-2.0；内置 VLC(libvlc) 为 LGPL-2.1+，动态链接可替换",
-            onClick = { },
+            onClick = onOpenLicense,
         )
 
         Spacer(modifier = Modifier.height(28.dp))
@@ -189,6 +191,106 @@ fun ChangelogScreen(
                 )
             }
             Spacer(modifier = Modifier.height(20.dp))
+        }
+    }
+}
+
+/**
+ * 开源许可页（SET-06）。四件套里「开源许可」的详情落点：
+ * 项目自身 Apache-2.0，内置 VLC(libvlc) 为 LGPL-2.1+ 动态链接。
+ *
+ * 只做摘要 + 关键义务，不整篇贴许可证原文 —— 电视上滚几十屏 Apache 正文没意义，
+ * 用户需要的是「能不能商用、要不要开源自己的代码」这类结论，全文留在根目录 LICENSE。
+ */
+@Composable
+fun LicenseScreen(
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+    ) {
+        Text(
+            text = "开源许可",
+            style = TvText.current.display,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+
+        LicenseBlock(
+            title = "本项目（磊毛TV）",
+            license = "Apache-2.0",
+            points =
+                listOf(
+                    "可商用、可修改、可再分发，需保留版权声明与许可文本",
+                    "不要求开源你自己的修改",
+                    "分发时需注明本软件按 Apache-2.0 许可",
+                ),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LicenseBlock(
+            title = "内置播放内核 VLC（libvlc）",
+            license = "LGPL-2.1+",
+            points =
+                listOf(
+                    "以动态链接方式集成，可被用户替换，不传染本项目源码",
+                    "修改 libvlc 本身需公开修改部分",
+                    "再分发需同时提供 libvlc 的许可文本与获取源码的途径",
+                ),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LicenseBlock(
+            title = "其余第三方依赖",
+            license = "Apache-2.0 / MIT / BSD",
+            points =
+                listOf(
+                    "仅引入 Apache-2.0 / MIT / BSD 三类许可的依赖（RULES §5.3）",
+                    "禁止 GPL / AGPL 依赖进入主工程",
+                ),
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "完整许可文本见项目根目录 LICENSE 文件。",
+            style = TvText.current.hint,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun LicenseBlock(
+    title: String,
+    license: String,
+    points: List<String>,
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = TvText.current.title,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = license,
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        points.forEach { point ->
+            Text(
+                text = "· $point",
+                style = TvText.current.body,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
         }
     }
 }

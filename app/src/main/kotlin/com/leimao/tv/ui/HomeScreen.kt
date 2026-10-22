@@ -96,6 +96,7 @@ fun HomeScreen(
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
+    onOpenLicense: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -167,6 +168,7 @@ fun HomeScreen(
                         onOpenChannel = onOpenChannel,
                         onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
+                        onOpenLicense = onOpenLicense,
                     )
                 }
             }
@@ -192,6 +194,7 @@ private fun ContentArea(
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
+    onOpenLicense: () -> Unit,
 ) {
     // 分区与模式必须自洽：模式是内容的「大前提」，分区只是它下面的入口。
     // 两者不一致时以模式为准 —— 否则切模式会出现「影视模式下还显示直播分区」的错位
@@ -223,6 +226,7 @@ private fun ContentArea(
             SettingsScreen(
                 onOpenChangelog = onOpenChangelog,
                 onOpenSourceManager = onOpenSourceManager,
+                onOpenLicense = onOpenLicense,
                 autoFocus = false,
             )
         else -> VodHomeScreen(autoFocus = false)

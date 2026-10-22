@@ -5,22 +5,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * M0 的占位播放器：**不解码任何内容**，只把状态机跑起来。
+ * 不解码任何内容的占位内核。
  *
- * 存在的意义是让「启动直达播放页 → 返回主页 → 切模式 → 回来接着播」这条链路
- * 在还没有解码器的阶段就能被走通、被验收（M0 验收项）。M1 接 Media3 时，
- * 换成 `Media3PlayerController` 即可，上层不变。
+ * 保留它有两个用处：契约测试（内核切换接口的行为基线）与「还没接内核」时的降级。
+ * 真实内核见 [Media3PlayerController]。
  *
- * 不打印任何 URL 之外的凭据信息，也不在 release 打日志（RULES §2.5、§8.6）。
+ * 不打印任何地址或凭据，也不在 release 打日志（RULES §2.5、§8.6）。
  */
 class StubPlayerController : PlayerController {
     private val _state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
-    override fun play(url: String, headers: Map<String, String>, startMs: Long) {
-        // 占位实现没有缓冲过程，直接进入 Playing；真实内核会停在 Preparing 直到首帧
-        _state.value = PlaybackState.Preparing(url)
-        _state.value = PlaybackState.Playing(url = url, positionMs = startMs)
+    private var current: PlaybackRequest? = null
+    private var lineIndex = 0
+
+    override fun play(request: PlaybackRequest) {
+        current = request
+        lineIndex = 0
+        emitPreparingThenPlaying(request)
+    }
+
+    override fun retry() {
+        current?.let { emitPreparingThenPlaying(it) }
+    }
+
+    override fun switchLine(delta: Int): Boolean {
+        val request = current ?: return false
+        val lines = request.normalizedLines
+        if (lines.size <= 1) return false
+        lineIndex = (lineIndex + delta).coerceIn(0, lines.lastIndex)
+        emitPreparingThenPlaying(request)
+        return true
     }
 
     override fun stop() {
@@ -28,6 +43,27 @@ class StubPlayerController : PlayerController {
     }
 
     override fun release() {
+        current = null
         _state.value = PlaybackState.Idle
+    }
+
+    private fun emitPreparingThenPlaying(request: PlaybackRequest) {
+        val lines = request.normalizedLines
+        val url = lines[lineIndex.coerceIn(0, lines.lastIndex)]
+        // 占位实现没有缓冲过程，直接进入 Playing；真实内核会停在 Preparing 直到首帧
+        _state.value =
+            PlaybackState.Preparing(
+                url = url,
+                channelId = request.channelId,
+                lineIndex = lineIndex,
+                lineCount = lines.size,
+            )
+        _state.value =
+            PlaybackState.Playing(
+                url = url,
+                channelId = request.channelId,
+                lineIndex = lineIndex,
+                lineCount = lines.size,
+            )
     }
 }

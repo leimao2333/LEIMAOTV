@@ -13,10 +13,10 @@ android {
         minSdk = 21
         targetSdk = 35
 
-        // versionCode 按 RULES §10.2 公式算：0×1000000 + 1×10000 + 1×100 + 0 = 10100
+        // versionCode 按 RULES §10.2 公式算：0×1000000 + 1×10000 + 2×100 + 0 = 10200
         // versionName 必须与 AppVersion.CURRENT_VERSION 逐字符相等（SYS-10，单测钉住）
-        versionCode = 10100
-        versionName = "0.1.1.0"
+        versionCode = 10200
+        versionName = "0.1.2.0"
     }
 
     buildTypes {
@@ -73,6 +73,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
+    // 台标图片的内存 / 磁盘上限在 LeimaoTvApplication 里统一配置（RULES §7）
+    implementation(libs.coil.compose)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

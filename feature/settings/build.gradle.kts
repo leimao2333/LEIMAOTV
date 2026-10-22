@@ -29,6 +29,11 @@ dependencies {
     // 应用内更新日志要读 CURRENT_VERSION / CHANGELOG（SYS-03），这层依赖是它的正当理由
     api(project(":core:version"))
     implementation(project(":core:designsystem"))
+    // 源管理页要读写源、要触发刷新（SET-03 / LIVE-03 / LIVE-04）
+    implementation(project(":core:database"))
+    implementation(project(":core:data"))
+    // SAF 选文件要 ActivityResultContracts
+    api(libs.androidx.activity.compose)
 
     testImplementation(libs.junit)
 }

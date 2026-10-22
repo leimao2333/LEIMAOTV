@@ -29,4 +29,13 @@ dependencies {
     api(project(":core:model"))
     api(project(":core:player"))
     implementation(project(":core:designsystem"))
+    // 播放画面是 View（PlayerView），Compose 侧用 AndroidView 挂上去
+    implementation(libs.androidx.media3.ui)
+    // 台标加载统一走 Coil，内存/磁盘上限在 TvApp 里统一定义（RULES §7）
+    implementation(libs.coil.compose)
+    // BackHandler：Android 13+ 的系统返回走 OnBackPressedDispatcher，
+    // 预览按键里收不到 Key.Back，必须在这一层接管「先收控制条」
+    implementation(libs.androidx.activity.compose)
+
+    testImplementation(libs.junit)
 }

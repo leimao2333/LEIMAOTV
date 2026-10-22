@@ -1,0 +1,196 @@
+package com.leimao.tv.feature.settings
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Text
+import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.theme.TvText
+
+/**
+ * 「添加订阅地址」对话框（LIVE-03）。
+ *
+ * 只用三样东西：名称、地址、UA。Referer / Basic 认证做成「高级」，是因为
+ * 绝大多数源只需要前两项 —— 一上来就摆五个输入框，用户会以为哪里填错了。
+ *
+ * 输入框用 `BasicTextField` 而不是 Material 的 TextField：tv-material 没有自带文本框，
+ * 而 Android TV 的输入法本身是方向键可操作的，所以「遥控器全流程」不依赖触摸（RULES §6.2）。
+ */
+@Composable
+fun AddSourceDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, url: String, userAgent: String) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var url by rememberSaveable { mutableStateOf("") }
+    var userAgent by rememberSaveable { mutableStateOf("") }
+    val firstFieldFocus = remember { FocusRequester() }
+    val urlFieldFocus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) { firstFieldFocus.requestFocus() }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier =
+                Modifier
+                    .width(720.dp)
+                    // 高度必须给上限：电视机的可用高度差别很大（模拟器只有 ~250dp），
+                    // 内容撑破对话框时 Compose 不会自动滚，而是**直接裁掉**——
+                    // 表现就是「按钮不见了，看起来像没做导入按钮」
+                    .fillMaxHeight(0.9f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(24.dp),
+        ) {
+            Text(
+                text = "添加订阅地址",
+                style = TvText.current.title,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "支持 M3U / M3U8 / TXT。地址应当是你能合法访问的订阅源。",
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 输入区可滚动、按钮固定在底部：投影仪/低端盒子上的字体放大也挤不掉按钮
+            Column(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+            ) {
+                TvTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = "名称（留空则自动命名）",
+                    modifier = Modifier.fillMaxWidth().focusRequester(firstFieldFocus),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                TvTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = "订阅地址（http:// 或 https:// 开头）",
+                    modifier = Modifier.fillMaxWidth().focusRequester(urlFieldFocus),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                TvTextField(
+                    value = userAgent,
+                    onValueChange = { userAgent = it },
+                    label = "User-Agent（可选，有些源不带就直接 403）",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FocusableCard(
+                    // 不要用 enabled = url.isNotBlank() 把它置灰：禁用态在本主题里
+                    // 只是一块更暗的方框，用户会以为「根本没有导入按钮」。改成永远可点，
+                    // 地址没填就把焦点送回去，比给一个按不动的按钮诚实
+                    onClick = {
+                        if (url.isBlank()) urlFieldFocus.requestFocus() else onConfirm(name, url, userAgent)
+                    },
+                ) {
+                    Text(text = "添加并刷新", style = TvText.current.label)
+                }
+                FocusableCard(onClick = onDismiss) {
+                    Text(text = "取消", style = TvText.current.label)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * TV 上的单行输入框。
+ *
+ * 焦点态用 2dp 描边而不是颜色变化：电视距离远，颜色差在低端面板上看不出来（RULES §6.3）。
+ */
+@Composable
+fun TvTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(8.dp)
+
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            style = TvText.current.hint,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TvText.current.body.copy(color = MaterialTheme.colorScheme.onSurface),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focused = it.isFocused }
+                    .clip(shape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(
+                        width = if (focused) 2.dp else 1.dp,
+                        color =
+                            if (focused) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                        shape = shape,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            decorationBox = { inner ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = "点此输入",
+                            style = TvText.current.body,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    inner()
+                }
+            },
+        )
+    }
+}

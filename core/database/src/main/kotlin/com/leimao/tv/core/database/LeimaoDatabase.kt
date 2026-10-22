@@ -8,11 +8,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.leimao.tv.core.database.dao.ChannelDao
 import com.leimao.tv.core.database.dao.ChannelLineDao
+import com.leimao.tv.core.database.dao.EpgDao
 import com.leimao.tv.core.database.dao.FavoriteDao
 import com.leimao.tv.core.database.dao.HistoryDao
 import com.leimao.tv.core.database.dao.SourceDao
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.entity.ChannelLineEntity
+import com.leimao.tv.core.database.entity.EpgChannelEntity
+import com.leimao.tv.core.database.entity.EpgProgrammeEntity
 import com.leimao.tv.core.database.entity.FavoriteEntity
 import com.leimao.tv.core.database.entity.HistoryEntity
 import com.leimao.tv.core.database.entity.SourceEntity
@@ -35,8 +38,10 @@ import com.leimao.tv.core.database.entity.SourceEntity
         ChannelLineEntity::class,
         FavoriteEntity::class,
         HistoryEntity::class,
+        EpgChannelEntity::class,
+        EpgProgrammeEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -49,6 +54,8 @@ abstract class LeimaoDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
 
     abstract fun historyDao(): HistoryDao
+
+    abstract fun epgDao(): EpgDao
 
     companion object {
         private const val DB_NAME = "leimao-tv.db"
@@ -125,9 +132,49 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 2 → 3：加节目单两张表（LIVE-20）。
+         *
+         * 仍然是纯加法：节目单是「随时可再导入一次」的派生数据，迁移里不需要也不会去搬它。
+         * 用户已有的源 / 频道 / 收藏 / 历史一行都不动。
+         */
+        val MIGRATION_2_3: Migration =
+            object : Migration(2, 3) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `epg_channel` (" +
+                            "`id` TEXT NOT NULL, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`normalizedName` TEXT NOT NULL, " +
+                            "PRIMARY KEY(`id`))",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_epg_channel_normalizedName` " +
+                            "ON `epg_channel` (`normalizedName`)",
+                    )
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `epg_programme` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`epgChannelId` TEXT NOT NULL, " +
+                            "`startAt` INTEGER NOT NULL, " +
+                            "`endAt` INTEGER NOT NULL, " +
+                            "`title` TEXT NOT NULL, " +
+                            "`description` TEXT)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_epg_programme_epgChannelId` " +
+                            "ON `epg_programme` (`epgChannelId`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_epg_programme_startAt` " +
+                            "ON `epg_programme` (`startAt`)",
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

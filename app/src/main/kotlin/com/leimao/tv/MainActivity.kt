@@ -1,6 +1,8 @@
 package com.leimao.tv
 
 import android.os.Bundle
+import android.util.Log
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -14,6 +16,42 @@ import com.leimao.tv.core.designsystem.theme.TvTheme
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.debug.DebugSeed
 import com.leimao.tv.ui.LeimaoTvApp
+
+/**
+ * 电脑键盘 → 遥控器的按键映射。
+ *
+ * 为什么需要它：在模拟器（或插了键盘的盒子）上验收时，方向键散落在主机键盘各处，
+ * 每调一次界面都要来回摸鼠标。统一成「小键盘方向 + 小键盘回车 + ESC」，一只手就能走完全部交互，
+ * 测试成本降下来，验收才会真的逐条做。
+ *
+ * | 键盘 | 等价遥控器键 |
+ * |---|---|
+ * | 小键盘 8 / 2 / 4 / 6 | ↑ / ↓ / ← / → |
+ * | 小键盘 Enter | OK |
+ * | ESC | 返回 |
+ *
+ * 只映射这几类，别的键原样放行 —— 输入订阅地址时还得靠它们。
+ */
+internal object KeyRemap {
+    /** 返回等价的遥控器键码；不需要映射时返回 null */
+    fun targetOf(keyCode: Int): Int? =
+        when (keyCode) {
+            KeyEvent.KEYCODE_NUMPAD_8 -> KeyEvent.KEYCODE_DPAD_UP
+            KeyEvent.KEYCODE_NUMPAD_2 -> KeyEvent.KEYCODE_DPAD_DOWN
+            KeyEvent.KEYCODE_NUMPAD_4 -> KeyEvent.KEYCODE_DPAD_LEFT
+            KeyEvent.KEYCODE_NUMPAD_6 -> KeyEvent.KEYCODE_DPAD_RIGHT
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> KeyEvent.KEYCODE_DPAD_CENTER
+            KeyEvent.KEYCODE_ESCAPE -> KeyEvent.KEYCODE_BACK
+            else -> null
+        }
+
+    /**
+     * 把一次按键换码。保留按下/抬起的成对关系 —— 只发 ACTION_DOWN 会让
+     * `clickable` 收不到抬手事件，按钮变成「按了不算点」。
+     */
+    fun translate(event: KeyEvent, target: Int): KeyEvent =
+        KeyEvent(event.downTime, event.eventTime, event.action, target, event.repeatCount)
+}
 
 /**
  * 唯一的 Activity。它的职责只有三件：建容器、算落点、挂导航图。
@@ -54,5 +92,35 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 键盘映射的落点：在 Activity 这一层换码，Compose 收到的事件就跟遥控器发的一模一样，
+     * 所有页面（含 Dialog、输入框、BackHandler）都不用感知「这次是键盘还是遥控器」。
+     *
+     * ESC 特殊处理：直接走 [onBackPressedDispatcher]，这样能命中 Compose 的 BackHandler，
+     * 效果等价于遥控器返回键（§6.5「控制条开着时返回先收控制条」也照样成立）。
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 排查「键盘按了没反应」时，logcat 里这两行就是全部证据：
+        // 有 KEY 说明事件到了 Activity，有 REMAP 说明映射命中；两行都没有 = 事件根本没进来
+        // （窗口没焦点，或输入法把键吃掉了）
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            Log.d(TAG, "KEY keyCode=${event.keyCode} scan=${event.scanCode} source=${event.source}")
+        }
+
+        val target = KeyRemap.targetOf(event.keyCode) ?: return super.dispatchKeyEvent(event)
+        Log.d(TAG, "REMAP ${event.keyCode} -> $target action=${event.action}")
+
+        if (target == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP) onBackPressedDispatcher.onBackPressed()
+            return true
+        }
+
+        return super.dispatchKeyEvent(KeyRemap.translate(event, target))
+    }
+
+    private companion object {
+        const val TAG = "KeyRemap"
     }
 }

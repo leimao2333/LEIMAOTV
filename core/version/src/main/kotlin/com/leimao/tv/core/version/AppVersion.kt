@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.1.1.0"
+    const val CURRENT_VERSION: String = "0.1.2.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,21 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.1.2.0",
+                date = "2026-10-22",
+                changes =
+                    listOf(
+                        "直播真的能播了：接入 Media3 内核，硬解直出，换台不再黑屏",
+                        "频道列表：分组浏览、★收藏、当前台高亮，按菜单键随时拉出来",
+                        "遥控器手感：上下换台到头会翻回去；数字键输入频道号 2 秒内自动跳转",
+                        "播放页顶部显示正在播什么、下一档是什么，几秒后自动淡出，不挡画面",
+                        "可以导入节目单（XMLTV）了，同一个台的多种写法会自动合并",
+                        "源管理：地址打码显示，刷新失败会直接说原因",
+                        "按键映射：小键盘方向键 / 小键盘回车 / ESC 可当遥控器用，方便在电脑上试",
+                        "修复：明亮画面上的白字看不清、控制条按钮按不动、对话框按钮被裁出屏幕",
+                    ),
+            ),
             VersionEntry(
                 version = "0.1.1.0",
                 date = "2026-10-21",

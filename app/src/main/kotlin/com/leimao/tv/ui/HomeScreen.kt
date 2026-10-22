@@ -34,7 +34,10 @@ import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.AppMode
+import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.SearchScope
+import com.leimao.tv.feature.iptv.ChannelBrowser
+import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.vod.VodHomeScreen
@@ -42,18 +45,36 @@ import com.leimao.tv.feature.vod.VodHomeScreen
 /**
  * 主页左侧导航项。
  *
- * [mode] 非空表示「点它要切到哪个板块」—— 电影/电视剧这些分类本来就在影视板块里，
- * 从直播板块点进去必须顺带把模式切过去，否则用户会看到一个空内容区还以为坏了。
+ * **直播模式只留「直播」「搜索」**：电影/电视剧/动漫/综艺/体育都是影视板块的栏目，
+ * 摆在直播模式的导航里会让"看电视"这件事变得比它该有的样子复杂。
+ * 它们没有消失 —— 直播模式的搜索照样能搜到这些类型（见 [IPTV_ALLOWED_TYPES]），
+ * 只是不提供"从导航直接跳进栏目"的路径，要浏览栏目请先切到影视模式。
+ *
+ * [mode] 非空表示「点它要切到哪个板块」—— 影视栏目本来就在影视板块里，
+ * 从别处点进去必须顺带把模式切过去，否则用户会看到一个空内容区还以为坏了。
+ *
+ * [visibleIn] 决定这一项出现在哪些模式的导航里。不写成"直播模式隐藏哪些"，
+ * 是因为以后加模式时，漏写等于默认可见 —— 那正是这次要避免的错。
  */
-enum class HomeSection(val label: String, val mode: AppMode?) {
-    LIVE("直播", AppMode.LIVE),
-    MOVIE("电影", AppMode.VOD),
-    SERIES("电视剧", AppMode.VOD),
-    ANIME("动漫", AppMode.VOD),
-    VARIETY("综艺", AppMode.VOD),
-    SPORTS("体育", AppMode.VOD),
-    SEARCH("搜索", null),
-    SETTINGS("设置", null),
+enum class HomeSection(
+    val label: String,
+    val mode: AppMode?,
+    val visibleIn: Set<AppMode>,
+) {
+    LIVE("直播", AppMode.LIVE, setOf(AppMode.LIVE)),
+    MOVIE("电影", AppMode.VOD, setOf(AppMode.VOD)),
+    SERIES("电视剧", AppMode.VOD, setOf(AppMode.VOD)),
+    ANIME("动漫", AppMode.VOD, setOf(AppMode.VOD)),
+    VARIETY("综艺", AppMode.VOD, setOf(AppMode.VOD)),
+    SPORTS("体育", AppMode.VOD, setOf(AppMode.VOD)),
+    SEARCH("搜索", null, setOf(AppMode.LIVE, AppMode.VOD)),
+    SETTINGS("设置", null, setOf(AppMode.LIVE, AppMode.VOD)),
+    ;
+
+    companion object {
+        /** 某个模式下该显示的导航项，顺序取枚举声明顺序 */
+        fun forMode(mode: AppMode): List<HomeSection> = entries.filter { mode in it.visibleIn }
+    }
 }
 
 /**
@@ -70,6 +91,10 @@ fun HomeScreen(
     onSectionChange: (HomeSection) -> Unit,
     onModeChange: (AppMode) -> Unit,
     onOpenPlayer: () -> Unit,
+    channels: List<Channel>,
+    favoriteIds: Set<Long>,
+    onOpenChannel: (Long) -> Unit,
+    onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -111,7 +136,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    HomeSection.entries.forEachIndexed { index, item ->
+                    HomeSection.forMode(mode).forEachIndexed { index, item ->
                         NavItem(
                             section = item,
                             selected = section == item,
@@ -137,6 +162,10 @@ fun HomeScreen(
                         section = section,
                         mode = mode,
                         onOpenPlayer = onOpenPlayer,
+                        channels = channels,
+                        favoriteIds = favoriteIds,
+                        onOpenChannel = onOpenChannel,
+                        onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
                     )
                 }
@@ -158,6 +187,10 @@ private fun ContentArea(
     section: HomeSection,
     mode: AppMode,
     onOpenPlayer: () -> Unit,
+    channels: List<Channel>,
+    favoriteIds: Set<Long>,
+    onOpenChannel: (Long) -> Unit,
+    onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
 ) {
     // 分区与模式必须自洽：模式是内容的「大前提」，分区只是它下面的入口。
@@ -172,7 +205,14 @@ private fun ContentArea(
         }
 
     when (effectiveSection) {
-        HomeSection.LIVE -> LiveSectionContent(mode = mode, onOpenPlayer = onOpenPlayer)
+        HomeSection.LIVE ->
+            LiveSectionContent(
+                mode = mode,
+                channels = channels,
+                favoriteIds = favoriteIds,
+                onOpenPlayer = onOpenPlayer,
+                onOpenChannel = onOpenChannel,
+            )
         HomeSection.SEARCH ->
             SearchScreen(
                 scope = if (mode == AppMode.LIVE) SearchScope.IPTV else SearchScope.VOD,
@@ -182,6 +222,7 @@ private fun ContentArea(
         HomeSection.SETTINGS ->
             SettingsScreen(
                 onOpenChangelog = onOpenChangelog,
+                onOpenSourceManager = onOpenSourceManager,
                 autoFocus = false,
             )
         else -> VodHomeScreen(autoFocus = false)
@@ -189,21 +230,37 @@ private fun ContentArea(
 }
 
 /**
- * 直播板块的内容区（HOME-06）。M0 只有空态与「回到播放页」入口，
- * 收藏 / 最近观看要等 M1 的 LIVE-14 / LIVE-15 才有数据。
+ * 直播板块的内容区（HOME-06 / LIVE-10）。
+ *
+ * 这里是「主动挑台」的入口：分组 + 频道列表。启动时不经过它（启动直达播放，§6.6），
+ * 所以它可以慢一点、可以一次把 5000 条频道都列出来，不占冷启动的预算。
  */
 @Composable
 private fun LiveSectionContent(
     mode: AppMode,
+    channels: List<Channel>,
+    favoriteIds: Set<Long>,
     onOpenPlayer: () -> Unit,
+    onOpenChannel: (Long) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
-            text = "直播",
+            text = if (mode == AppMode.LIVE) "直播" else "直播（影视模式下也可切回）",
             style = TvText.current.display,
             color = MaterialTheme.colorScheme.onBackground,
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text =
+                if (channels.isEmpty()) {
+                    "还没有频道。去「源管理」添加一个订阅地址，或在调试包里首次启动自动种一条演示源。"
+                } else {
+                    "共 ${channels.size} 个频道 · ${channels.map { it.groupName }.distinct().size} 个分组"
+                },
+            style = TvText.current.hint,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
 
         FocusableCard(onClick = onOpenPlayer) {
             Text(
@@ -212,18 +269,17 @@ private fun LiveSectionContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "收藏频道 / 最近观看 / 分组快捷入口",
-            style = TvText.current.title,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "M0 还没有频道数据。调试包首次启动会种一条演示源（example.com），用来走通启动链路。",
-            style = TvText.current.hint,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (channels.isNotEmpty()) {
+            ChannelBrowser(
+                groups = remember(channels) { groupChannels(channels) },
+                selectedChannelId = null,
+                onChannelClick = { channel -> onOpenChannel(channel.id) },
+                favoriteIds = favoriteIds,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

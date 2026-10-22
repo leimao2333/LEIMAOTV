@@ -29,7 +29,23 @@ object DebugSeed {
                 NewSource(name = DEMO_SOURCE_NAME, url = "$DEMO_HOST/demo.m3u"),
             )
 
-        val channels =
+        val channels = mutableListOf<MergedChannel>()
+
+        // 如果设备上有本地演示视频（`adb shell screenrecord` 生成的那种），补一条能真正解码的台。
+        // 没有也不影响：其余演示台只有地址，用来验证失败降级链
+        localDemoFile(container)?.let { uri ->
+            channels +=
+                MergedChannel(
+                    name = "本地演示画面（调试）",
+                    groupName = "演示分组 A",
+                    tvgId = "demo-local",
+                    logoUrl = null,
+                    numberInPlaylist = 0,
+                    lines = listOf(uri),
+                )
+        }
+
+        channels +=
             (1..DEMO_CHANNEL_COUNT).map { number ->
                 MergedChannel(
                     name = "演示频道 $number",
@@ -48,4 +64,12 @@ object DebugSeed {
 
         container.writeDemoChannels(sourceId = sourceId, channels = channels)
     }
+
+    /** 找本地演示视频：只认应用自己的外部目录，不需要任何存储权限 */
+    private fun localDemoFile(container: AppContainer): String? {
+        val file = container.appContext.getExternalFilesDir(null)?.resolve(DEMO_FILE_NAME) ?: return null
+        return if (file.exists() && file.length() > 0) file.toURI().toString() else null
+    }
+
+    private const val DEMO_FILE_NAME = "demo.mp4"
 }

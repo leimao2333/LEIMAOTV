@@ -27,8 +27,11 @@ Thumbs.db
 *~
 
 # 本地调试产物（截图 / 界面层级转储 / 日志），随手生成、不入库
+# 验收截图同理：docs/verify/ 是模拟器实拍的证据目录，单张 2~3MB，77 张就 30MB，
+# 进 git 会把仓库撑成一个图片仓库。留在本地用作验收凭据，结论写进 docs/ 的正文
 /*.png
 /*.xml
+docs/verify/
 *.log
 crashlogs/
 .backup/

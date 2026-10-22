@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文 HTTP 必须放行。
+
+  这不是「图省事把安全关掉」：用户自己添加的 IPTV 源里，绝大多数是 http:// 的
+  m3u8 / ts 地址（台站直连、聚合列表基本都是），Android 9+ 默认拒绝向明文地址发请求，
+  结果是**频道列表能拉到、一点播放就黑屏**，而失败原因埋在 ExoPlayer 的堆栈里，
+  用户在界面上什么也看不到。
+
+  暴露面并没有因此变大：应用本来就要连用户填的那个地址，这里没有账号体系、
+  不上传任何数据（RULES §1、§2.3），放行明文只是让「用户本来就同意的连接」能建立起来。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

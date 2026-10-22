@@ -157,10 +157,14 @@
 
 ### 2.5 节目单与设置
 
-- [ ] **LIVE-20** XMLTV 解析 ｜ P1
-  - [ ] `start/stop/channel/title/desc`；时区与跨天边界单测
-- [ ] **LIVE-21** 当前 / 下一节目 ｜ P1
-  - [ ] 播放页与列表展示
+- [x] **LIVE-20** XMLTV 解析 ｜ P1
+  - [x] `start/stop/channel/title/desc`；时区与跨天边界单测
+  - [x] 同类合并（`normalizeEpgName` 去中间分隔符）：`CCTV-1 高清` 与 `CCTV1` 归并
+  - [x] 源管理页「导入节目单」（SAF 选文件）→ 解析 → 合并 → 落库（Room v3）
+  - [x] Android SAX 特性差异：`disallow-doctype-decl` 不支持时不能整次失败
+- [x] **LIVE-21** 当前 / 下一节目 ｜ P1
+  - [x] 播放页顶部展示「正在播 … 结束 · 下一档 …」，每分钟对表、换台立刻重算
+  - [ ] 频道列表 / 节目单网格里的展示（归 LIVE-22）
 - [ ] **LIVE-07** 定时刷新 ｜ P1
   - [ ] WorkManager：启动刷新 + 每 N 小时（可配）
 - [ ] **SET-01** 播放设置 ｜ P0

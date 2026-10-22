@@ -7,6 +7,9 @@ package com.leimao.tv.core.model
 object TvRoute {
     const val COMPLIANCE = "compliance"
     const val ADD_SOURCE = "add_source"
+
+    /** 源管理（SET-03）。首启引导与设置里的入口共用同一页，只有返回行为不同 */
+    const val SOURCE_MANAGER = "source_manager"
     const val HOME = "home"
     const val SEARCH = "search"
     const val SETTINGS = "settings"

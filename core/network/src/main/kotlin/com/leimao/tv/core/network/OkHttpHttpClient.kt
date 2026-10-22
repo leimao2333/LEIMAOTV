@@ -69,3 +69,13 @@ class OkHttpHttpClient(
                 .build()
     }
 }
+
+/**
+ * 全应用共用的 OkHttp 实例。
+ *
+ * 抓取播放列表与播放视频流走同一个连接池：很多源对同一域名的连接数有限制，
+ * 两套连接池等于自己跟自己抢配额。放在这里而不是各模块 new，也是为了只有一个地方能调参。
+ */
+object AppHttp {
+    val client: OkHttpClient by lazy { OkHttpHttpClient.defaultClient() }
+}

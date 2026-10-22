@@ -103,10 +103,10 @@
 - [x] **LIVE-13** 同名频道合并 + 线路 ｜ P1
   - [x] 合并规则（名称归一 + tvg-id 优先）与单测
   - [x] 播放失败自动切下一条线路；手动切线路入口（←→）
-- [ ] **LIVE-06** 自定义请求头 ｜ P0
+- [x] **LIVE-06** 自定义请求头 ｜ P0
   - [x] 每源 `userAgent` / `referer` / Basic 认证字段；注入到播放（`setDefaultRequestProperties`）与解析请求
   - [x] 添加源对话框可填 `User-Agent`
-  - [ ] 对话框补 `Referer` 与 Basic 账号密码（字段已在库和链路上，只差输入口）
+  - [x] 对话框补 `Referer` 与 Basic 账号密码（高级折叠区，默认收起）
 
 ### 2.2 源管理入口
 

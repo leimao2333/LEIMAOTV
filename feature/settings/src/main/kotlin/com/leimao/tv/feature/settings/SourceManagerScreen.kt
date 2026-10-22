@@ -277,7 +277,7 @@ fun SourceManagerScreen(
     if (adding) {
         AddSourceDialog(
             onDismiss = { adding = false },
-            onConfirm = { name, url, userAgent ->
+            onConfirm = { name, url, userAgent, referer, basicUser, basicPass ->
                 adding = false
                 scope.launch {
                     busy = true
@@ -287,6 +287,9 @@ fun SourceManagerScreen(
                                 name = name.ifBlank { "订阅源" },
                                 url = url.trim(),
                                 userAgent = userAgent.takeIf { it.isNotBlank() },
+                                referer = referer.takeIf { it.isNotBlank() },
+                                basicUser = basicUser.takeIf { it.isNotBlank() },
+                                basicPass = basicPass.takeIf { it.isNotBlank() },
                             ),
                         )
                     val result = refresher.refresh(id)

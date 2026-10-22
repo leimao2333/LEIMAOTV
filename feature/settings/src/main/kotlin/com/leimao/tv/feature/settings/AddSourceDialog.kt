@@ -49,11 +49,22 @@ import com.leimao.tv.core.designsystem.theme.TvText
 @Composable
 fun AddSourceDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, url: String, userAgent: String) -> Unit,
+    onConfirm: (
+        name: String,
+        url: String,
+        userAgent: String,
+        referer: String,
+        basicUser: String,
+        basicPass: String,
+    ) -> Unit,
 ) {
     var name by rememberSaveable { mutableStateOf("") }
     var url by rememberSaveable { mutableStateOf("") }
     var userAgent by rememberSaveable { mutableStateOf("") }
+    var referer by rememberSaveable { mutableStateOf("") }
+    var basicUser by rememberSaveable { mutableStateOf("") }
+    var basicPass by rememberSaveable { mutableStateOf("") }
+    var advanced by rememberSaveable { mutableStateOf(false) }
     val firstFieldFocus = remember { FocusRequester() }
     val urlFieldFocus = remember { FocusRequester() }
 
@@ -112,6 +123,53 @@ fun AddSourceDialog(
                     label = "User-Agent（可选，有些源不带就直接 403）",
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+                // 高级项默认收起：绝大多数源只需要「名称 + 地址 + UA」，
+                // Referer / Basic 认证一摆出来用户会以为哪里填错了（LIVE-06）
+                FocusableCard(
+                    onClick = { advanced = !advanced },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "高级（Referer / 认证）",
+                            style = TvText.current.label,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = if (advanced) "▲ 收起" else "▼ 展开",
+                            style = TvText.current.hint,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                if (advanced) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TvTextField(
+                        value = referer,
+                        onValueChange = { referer = it },
+                        label = "Referer（可选，防盗链源需要）",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TvTextField(
+                        value = basicUser,
+                        onValueChange = { basicUser = it },
+                        label = "认证账号（可选，Basic 认证）",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TvTextField(
+                        value = basicPass,
+                        onValueChange = { basicPass = it },
+                        label = "认证密码（可选，只存本机不上传）",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -121,7 +179,11 @@ fun AddSourceDialog(
                     // 只是一块更暗的方框，用户会以为「根本没有导入按钮」。改成永远可点，
                     // 地址没填就把焦点送回去，比给一个按不动的按钮诚实
                     onClick = {
-                        if (url.isBlank()) urlFieldFocus.requestFocus() else onConfirm(name, url, userAgent)
+                        if (url.isBlank()) {
+                            urlFieldFocus.requestFocus()
+                        } else {
+                            onConfirm(name, url, userAgent, referer, basicUser, basicPass)
+                        }
                     },
                 ) {
                     Text(text = "添加并刷新", style = TvText.current.label)

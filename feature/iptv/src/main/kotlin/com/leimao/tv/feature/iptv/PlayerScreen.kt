@@ -51,6 +51,8 @@ import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.epg.EpgProgramme
+import com.leimao.tv.core.model.epg.buildEpgTimeline
 import com.leimao.tv.core.player.PlaybackState
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -101,6 +103,11 @@ data class PlayerUiState(
     val favoriteIds: Set<Long> = emptySet(),
     val loadingChannels: Boolean = false,
     val programme: ProgrammeLine? = null,
+    /**
+     * 当前频道的节目单（时间窗内的，已排序）。节目单网格（LIVE-22）直接用这一份，
+     * 打开时不再查一次库 —— 顶部「正在播 / 下一档」用的也是它，两处同一个数据源就不会打架。
+     */
+    val epgProgrammes: List<EpgProgramme> = emptyList(),
 )
 
 /**
@@ -136,6 +143,7 @@ fun PlayerScreen(
 ) {
     var controlsVisible by remember { mutableStateOf(false) }
     var drawerOpen by remember { mutableStateOf(false) }
+    var epgOpen by remember { mutableStateOf(false) }
     var numberBuffer by remember { mutableStateOf("") }
     var interactionTick by remember { mutableIntStateOf(0) }
 
@@ -196,14 +204,19 @@ fun PlayerScreen(
         }
     }
 
-    // 返回键的第一层含义（PLAY-04 / §6.5）：控制条或抽屉开着时，先收它们，别一路退回主页。
+    // 返回键的第一层含义（PLAY-04 / §6.5）：节目单、抽屉、控制条开着时先收它们。
     //
-    // 为什么不能只靠 onPreviewKeyEvent 里的 Key.Back：Android 13+ 的系统返回走
-    // OnBackPressedDispatcher，Compose 的预览按键收不到 Key.Back，结果是
-    // 「控制条还开着，人已经回主页了」。这里用 enabled 做二元开关：有东西可收时接管，
-    // 没有时把返回让给路由层，由它回主页。
-    BackHandler(enabled = drawerOpen || controlsVisible) {
-        if (drawerOpen) drawerOpen = false else controlsVisible = false
+    // 这里必须**无条件接管**（enabled 恒为 true），把「无可收时回主页」也收进来：
+    // Compose 的 effect 按先子后父执行，路由层（外层）的 BackHandler 注册得更晚、
+    // 优先级更高 —— 有条件接管（enabled=false 时让出）根本轮不到本页，
+    // 实测返回键会直接跳过网格/抽屉回主页。
+    BackHandler {
+        when {
+            epgOpen -> epgOpen = false
+            drawerOpen -> drawerOpen = false
+            controlsVisible -> controlsVisible = false
+            else -> onBack()
+        }
     }
 
     val playback = state.playback
@@ -227,6 +240,24 @@ fun PlayerScreen(
                 .focusRequester(rootFocus)
                 .focusable()
                 .onPreviewKeyEvent { event ->
+                    // 节目单网格开着时，按键全部交给网格里的焦点系统。
+                    //
+                    // 这里必须返回 false（放行）而不是 true（消费）：网格里「左右移动」
+                    // 靠的就是焦点系统，一旦在预览阶段把方向键吞掉，表现就是「按左右没反应」
+                    // —— 第一版就是这么写的，实测确实一动不动。
+                    // 放行也不会误触发放映页的动作：下面的 handleKey 不再调用，换台与切线路都不会发生；
+                    // 焦点走到最后一个块之后事件自然没人处理，什么也不做才是对的。
+                    if (epgOpen) {
+                        // BACK 键不会自动进 OnBackPressedDispatcher（焦点在网格卡片上时，
+                        // 实测系统返回被 Compose 的按键链吃掉，BackHandler 收不到）——
+                        // 所以在这里显式拦下，行为与 ESC（直调 dispatcher）保持一致。
+                        if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                            epgOpen = false
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+
                     // 任何一次按键都算「用户在操作」：HUD 立刻亮起来，计时器归零
                     if (event.type == KeyEventType.KeyDown) {
                         hudVisible = true
@@ -319,6 +350,10 @@ fun PlayerScreen(
                             drawerOpen = true
                             controlsVisible = false
                         },
+                        onOpenEpg = {
+                            epgOpen = true
+                            controlsVisible = false
+                        },
                         onSwitchLine = onSwitchLine,
                         onToggleFavorite = onToggleFavorite,
                         onOpenSourceManager = onOpenSourceManager,
@@ -344,6 +379,21 @@ fun PlayerScreen(
                     drawerOpen = false
                     onSelectChannel(channel.id)
                 },
+            )
+        }
+
+        // 节目单网格盖在最上层：它是一块完整的横向时间轴，和抽屉不同时出现
+        if (epgOpen) {
+            // 窗口起点按「打开这一刻」算：上一轮打开过又关了，再打开要从现在重新铺，
+            // 而不是接着上次那个已经过去十分钟的窗口
+            val timeline =
+                remember(state.epgProgrammes) {
+                    buildEpgTimeline(state.epgProgrammes, System.currentTimeMillis())
+                }
+            EpgGridOverlay(
+                channelName = state.channel?.name.orEmpty(),
+                timeline = timeline,
+                nowMillis = System.currentTimeMillis(),
             )
         }
     }
@@ -454,6 +504,7 @@ private fun ControlBar(
     state: PlayerUiState,
     firstFocus: FocusRequester,
     onOpenDrawer: () -> Unit,
+    onOpenEpg: () -> Unit,
     onSwitchLine: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenSourceManager: () -> Unit,
@@ -471,6 +522,9 @@ private fun ControlBar(
     ) {
         FocusableCard(onClick = onOpenDrawer, modifier = Modifier.focusRequester(firstFocus)) {
             Text(text = "频道", style = TvText.current.label)
+        }
+        FocusableCard(onClick = onOpenEpg) {
+            Text(text = "节目单", style = TvText.current.label)
         }
         FocusableCard(onClick = onToggleFavorite) {
             Text(text = if (isFavorite) "★ 已收藏" else "☆ 收藏", style = TvText.current.label)

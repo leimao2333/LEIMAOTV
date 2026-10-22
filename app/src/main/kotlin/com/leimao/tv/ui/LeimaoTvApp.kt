@@ -21,6 +21,9 @@ import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.SearchScope
 import com.leimao.tv.core.model.TvRoute
+import com.leimao.tv.core.model.epg.EpgProgramme
+import com.leimao.tv.core.model.epg.currentAt
+import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.network.BasicAuth
 import com.leimao.tv.core.network.RequestHeaders
@@ -192,6 +195,7 @@ private fun PlayerRoute(
     var current by remember { mutableStateOf<Channel?>(null) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var programme by remember { mutableStateOf<ProgrammeLine?>(null) }
+    var epgProgrammes by remember { mutableStateOf<List<EpgProgramme>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     suspend fun startChannel(targetId: Long) {
@@ -202,6 +206,9 @@ private fun PlayerRoute(
         val config = container.channelRepository.playbackConfig(channel.id) ?: return
 
         current = channel
+        // 换台先清空上一个台的节目单：留着的话打开网格会看到上一个台的节目
+        // 铺在当前这个台的名字下面，比空白更糟
+        epgProgrammes = emptyList()
         container.player.play(
             PlaybackRequest(
                 channelId = channel.id,
@@ -225,23 +232,33 @@ private fun PlayerRoute(
 
     // 节目单对表：跨过整点要换成下一档，不刷新就会一直挂着上一档的名字。
     // 跟着 current 一起重算 —— 换台必须立刻换成新台的节目，不能等这一分钟走完。
+    // 一次查询同时喂两处：顶部的「正在播 / 下一档」与节目单网格（LIVE-22），
+    // 两边各自查库会出现「顶部说这档、网格说那档」的自相矛盾。
     LaunchedEffect(current?.id) {
         val channel = current ?: return@LaunchedEffect
         while (true) {
-            val nowNext = container.epgRepository.nowNext(channel.name, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            val list = container.epgRepository.programmesFor(channel.name, now)
+            epgProgrammes = list
+
+            val currentProgramme = list.currentAt(now)
+            val nextProgramme = list.nextAfter(now)
             programme =
                 ProgrammeLine(
-                    current = nowNext.current?.title,
-                    currentEndsAt = nowNext.current?.endAt,
-                    next = nowNext.next?.title,
-                    nextStartsAt = nowNext.next?.startAt,
+                    current = currentProgramme?.title,
+                    currentEndsAt = currentProgramme?.endAt,
+                    next = nextProgramme?.title,
+                    nextStartsAt = nextProgramme?.startAt,
                 ).takeUnless { it.isEmpty }
+
             delay(EPG_REFRESH_MS)
         }
     }
 
-    BackHandler { onBackToHome() }
-
+    // 返回回主页这件事由 PlayerScreen 内部统一调度（先收节目单/抽屉/控制条，
+    // 无可收才回调 onBack）。这里不能自己挂 BackHandler：Compose 的 effect 先子后父，
+    // 外层注册得更晚、优先级更高，会把内层的返回处理整个抢走（实测：网格开着按返回
+    // 直接回主页）。onBackToHome 通过参数传下去。
     PlayerScreen(
         state =
             PlayerUiState(
@@ -251,6 +268,7 @@ private fun PlayerRoute(
                 favoriteIds = favoriteIds,
                 loadingChannels = loadingChannels && channels.isEmpty(),
                 programme = programme,
+                epgProgrammes = epgProgrammes,
             ),
         videoPlayer = (container.player as? VideoSurfaceHost)?.videoPlayer,
         onSwitchChannel = { delta ->

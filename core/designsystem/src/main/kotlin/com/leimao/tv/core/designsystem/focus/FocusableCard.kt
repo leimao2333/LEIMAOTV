@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -56,6 +57,12 @@ fun FocusableCard(
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
     enabled: Boolean = true,
+    /**
+     * 内容内边距。默认值适合按钮这类「宽度由内容决定」的块；
+     * 宽度受限的块（节目单网格里 15 分钟档只有 60dp 宽）要传更小的值，
+     * 否则 40dp 的水平内边距会把标题挤成一个字。
+     */
+    contentPadding: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
     content: @Composable BoxScope.() -> Unit,
 ) {
     val visuals = LocalTvFocusVisuals.current
@@ -94,7 +101,7 @@ fun FocusableCard(
                 }
                 .background(backgroundColor, visuals.shape)
                 .focusRing(focused)
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(contentPadding),
     ) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             content()

@@ -18,6 +18,7 @@ data class Source(
     val referer: String? = null,
     val basicUser: String? = null,
     val basicPass: String? = null,
+    val sortOrder: Int = 0,
 ) {
     val hasCustomHeaders: Boolean
         get() = !userAgent.isNullOrBlank() || !referer.isNullOrBlank() || !basicUser.isNullOrBlank()

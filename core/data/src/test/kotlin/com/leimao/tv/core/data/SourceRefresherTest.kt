@@ -220,5 +220,11 @@ class SourceRefresherTest {
             val index = data.indexOfFirst { it.id == id }
             if (index >= 0) data[index] = data[index].copy(updatedAt = at, lastRefreshNote = note)
         }
+
+        override suspend fun move(id: Long, direction: Int) = Unit
+
+        override suspend fun exportJson(): String = ""
+
+        override suspend fun importJson(json: String): Int = 0
     }
 }

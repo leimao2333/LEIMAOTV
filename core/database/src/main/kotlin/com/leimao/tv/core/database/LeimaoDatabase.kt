@@ -44,7 +44,7 @@ import com.leimao.tv.core.database.entity.SourceEntity
         EpgProgrammeEntity::class,
         EpgSourceEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -200,9 +200,25 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 4 → 5：给源加 sortOrder 列（SET-03 上移/下移排序）。
+         *
+         * 纯加法 + 回填：既有行按 id 顺序补成 0,1,2…，保证升级后顺序与之前一致。
+         * 源 / 频道 / 收藏 / 历史一行都不搬。
+         */
+        val MIGRATION_4_5: Migration =
+            object : Migration(4, 5) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE `source` ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0")
+                    // 回填：直接用 id 作排序值，与旧的「按 id 排序」语义完全一致（id 单调递增）。
+                    // 新源追加时走 maxSortOrder()+1，仍能排到末尾。
+                    db.execSQL("UPDATE `source` SET `sortOrder` = `id`")
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }

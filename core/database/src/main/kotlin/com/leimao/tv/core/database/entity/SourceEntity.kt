@@ -29,4 +29,6 @@ data class SourceEntity(
     val updatedAt: Long = 0,
     /** 上一次刷新的结果，空串表示从未成功；用于源管理页显示「上次更新」与失败原因 */
     val lastRefreshNote: String? = null,
+    /** 列表里的显示顺序（SET-03 上移/下移）。0 起递增，导入时按 JSON 里的顺序续排 */
+    val sortOrder: Int = 0,
 )

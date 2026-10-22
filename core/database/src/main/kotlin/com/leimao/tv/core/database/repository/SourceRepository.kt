@@ -21,6 +21,15 @@ interface SourceRepository {
 
     /** 刷新结束后记一笔：成功写「上次更新时间」，失败写原因（源管理页直接展示） */
     suspend fun markRefreshed(id: Long, at: Long, note: String?)
+
+    /** 上移/下移（SET-03）。direction = -1 上移、+1 下移；边界处不动作 */
+    suspend fun move(id: Long, direction: Int)
+
+    /** 把全部源（含停用）序列化成 JSON，供导出备份（SET-03） */
+    suspend fun exportJson(): String
+
+    /** 从导出的 JSON 恢复源，追加到现有列表末尾（不覆盖、不按 id 对齐） */
+    suspend fun importJson(json: String): Int
 }
 
 class RoomSourceRepository(
@@ -36,8 +45,9 @@ class RoomSourceRepository(
 
     override suspend fun countEnabled(): Int = dao.countEnabled()
 
-    override suspend fun add(source: NewSource): Long =
-        dao.insert(
+    override suspend fun add(source: NewSource): Long {
+        val nextOrder = dao.maxSortOrder() + 1
+        return dao.insert(
             SourceEntity(
                 type = source.type,
                 name = source.name,
@@ -47,14 +57,53 @@ class RoomSourceRepository(
                 basicUser = source.basicUser?.takeIf { it.isNotBlank() },
                 basicPass = source.basicPass?.takeIf { it.isNotBlank() },
                 enabled = true,
+                sortOrder = nextOrder,
             ),
         )
+    }
 
     override suspend fun delete(id: Long) = dao.deleteById(id)
 
     override suspend fun setEnabled(id: Long, enabled: Boolean) = dao.setEnabled(id, enabled)
 
     override suspend fun markRefreshed(id: Long, at: Long, note: String?) = dao.markRefreshed(id, at, note)
+
+    override suspend fun move(id: Long, direction: Int) {
+        val ordered = dao.listAll()
+        val index = ordered.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val target = index + direction
+        if (target < 0 || target >= ordered.size) return
+        val a = ordered[index]
+        val b = ordered[target]
+        dao.swapSortOrder(a.id, a.sortOrder, b.id, b.sortOrder)
+    }
+
+    override suspend fun exportJson(): String = SourceJson.encode(dao.listAll().map { it.toSource() })
+
+    override suspend fun importJson(json: String): Int {
+        val parsed = SourceJson.decode(json)
+        var count = 0
+        var order = dao.maxSortOrder() + 1
+        for (src in parsed) {
+            dao.insert(
+                SourceEntity(
+                    type = src.type,
+                    name = src.name,
+                    url = src.url,
+                    userAgent = src.userAgent?.takeIf { it.isNotBlank() },
+                    referer = src.referer?.takeIf { it.isNotBlank() },
+                    basicUser = src.basicUser?.takeIf { it.isNotBlank() },
+                    basicPass = src.basicPass?.takeIf { it.isNotBlank() },
+                    enabled = src.enabled,
+                    sortOrder = order,
+                ),
+            )
+            order += 1
+            count += 1
+        }
+        return count
+    }
 }
 
 private fun SourceEntity.toSource(): Source =
@@ -70,4 +119,5 @@ private fun SourceEntity.toSource(): Source =
         referer = referer,
         basicUser = basicUser,
         basicPass = basicPass,
+        sortOrder = sortOrder,
     )

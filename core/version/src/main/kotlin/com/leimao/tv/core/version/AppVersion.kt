@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.1.5.0"
+    const val CURRENT_VERSION: String = "0.1.6.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,14 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.1.6.0",
+                date = "2026-10-22",
+                changes =
+                    listOf(
+                        "源管理可上下移动排序、导出/导入源备份（JSON）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.1.5.0",
                 date = "2026-10-22",

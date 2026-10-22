@@ -126,6 +126,58 @@ fun SourceManagerScreen(
             }
         }
 
+    // 导入源备份（SET-03）：与「导入本地文件」不同，这里读的是我们自己导出的 JSON
+    val pickJson =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            scope.launch {
+                busy = true
+                val text =
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        }.getOrNull()
+                    }
+                if (text.isNullOrBlank()) {
+                    status = "导入失败：文件打不开或没有内容"
+                    busy = false
+                    return@launch
+                }
+                status =
+                    runCatching {
+                        val count = sourceRepository.importJson(text)
+                        "已从备份导入 $count 个源"
+                    }.getOrElse { e ->
+                        "导入失败：${e.message ?: "不是有效的源备份文件"}"
+                    }
+                busy = false
+                reload()
+                onSourcesChanged()
+            }
+        }
+
+    // 导出源备份（SET-03）：SAF 创建文件，写到用户选的位置
+    val createJson =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            scope.launch {
+                busy = true
+                status =
+                    runCatching {
+                        val json = sourceRepository.exportJson()
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openOutputStream(uri)?.use { out ->
+                                out.write(json.toByteArray(Charsets.UTF_8))
+                            } ?: throw java.io.IOException("无法写入所选位置")
+                        }
+                        "已导出 ${sources.size} 个源到备份文件"
+                    }.getOrElse { e ->
+                        "导出失败：${e.message ?: "无法写入文件"}"
+                    }
+                busy = false
+            }
+        }
+
     // 节目单（XMLTV）走同一个 SAF 选文件流程：TV 上没有「把文件拖进来」这回事
     val pickEpg =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -202,6 +254,16 @@ fun SourceManagerScreen(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FocusableCard(onClick = { createJson.launch("leimao-sources.json") }) {
+                        Text(text = "导出备份", style = TvText.current.label)
+                    }
+                    FocusableCard(onClick = { pickJson.launch(arrayOf("application/json", "*/*")) }) {
+                        Text(text = "导入备份", style = TvText.current.label)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
                 StatusLine(status = status, busy = busy)
                 epgSummary?.let { summary ->
@@ -242,6 +304,8 @@ fun SourceManagerScreen(
                             SourceRow(
                                 source = source,
                                 busy = busy,
+                                isFirst = sources.first().id == source.id,
+                                isLast = sources.last().id == source.id,
                                 onRefresh = {
                                     scope.launch {
                                         busy = true
@@ -250,6 +314,12 @@ fun SourceManagerScreen(
                                         busy = false
                                         reload()
                                         if (result is RefreshResult.Done) onSourcesChanged()
+                                    }
+                                },
+                                onMove = { direction ->
+                                    scope.launch {
+                                        sourceRepository.move(source.id, direction)
+                                        reload()
                                     }
                                 },
                                 onToggle = {
@@ -347,7 +417,10 @@ private fun StatusLine(status: String?, busy: Boolean) {
 private fun SourceRow(
     source: Source,
     busy: Boolean,
+    isFirst: Boolean,
+    isLast: Boolean,
     onRefresh: () -> Unit,
+    onMove: (Int) -> Unit,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -396,6 +469,12 @@ private fun SourceRow(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FocusableCard(onClick = { onMove(-1) }, enabled = !isFirst) {
+                Text(text = "上移", style = TvText.current.label)
+            }
+            FocusableCard(onClick = { onMove(1) }, enabled = !isLast) {
+                Text(text = "下移", style = TvText.current.label)
+            }
             FocusableCard(onClick = onRefresh, enabled = !busy) {
                 Text(text = "刷新", style = TvText.current.label)
             }

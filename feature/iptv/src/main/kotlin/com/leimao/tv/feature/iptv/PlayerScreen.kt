@@ -47,6 +47,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.leimao.tv.core.designsystem.components.TvTextField
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
@@ -601,6 +602,9 @@ private fun ChannelDrawer(
     onSelect: (Channel) -> Unit,
 ) {
     val firstChannelFocus = remember { FocusRequester() }
+    var filterQuery by remember { mutableStateOf("") }
+    // 即时过滤（LIVE-16）：输入即筛，空关键词等价于不过滤。过滤后的分组喂给浏览器。
+    val visibleGroups = remember(state.groups, filterQuery) { filterGroups(state.groups, filterQuery) }
 
     Box(
         modifier =
@@ -616,8 +620,16 @@ private fun ChannelDrawer(
                     color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
+                // 过滤框放在分组栏上方：TV 上按名称过滤是最快的找台方式，
+                // 尤其是几百上千个台的时候，比逐组翻找省得多。
+                TvTextField(
+                    value = filterQuery,
+                    onValueChange = { filterQuery = it },
+                    label = "按名称过滤",
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
                 ChannelBrowser(
-                    groups = state.groups,
+                    groups = visibleGroups,
                     selectedChannelId = state.channel?.id,
                     onChannelClick = onSelect,
                     favoriteIds = state.favoriteIds,

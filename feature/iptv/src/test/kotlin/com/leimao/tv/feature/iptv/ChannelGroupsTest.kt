@@ -70,4 +70,43 @@ class ChannelGroupsTest {
     fun `空列表返回空`() {
         assertNull(neighborOf(emptyList(), currentId = 1L, delta = 1))
     }
+
+    @Test
+    fun `过滤空关键词原样返回`() {
+        val groups = groupChannels(channels)
+        assertEquals(groups, filterGroups(groups, "  "))
+    }
+
+    @Test
+    fun `过滤按名称包含匹配且不区分大小写`() {
+        val groups =
+            listOf(
+                ChannelGroup("分组甲", listOf(channel(1, "CCTV1", "分组甲", 1), channel(3, "cctv2", "分组甲", 3))),
+                ChannelGroup("分组乙", listOf(channel(2, "凤凰卫视", "分组乙", 2))),
+            )
+        val result = filterGroups(groups, "cctv")
+
+        assertEquals(1, result.size)
+        assertEquals("分组甲", result[0].name)
+        assertEquals(listOf(1L, 3L), result[0].channels.map { it.id })
+    }
+
+    @Test
+    fun `过滤后无命中的分组被整组去掉`() {
+        val groups =
+            listOf(
+                ChannelGroup("分组甲", listOf(channel(1, "台一", "分组甲", 1))),
+                ChannelGroup("分组乙", listOf(channel(2, "台二", "分组乙", 2))),
+            )
+        val result = filterGroups(groups, "台一")
+
+        assertEquals(1, result.size)
+        assertEquals("分组甲", result[0].name)
+    }
+
+    @Test
+    fun `过滤无结果时返回空列表`() {
+        val groups = groupChannels(channels)
+        assertEquals(emptyList<ChannelGroup>(), filterGroups(groups, "不存在"))
+    }
 }

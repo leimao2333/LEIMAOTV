@@ -39,3 +39,23 @@ fun neighborOf(
     if (index < 0) return channels.first()
     return channels[(index + delta).mod(channels.size)]
 }
+
+/**
+ * 列表内即时过滤（LIVE-16）：按名称包含关键词筛频道，空关键词原样返回。
+ *
+ * 匹配不区分大小写；分组的壳保留，但**没有命中频道的分组会被整个去掉** ——
+ * 否则过滤后列表里躺着一堆「0 台」的空分组，比不过滤还难用。
+ * 与跨库搜索（SEARCH 段）是两回事：这里只在这份已经加载的频道列表里筛，不查库、不联网。
+ */
+fun filterGroups(
+    groups: List<ChannelGroup>,
+    query: String,
+): List<ChannelGroup> {
+    val keyword = query.trim()
+    if (keyword.isEmpty()) return groups
+    return groups
+        .mapNotNull { group ->
+            val matched = group.channels.filter { it.name.contains(keyword, ignoreCase = true) }
+            if (matched.isEmpty()) null else ChannelGroup(group.name, matched)
+        }
+}

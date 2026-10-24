@@ -18,9 +18,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,9 +66,19 @@ data class VodPlayerActions(
     val onPrevious: () -> Unit,
     val onNext: () -> Unit,
     val onSelectEpisode: (Int) -> Unit,
+    /** 换到第 N 条线路，按集号对齐、保留当前位置（VOD-10） */
+    val onSelectLine: (Int) -> Unit,
     val onRetry: () -> Unit,
     val onBack: () -> Unit,
 )
+
+/**
+ * 播放页当前开着哪个覆盖面板。
+ *
+ * 用一个枚举而不是两个布尔：两个布尔能出现「选集和线路同时打开」这种画不出来的状态，
+ * 而返回键的优先级也得跟着分成四支。
+ */
+private enum class VodPanel { None, Episodes, Lines }
 
 /**
  * 影视播放页（VOD-05）。
@@ -88,7 +100,7 @@ fun VodPlayerScreen(
     modifier: Modifier = Modifier,
 ) {
     var controlsVisible by remember { mutableStateOf(true) }
-    var panelOpen by remember { mutableStateOf(false) }
+    var panel by remember { mutableStateOf(VodPanel.None) }
     var tick by remember { mutableIntStateOf(0) }
 
     val rootFocus = remember { FocusRequester() }
@@ -99,8 +111,8 @@ fun VodPlayerScreen(
 
     // 5s 无操作自动收起（与直播页同一个窗口，PLAY-04 的约定）。
     // 面板开着时不计时：用户正在挑集，把控制条收掉是帮倒忙。
-    LaunchedEffect(controlsVisible, tick, panelOpen) {
-        if (!controlsVisible || panelOpen) return@LaunchedEffect
+    LaunchedEffect(controlsVisible, tick, panel) {
+        if (!controlsVisible || panel != VodPanel.None) return@LaunchedEffect
         delay(CONTROLS_AUTO_HIDE_MS)
         controlsVisible = false
     }
@@ -113,8 +125,8 @@ fun VodPlayerScreen(
         runCatching { progressFocus.requestFocus() }
     }
 
-    LaunchedEffect(panelOpen) {
-        if (!panelOpen) return@LaunchedEffect
+    LaunchedEffect(panel) {
+        if (panel == VodPanel.None) return@LaunchedEffect
         withFrameNanos { }
         runCatching { panelFocus.requestFocus() }
     }
@@ -132,7 +144,7 @@ fun VodPlayerScreen(
     // 优先级更高，有条件让出根本轮不到本页（直播页踩过同一个坑）
     BackHandler {
         when {
-            panelOpen -> panelOpen = false
+            panel != VodPanel.None -> panel = VodPanel.None
             controlsVisible -> controlsVisible = false
             else -> actions.onBack()
         }
@@ -150,7 +162,7 @@ fun VodPlayerScreen(
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     // 面板开着时按键全交给面板的焦点系统（放行，不消费）
-                    if (panelOpen) return@onPreviewKeyEvent false
+                    if (panel != VodPanel.None) return@onPreviewKeyEvent false
                     // 控制条收起时，任意键只负责「叫出来」，不执行动作 ——
                     // 否则用户想看一眼进度，结果顺手切走了一集
                     if (!controlsVisible) {
@@ -192,18 +204,35 @@ fun VodPlayerScreen(
         }
 
         if (failed != null) {
+            // 「换线路」只在真有第二条线路时出现：内核已经把**同一集在所有线路上的地址**
+            // 依次试过了（episodeUrls 组成的降级链），所以走到这里通常是真的都不行 ——
+            // 但线路本身可能刚好在这一集上出了差异，给用户一个一键换过去的口子，
+            // 比让他在失败页上反复按「重试」有用
+            val reason =
+                if (state.canSwitchLine) {
+                    "${failed.reason}（这一集在各条线路上都没播起来，可以换一条试试）"
+                } else {
+                    failed.reason
+                }
             CenterHint(
-                text = failed.reason,
-                primary = "重试" to actions.onRetry,
-                secondary = "返回" to actions.onBack,
+                text = reason,
+                buttons =
+                    buildList {
+                        add("重试" to actions.onRetry)
+                        if (state.canSwitchLine) add("换线路" to { panel = VodPanel.Lines })
+                        add("返回" to actions.onBack)
+                    },
             )
         }
 
         if (state.finished) {
             CenterHint(
                 text = "已经播到最后一集了",
-                primary = "选集" to { panelOpen = true },
-                secondary = "返回" to actions.onBack,
+                buttons =
+                    listOf(
+                        "选集" to { panel = VodPanel.Episodes },
+                        "返回" to actions.onBack,
+                    ),
             )
         }
 
@@ -232,7 +261,12 @@ fun VodPlayerScreen(
                     onTogglePause = actions.onTogglePause,
                 )
                 Spacer(modifier = Modifier.height(14.dp))
-                ControlButtons(state = state, actions = actions, onOpenPanel = { panelOpen = true })
+                ControlButtons(
+                    state = state,
+                    actions = actions,
+                    onOpenPanel = { panel = VodPanel.Episodes },
+                    onOpenLines = { panel = VodPanel.Lines },
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     // 这套控制条的「← → 是快进」不可能自己看出来，必须写在屏幕上
@@ -243,16 +277,30 @@ fun VodPlayerScreen(
             }
         }
 
-        if (panelOpen) {
-            EpisodePanel(
-                state = state,
-                firstFocus = panelFocus,
-                onSelect = { index ->
-                    panelOpen = false
-                    actions.onSelectEpisode(index)
-                },
-                onDismiss = { panelOpen = false },
-            )
+        when (panel) {
+            VodPanel.Episodes ->
+                EpisodePanel(
+                    state = state,
+                    firstFocus = panelFocus,
+                    onSelect = { index ->
+                        panel = VodPanel.None
+                        actions.onSelectEpisode(index)
+                    },
+                    onDismiss = { panel = VodPanel.None },
+                )
+
+            VodPanel.Lines ->
+                LinePanel(
+                    state = state,
+                    firstFocus = panelFocus,
+                    onSelect = { index ->
+                        panel = VodPanel.None
+                        actions.onSelectLine(index)
+                    },
+                    onDismiss = { panel = VodPanel.None },
+                )
+
+            VodPanel.None -> Unit
         }
     }
 }
@@ -387,11 +435,17 @@ private fun ControlButtons(
     state: VodPlayerUiState,
     actions: VodPlayerActions,
     onOpenPanel: () -> Unit,
+    onOpenLines: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         ControlButton(text = "上一集", enabled = state.hasPrevious, onClick = actions.onPrevious)
         ControlButton(text = "下一集", enabled = state.hasNext, onClick = actions.onNext)
         ControlButton(text = "选集", enabled = state.episodeCount > 0, onClick = onOpenPanel)
+        // 只有一条线路时按钮直接**不出现**（不是变灰）：大量片子本来就一条线路，
+        // 一个永远点不动的按钮会被当成 bug
+        if (state.canSwitchLine) {
+            ControlButton(text = "线路", enabled = true, onClick = onOpenLines)
+        }
         ControlButton(text = "返回", enabled = true, onClick = actions.onBack)
     }
 }
@@ -500,12 +554,101 @@ private fun EpisodePanel(
     }
 }
 
-/** 居中的一句话 + 至多两个出口。给不给按钮由调用方决定，不留假按钮 */
+/**
+ * 线路面板（VOD-10）。
+ *
+ * 详情页也能切线路，但**播到一半发现这条线路模糊/卡顿**时再退回详情页、再点进来，
+ * 进度就断了 —— 这个面板解决的正是那一步。所以它必须：
+ * ① 按集号对齐（不是回到第 1 集）；② 保留当前位置（由调用方起播时带 startPositionMs）。
+ *
+ * 竖排一列而不是网格：线路通常 2~5 条，一列读下来比找格子快，也容得下「线路名 + 集数」。
+ */
+@Composable
+private fun LinePanel(
+    state: VodPlayerUiState,
+    firstFocus: FocusRequester,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xF20B0F12))
+                .padding(horizontal = 48.dp, vertical = 32.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "线路",
+                    style = TvText.current.title,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "换线后仍停在第 ${state.episodeIndex + 1} 集，进度不丢",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                FocusableCard(onClick = onDismiss) {
+                    Text(
+                        text = "关闭",
+                        style = TvText.current.body,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                items(items = state.lines, key = { "line-${it.index}" }) { line ->
+                    val selected = line.index == state.lineIndex
+                    FocusableCard(
+                        onClick = { onSelect(line.index) },
+                        focusRequester = if (selected) firstFocus else null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = line.label,
+                                style = TvText.current.body,
+                                color =
+                                    if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "${line.episodeCount} 集",
+                                style = TvText.current.hint,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            if (selected) {
+                                Text(
+                                    text = "正在用",
+                                    style = TvText.current.hint,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 居中的一句话 + 若干出口。给不给按钮由调用方决定，不留假按钮 */
 @Composable
 private fun CenterHint(
     text: String,
-    primary: Pair<String, () -> Unit>? = null,
-    secondary: Pair<String, () -> Unit>? = null,
+    buttons: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     Box(
         modifier = Modifier.fillMaxSize().background(Color(0x99000000)),
@@ -522,7 +665,6 @@ private fun CenterHint(
                 color = Color.White,
                 textAlign = TextAlign.Center,
             )
-            val buttons = listOfNotNull(primary, secondary)
             if (buttons.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     buttons.forEach { (label, onClick) ->
@@ -548,6 +690,9 @@ private fun subtitleOf(state: VodPlayerUiState): String =
         if (state.episodeCount > 1) add("第 ${state.episodeIndex + 1}/${state.episodeCount} 集")
         if (state.lineCount > 1 && state.lineName.isNotBlank()) add("线路 ${state.lineName}")
         if (state.playback is PlaybackState.Preparing) add("缓冲中…")
+        // 换线时集号被钳制（甲 40 集 → 乙 39 集）这类事必须说出来：
+        // 用户只看到数字变了，会以为自己按错了集
+        state.note?.takeIf { it.isNotBlank() }?.let { add(it) }
     }.joinToString(" · ")
 
 /** 毫秒 → `mm:ss` 或 `h:mm:ss`。超过一小时还用 mm:ss 的话，两小时的电影会显示成 120:31 */

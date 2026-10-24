@@ -111,3 +111,37 @@ fun VodDetail.episodeUrls(
 
     return (listOf(primary) + alternatives).distinct()
 }
+
+/** 换线之后落在哪一集。[clamped] 为 true 表示目标线路集数不够，被压到了最后一集。 */
+data class VodLineSwitch(
+    val lineIndex: Int,
+    val episodeIndex: Int,
+    val clamped: Boolean,
+)
+
+/**
+ * 换到另一条线路时该播哪一集（VOD-10）。
+ *
+ * 两条规矩：
+ * - **按集号对齐**，不是按「第几条地址」。用户切线路是想同一次观看换个承载，
+ *   不是为了看别的集。
+ * - **对不齐时压到目标线路的最后一集**，不越界也不回到第 1 集：甲线路 40 集、
+ *   乙线路 39 集时，从第 40 集切到乙线路，落在乙的第 39 集是最近的等价位置；
+ *   弹回第 1 集等于把用户的进度清零。
+ *
+ * 返回 null 表示这条线路压根不是可选项（下标越界 / 一集都没有），调用方按「没换」处理。
+ */
+fun VodDetail.lineSwitchTarget(
+    episodeIndex: Int,
+    targetLine: Int,
+): VodLineSwitch? {
+    val target = lines.getOrNull(targetLine) ?: return null
+    val lastIndex = target.episodes.lastIndex
+    if (lastIndex < 0 || episodeIndex < 0) return null
+    val clampedIndex = episodeIndex.coerceAtMost(lastIndex)
+    return VodLineSwitch(
+        lineIndex = targetLine,
+        episodeIndex = clampedIndex,
+        clamped = clampedIndex != episodeIndex,
+    )
+}

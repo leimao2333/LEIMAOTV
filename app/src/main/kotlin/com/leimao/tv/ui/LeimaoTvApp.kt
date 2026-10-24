@@ -43,6 +43,7 @@ import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.core.model.vod.acceptsProgress
 import com.leimao.tv.core.model.vod.episodeName
 import com.leimao.tv.core.model.vod.episodeUrls
+import com.leimao.tv.core.model.vod.lineSwitchTarget
 import com.leimao.tv.core.model.vod.nextEpisode
 import com.leimao.tv.core.model.vod.previousEpisode
 import com.leimao.tv.core.network.BasicAuth
@@ -71,6 +72,7 @@ import com.leimao.tv.feature.vod.VodDetailScreen
 import com.leimao.tv.feature.vod.VodDetailState
 import com.leimao.tv.feature.vod.VodDetailStatus
 import com.leimao.tv.feature.vod.VodHomeState
+import com.leimao.tv.feature.vod.VodLineOption
 import com.leimao.tv.feature.vod.VodPlayerActions
 import com.leimao.tv.feature.vod.VodPlayerScreen
 import com.leimao.tv.feature.vod.VodPlayerUiState
@@ -851,7 +853,9 @@ private fun VodPlayRoute(
         finished = false
         preparing = false
         note = null
-        positionMs = 0L
+        // 起播位置就是新位置。不能一律清零：换线时是带着原进度起播的（startAt > 0），
+        // 清零后用户在缓冲阶段按返回，onDispose 会把进度写成 0 —— 下次「继续观看」从头开始
+        positionMs = startAt
         durationMs = 0L
         lastSavedMs = 0L
         container.player.play(
@@ -865,6 +869,26 @@ private fun VodPlayRoute(
                 startPositionMs = startAt,
             ),
         )
+    }
+
+    /**
+     * 换线路（VOD-10）。
+     *
+     * 按集号对齐、**保留当前位置**：用户换线是因为这条承载不行（卡 / 糊 / 断流），
+     * 不是为了看下一集。对不齐时落到目标线路的最后一集（见 `lineSwitchTarget`），
+     * 并在顶部说明一句 —— 否则用户只看到集号变了，以为按错了。
+     *
+     * 为什么 UI 层不自己「失败后自动换线」：内核的降级链本身就是「同一集在所有线路上的
+     * 地址依次尝试」，走到 Failed 说明那一集真的都不行，重起一遍播放器只会更慢。
+     * 这里补的是内核做不到的那一半 —— 让线路**可见、可换**。
+     */
+    fun switchLine(target: Int) {
+        val current = detail ?: return
+        val next = current.lineSwitchTarget(episodeIndex, target) ?: return
+        playEpisodeAt(next.lineIndex, next.episodeIndex, startAt = positionMs)
+        if (next.clamped) {
+            note = "这条线路只有 ${next.episodeIndex + 1} 集，已停在最后一集"
+        }
     }
 
     // 详情只拉一次：切集、连播都复用这份，不再打网络
@@ -955,6 +979,10 @@ private fun VodPlayRoute(
                 lineName = line?.name.orEmpty(),
                 lineIndex = lineIndex,
                 lineCount = current?.lines?.size ?: 0,
+                lines =
+                    current?.lines?.mapIndexed { index, vodLine ->
+                        VodLineOption(index = index, name = vodLine.name, episodeCount = vodLine.episodes.size)
+                    }.orEmpty(),
                 playback = playback,
                 positionMs = positionMs,
                 durationMs = durationMs,
@@ -983,6 +1011,7 @@ private fun VodPlayRoute(
                     }
                 },
                 onSelectEpisode = { index -> playEpisodeAt(lineIndex, index) },
+                onSelectLine = { target -> switchLine(target) },
                 onRetry = { playEpisodeAt(lineIndex, episodeIndex) },
                 onBack = {
                     // 离开就停：影视是长视频，挂在后台继续拉流既费流量又会让回直播时打架

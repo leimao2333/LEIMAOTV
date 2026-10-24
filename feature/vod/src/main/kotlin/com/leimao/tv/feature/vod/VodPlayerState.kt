@@ -3,6 +3,21 @@ package com.leimao.tv.feature.vod
 import com.leimao.tv.core.player.PlaybackState
 
 /**
+ * 播放页线路列表里的一条（VOD-10）。
+ *
+ * 只带「选线路时要看的三样」：名字、集数、下标。地址不进 UI ——
+ * 电视上没有「复制链接」这种动作，把地址摆上去只会让一行变得很脏。
+ */
+data class VodLineOption(
+    val index: Int,
+    val name: String,
+    val episodeCount: Int,
+) {
+    /** 源没给线路名时兜底成「线路 N」：不能让用户点一个空格子 */
+    val label: String get() = name.ifBlank { "线路 ${index + 1}" }
+}
+
+/**
  * 影视播放页的展示状态（VOD-05）。
  *
  * 与直播的 `PlayerUiState` 分开而不是复用：两者的「控制条上该有什么」几乎没有交集
@@ -18,6 +33,8 @@ data class VodPlayerUiState(
     val lineName: String = "",
     val lineIndex: Int = 0,
     val lineCount: Int = 0,
+    /** 全部线路，供「线路」面板列出（VOD-10） */
+    val lines: List<VodLineOption> = emptyList(),
     val playback: PlaybackState = PlaybackState.Idle,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
@@ -40,4 +57,12 @@ data class VodPlayerUiState(
     val hasPrevious: Boolean get() = episodeIndex > 0
 
     val hasNext: Boolean get() = episodeIndex + 1 < episodeCount
+
+    /**
+     * 能不能换线。
+     *
+     * 只有一条线路时**不显示**这个按钮，而不是显示成灰色：影视源里大量片子只有一条线路，
+     * 一个永远点不动的按钮只会让人以为坏了。
+     */
+    val canSwitchLine: Boolean get() = lines.size > 1
 }

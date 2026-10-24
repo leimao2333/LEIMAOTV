@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.6.0"
+    const val CURRENT_VERSION: String = "0.2.7.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.7.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "播放页可以直接换线路了：控制条多一个「线路」，按集号对齐、进度不丢",
+                        "某条线路卡或者糊的时候，不用退回详情页再点进来",
+                        "这一集播不起来时，失败提示里直接给「换线路」",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.6.0",
                 date = "2026-10-24",

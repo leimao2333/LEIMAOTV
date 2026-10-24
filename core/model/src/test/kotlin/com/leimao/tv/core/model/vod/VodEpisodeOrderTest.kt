@@ -150,6 +150,42 @@ class VodEpisodeOrderTest {
         assertEquals(false, d.acceptsProgress(progress(line = 1, episode = 0)))
     }
 
+    // ---------------------------------------------------------------- 换线路（VOD-10）
+
+    @Test
+    fun `换线按集号对齐`() {
+        val d = detail("甲" to 5, "乙" to 5)
+
+        assertEquals(VodLineSwitch(lineIndex = 1, episodeIndex = 2, clamped = false), d.lineSwitchTarget(2, 1))
+    }
+
+    @Test
+    fun `目标线路集数不够时停在它的最后一集`() {
+        // 甲 5 集、乙 3 集：从甲的第 5 集切到乙，落在乙的第 3 集。
+        // 不钳制会越界（起播失败），弹回第 1 集则等于把用户进度清零
+        val d = detail("甲" to 5, "乙" to 3)
+        val target = d.lineSwitchTarget(4, 1)
+
+        assertEquals(2, target?.episodeIndex)
+        assertEquals(true, target?.clamped)
+    }
+
+    @Test
+    fun `切到不存在的线路返回 null`() {
+        val d = detail("甲" to 5)
+
+        assertNull(d.lineSwitchTarget(0, 3))
+        assertNull(d.lineSwitchTarget(0, -1))
+    }
+
+    @Test
+    fun `一条集都没有的线路不能切过去`() {
+        // 源里会有「线路存在但空的」条目，切过去就是一块黑屏
+        val d = detail("甲" to 5, "空" to 0)
+
+        assertNull(d.lineSwitchTarget(0, 1))
+    }
+
     private fun progress(
         line: Int,
         episode: Int,

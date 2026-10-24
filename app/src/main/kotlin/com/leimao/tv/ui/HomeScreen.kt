@@ -41,13 +41,11 @@ import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
-import com.leimao.tv.core.model.SearchScope
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.feature.iptv.ChannelBrowser
 import com.leimao.tv.feature.iptv.ChannelLogo
 import com.leimao.tv.feature.iptv.groupChannels
-import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.vod.HeroItem
 import com.leimao.tv.feature.vod.VodHomeScreen
@@ -149,6 +147,8 @@ fun HomeScreen(
     onOpenPlaybackSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     onExit: () -> Unit,
+    /** 「搜索」分区的内容，由路由层提供（见 [ContentArea] 里的说明） */
+    searchContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showExitConfirm by rememberSaveable { mutableStateOf(false) }
@@ -227,6 +227,7 @@ fun HomeScreen(
                         onOpenLicense = onOpenLicense,
                         onOpenPlaybackSettings = onOpenPlaybackSettings,
                         onOpenRefreshSettings = onOpenRefreshSettings,
+                        searchContent = searchContent,
                     )
                 }
             }
@@ -260,6 +261,13 @@ private fun ContentArea(
     onOpenLicense: () -> Unit,
     onOpenPlaybackSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
+    /**
+     * 「搜索」分区的内容。
+     *
+     * 用 lambda 传进来而不是在主页里直接 new 一个搜索页：搜索需要仓库、设置、导航三样东西，
+     * 它们都归 :app 的路由层管；这个文件只管「哪块地方放什么」，不该顺手把依赖也接进来。
+     */
+    searchContent: @Composable () -> Unit,
 ) {
     // 分区与模式必须自洽：模式是内容的「大前提」，分区只是它下面的入口。
     // 两者不一致时以模式为准 —— 否则切模式会出现「影视模式下还显示直播分区」的错位
@@ -284,12 +292,7 @@ private fun ContentArea(
                 onOpenPlayer = onOpenPlayer,
                 onOpenChannel = onOpenChannel,
             )
-        HomeSection.SEARCH ->
-            SearchScreen(
-                scope = if (mode == AppMode.LIVE) SearchScope.IPTV else SearchScope.VOD,
-                // 焦点归主页导航统管，内容区不再抢（§6.2：每个页面只有一个明确的初始焦点）
-                autoFocus = false,
-            )
+        HomeSection.SEARCH -> searchContent()
         HomeSection.SETTINGS ->
             SettingsScreen(
                 onOpenPlaybackSettings = onOpenPlaybackSettings,

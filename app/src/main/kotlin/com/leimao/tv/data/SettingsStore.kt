@@ -10,6 +10,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.leimao.tv.core.data.RefreshInterval
 import com.leimao.tv.core.model.AppMode
+import com.leimao.tv.core.model.search.decodeSearchHistory
+import com.leimao.tv.core.model.search.encodeSearchHistory
+import com.leimao.tv.core.model.search.pushSearchHistory
+import com.leimao.tv.core.model.search.removeSearchHistory
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.PlaybackSettings
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +41,9 @@ interface SettingsStore {
     /** 自动刷新周期（LIVE-07）。关闭 / 6 / 12 / 24 小时 */
     val refreshInterval: Flow<RefreshInterval>
 
+    /** 搜索历史（SEARCH-07）：最近 10 条，新的在前。存原文，去重按归一化后的词 */
+    val searchHistory: Flow<List<String>>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
@@ -46,6 +53,12 @@ interface SettingsStore {
     suspend fun setPlaybackSettings(settings: PlaybackSettings)
 
     suspend fun setRefreshInterval(interval: RefreshInterval)
+
+    suspend fun rememberSearchQuery(query: String)
+
+    suspend fun forgetSearchQuery(query: String)
+
+    suspend fun clearSearchHistory()
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -76,6 +89,9 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
             RefreshInterval.fromName(prefs[KEY_REFRESH_INTERVAL])
         }
 
+    override val searchHistory: Flow<List<String>> =
+        context.tvSettings.data.map { decodeSearchHistory(it[KEY_SEARCH_HISTORY]) }
+
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
     }
@@ -101,6 +117,25 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         context.tvSettings.edit { it[KEY_REFRESH_INTERVAL] = interval.name }
     }
 
+    override suspend fun rememberSearchQuery(query: String) {
+        // 读改写都在 edit 里完成：DataStore 的 edit 自身串行，手写「先读再写」会丢条
+        context.tvSettings.edit { prefs ->
+            prefs[KEY_SEARCH_HISTORY] =
+                encodeSearchHistory(pushSearchHistory(decodeSearchHistory(prefs[KEY_SEARCH_HISTORY]), query))
+        }
+    }
+
+    override suspend fun forgetSearchQuery(query: String) {
+        context.tvSettings.edit { prefs ->
+            prefs[KEY_SEARCH_HISTORY] =
+                encodeSearchHistory(removeSearchHistory(decodeSearchHistory(prefs[KEY_SEARCH_HISTORY]), query))
+        }
+    }
+
+    override suspend fun clearSearchHistory() {
+        context.tvSettings.edit { it.remove(KEY_SEARCH_HISTORY) }
+    }
+
     private companion object {
         val KEY_COMPLIANCE_AGREED = booleanPreferencesKey("compliance_agreed")
         val KEY_MODE = stringPreferencesKey("app_mode")
@@ -108,5 +143,6 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         val KEY_BUFFER_PROFILE = stringPreferencesKey("buffer_profile")
         val KEY_SEEK_STEP_MS = longPreferencesKey("seek_step_ms")
         val KEY_REFRESH_INTERVAL = stringPreferencesKey("refresh_interval")
+        val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
     }
 }

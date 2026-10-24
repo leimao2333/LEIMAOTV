@@ -29,7 +29,6 @@ import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
-import com.leimao.tv.core.model.SearchScope
 import com.leimao.tv.core.model.TvRoute
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
@@ -62,7 +61,6 @@ import com.leimao.tv.feature.iptv.PlayerUiState
 import com.leimao.tv.feature.iptv.ProgrammeLine
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.iptv.neighborOf
-import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.LicenseScreen
 import com.leimao.tv.feature.settings.PlaybackSettingsScreen
@@ -169,10 +167,13 @@ fun LeimaoTvApp(
             }
 
             composable(TvRoute.SEARCH) {
-                val mode by container.settings.mode.collectAsStateWithLifecycle(initialValue = AppMode.LIVE)
                 BackHandler { navController.popBackStack() }
-                SearchScreen(
-                    scope = if (mode == AppMode.LIVE) SearchScope.IPTV else SearchScope.VOD,
+                SearchContent(
+                    container = container,
+                    onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
+                    onOpenVod = { sourceId, sourceKey ->
+                        navController.navigate(TvRoute.vodDetail(sourceId, sourceKey))
+                    },
                 )
             }
 
@@ -441,6 +442,18 @@ private fun HomeRoute(
         onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
         onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
         onExit = onExitApp,
+        // 主页导航项「搜索」与菜单键进来的搜索页是**同一块内容**：两处各写一套必然走样
+        searchContent = {
+            SearchContent(
+                container = container,
+                onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
+                onOpenVod = { sourceId, sourceKey ->
+                    navController.navigate(TvRoute.vodDetail(sourceId, sourceKey))
+                },
+                // 焦点归主页导航统管，内容区不再抢（RULES §6.2：每页只有一个初始焦点）
+                autoFocus = false,
+            )
+        },
     )
 }
 

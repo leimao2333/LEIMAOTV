@@ -16,6 +16,9 @@ object TvRoute {
     const val CHANGELOG = "changelog"
     const val LICENSE = "license"
     const val PLAYBACK_SETTINGS = "playback_settings"
+
+    /** 界面设置（SET-02）：主题与字号，改了立即生效 */
+    const val APPEARANCE_SETTINGS = "appearance_settings"
     const val REFRESH_SETTINGS = "refresh_settings"
 
     /** 存储与缓存（SET-05）：看占了多少、一键清空 */

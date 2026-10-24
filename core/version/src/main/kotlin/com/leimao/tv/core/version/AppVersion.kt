@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.4"
+    const val CURRENT_VERSION: String = "0.2.9.5"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.5",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "设置里能换主题了：深色、浅色，或者跟着盒子走",
+                        "字号能整体调大调小了，改完当场就看得到效果",
+                        "浅色主题下开机不再先黑一下再变白",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.4",
                 date = "2026-10-24",

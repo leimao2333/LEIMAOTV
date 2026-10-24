@@ -30,6 +30,8 @@ import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.TvRoute
+import com.leimao.tv.core.model.appearance.FontScale
+import com.leimao.tv.core.model.appearance.ThemeMode
 import com.leimao.tv.core.model.cache.CacheUsage
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
@@ -62,6 +64,7 @@ import com.leimao.tv.feature.iptv.PlayerUiState
 import com.leimao.tv.feature.iptv.ProgrammeLine
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.iptv.neighborOf
+import com.leimao.tv.feature.settings.AppearanceSettingsScreen
 import com.leimao.tv.feature.settings.CacheScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.LicenseScreen
@@ -183,12 +186,20 @@ fun LeimaoTvApp(
                 BackHandler { navController.popBackStack() }
                 SettingsScreen(
                     onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
+                    onOpenAppearanceSettings = {
+                        navController.navigate(TvRoute.APPEARANCE_SETTINGS)
+                    },
                     onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
                     onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
                     onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
                     onOpenCache = { navController.navigate(TvRoute.CACHE) },
                     onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
                 )
+            }
+
+            composable(TvRoute.APPEARANCE_SETTINGS) {
+                BackHandler { navController.popBackStack() }
+                AppearanceSettingsRoute(container = container)
             }
 
             composable(TvRoute.SOURCE_MANAGER) {
@@ -291,6 +302,29 @@ private fun CacheRoute(container: AppContainer) {
                 }
             }
         },
+    )
+}
+
+/**
+ * 界面设置（SET-02）的接线。
+ *
+ * 两项都写 DataStore，但**不在这里等写入完成**：主题与字号的真实来源是 MainActivity 里
+ * 那个 `collectAsStateWithLifecycle`，DataStore 一改 Flow 就发新值，整个界面重组。
+ * 这里只负责把用户的点击落下去。
+ */
+@Composable
+private fun AppearanceSettingsRoute(container: AppContainer) {
+    val themeMode by
+        container.settings.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.DEFAULT)
+    val fontScale by
+        container.settings.fontScale.collectAsStateWithLifecycle(initialValue = FontScale.DEFAULT)
+    val scope = rememberCoroutineScope()
+
+    AppearanceSettingsScreen(
+        themeMode = themeMode,
+        fontScale = fontScale,
+        onThemeModeChange = { mode -> scope.launch { container.settings.setThemeMode(mode) } },
+        onFontScaleChange = { scale -> scope.launch { container.settings.setFontScale(scale) } },
     )
 }
 
@@ -486,6 +520,7 @@ private fun HomeRoute(
         onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
         onOpenCache = { navController.navigate(TvRoute.CACHE) },
         onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
+        onOpenAppearanceSettings = { navController.navigate(TvRoute.APPEARANCE_SETTINGS) },
         onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
         onExit = onExitApp,
         // 主页导航项「搜索」与菜单键进来的搜索页是**同一块内容**：两处各写一套必然走样

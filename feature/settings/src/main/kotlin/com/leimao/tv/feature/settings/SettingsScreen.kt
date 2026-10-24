@@ -35,6 +35,7 @@ import com.leimao.tv.feature.settings.changelog.renderBoldMarkdown
 @Composable
 fun SettingsScreen(
     onOpenPlaybackSettings: () -> Unit,
+    onOpenAppearanceSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenSourceManager: () -> Unit,
@@ -68,8 +69,8 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(12.dp))
         SettingRow(
             title = "界面设置",
-            subtitle = "主题 / 字号缩放 / 导航自动隐藏 —— M4 落地（SET-02）",
-            onClick = { },
+            subtitle = "主题（深色 / 浅色 / 跟随系统）、全局字号缩放（SET-02）",
+            onClick = onOpenAppearanceSettings,
         )
         Spacer(modifier = Modifier.height(12.dp))
         SettingRow(

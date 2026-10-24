@@ -146,6 +146,7 @@ fun HomeScreen(
     onOpenLicense: () -> Unit,
     onOpenCache: () -> Unit,
     onOpenPlaybackSettings: () -> Unit,
+    onOpenAppearanceSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     onExit: () -> Unit,
     /** 「搜索」分区的内容，由路由层提供（见 [ContentArea] 里的说明） */
@@ -228,6 +229,7 @@ fun HomeScreen(
                         onOpenLicense = onOpenLicense,
                         onOpenCache = onOpenCache,
                         onOpenPlaybackSettings = onOpenPlaybackSettings,
+                        onOpenAppearanceSettings = onOpenAppearanceSettings,
                         onOpenRefreshSettings = onOpenRefreshSettings,
                         searchContent = searchContent,
                     )
@@ -263,6 +265,7 @@ private fun ContentArea(
     onOpenLicense: () -> Unit,
     onOpenCache: () -> Unit,
     onOpenPlaybackSettings: () -> Unit,
+    onOpenAppearanceSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     /**
      * 「搜索」分区的内容。
@@ -299,6 +302,7 @@ private fun ContentArea(
         HomeSection.SETTINGS ->
             SettingsScreen(
                 onOpenPlaybackSettings = onOpenPlaybackSettings,
+                onOpenAppearanceSettings = onOpenAppearanceSettings,
                 onOpenRefreshSettings = onOpenRefreshSettings,
                 onOpenChangelog = onOpenChangelog,
                 onOpenSourceManager = onOpenSourceManager,

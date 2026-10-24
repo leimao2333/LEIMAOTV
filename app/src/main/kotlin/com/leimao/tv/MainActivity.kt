@@ -1,22 +1,34 @@
 package com.leimao.tv
 
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
+import com.leimao.tv.core.designsystem.theme.TvColors
 import com.leimao.tv.core.designsystem.theme.TvTheme
+import com.leimao.tv.core.model.appearance.FontScale
+import com.leimao.tv.core.model.appearance.ThemeMode
+import com.leimao.tv.core.model.appearance.shouldUseDarkTheme
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.debug.DebugSeed
 import com.leimao.tv.ui.LeimaoTvApp
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 /**
  * 电脑键盘 → 遥控器的按键映射。
@@ -73,9 +85,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as LeimaoTvApplication).container
+        applyStartupWindowBackground(container)
 
         setContent {
-            TvTheme {
+            // 主题与字号只在**这一层**读：设置页改完 DataStore 发新值，整棵树重组，
+            // 于是「改了立刻见效」是免费得到的，不需要各处监听一遍
+            val themeMode by
+                container.settings.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.DEFAULT)
+            val fontScale by
+                container.settings.fontScale.collectAsStateWithLifecycle(initialValue = FontScale.DEFAULT)
+            val dark = shouldUseDarkTheme(themeMode, isSystemInDarkTheme())
+
+            // 窗口底色跟着主题走：Compose 画满之前、以及播放页全屏时露出系统窗口的那一瞬，
+            // 靠的都是它。不改的话浅色主题下会闪一下深色
+            LaunchedEffect(dark) { setWindowBackground(dark) }
+
+            TvTheme(dark = dark, fontScale = fontScale.scale) {
                 val startup by produceState<StartDestination?>(initialValue = null) {
                     // 调试包会在这里种一条 example.com 演示源（正式包为空实现，见 src/release）
                     DebugSeed.seedIfEmpty(container)
@@ -103,6 +128,29 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 冷启动到首帧之间那块底色。
+     *
+     * 在 `setContent` 之前同步读一次主题：DataStore 的小文件读取是毫秒级，而这里省下的
+     * 是「浅色主题下先闪一帧深色」—— 那恰恰是用户刚按下开机键、最会盯着屏幕看的时刻。
+     * 读失败就按深色处理，与 `themes.xml` 里的默认值一致。
+     */
+    private fun applyStartupWindowBackground(container: AppContainer) {
+        val systemDark =
+            (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+        val dark =
+            runCatching {
+                runBlocking { shouldUseDarkTheme(container.settings.themeMode.first(), systemDark) }
+            }.getOrDefault(true)
+        setWindowBackground(dark)
+    }
+
+    private fun setWindowBackground(dark: Boolean) {
+        val color = if (dark) TvColors.BackgroundDark else TvColors.BackgroundLight
+        window.setBackgroundDrawable(ColorDrawable(color.toArgb()))
     }
 
     /**

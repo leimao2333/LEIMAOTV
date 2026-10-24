@@ -11,11 +11,24 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.darkColorScheme
+import androidx.tv.material3.lightColorScheme
+
+/**
+ * 窗口底色。
+ *
+ * 单独提出来是因为它有两个读者：Compose 的色板，和 `MainActivity` 里
+ * `window.setBackgroundDrawable()` —— 后者决定冷启动到首帧之间那块颜色。
+ * 两处各写一个 0xFF0B0F12，浅色主题下冷启动就会先闪一下深色。
+ */
+object TvColors {
+    val BackgroundDark = Color(0xFF0B0F12)
+    val BackgroundLight = Color(0xFFF2F5F7)
+}
 
 /**
  * 电视环境默认是暗色：客厅光线、播放画面都得靠深底衬托。
- * 浅色主题是设置项（SET-02），M0 只落深色，但色板已经在这里集中定义，
- * 之后加浅色只需要多一套 scheme，页面一行都不用改。
+ * 浅色是设置项（SET-02），色板在这里集中定义，页面一行都不用改 —— 页面只认
+ * `MaterialTheme.colorScheme`，从没直接引用过具体颜色。
  */
 private val TvDarkColors =
     darkColorScheme(
@@ -23,12 +36,30 @@ private val TvDarkColors =
         onPrimary = Color(0xFF00202E),
         secondary = Color(0xFFB6C8D4),
         onSecondary = Color(0xFF1B2A32),
-        background = Color(0xFF0B0F12),
+        background = TvColors.BackgroundDark,
         onBackground = Color(0xFFE6EDF2),
         surface = Color(0xFF151B20),
         onSurface = Color(0xFFE6EDF2),
         surfaceVariant = Color(0xFF1F272D),
         onSurfaceVariant = Color(0xFFB0BEC7),
+    )
+
+/**
+ * 浅色不是把深色反相：白底上蓝色必须压深才够对比（0xFF7FD6FF 在浅底上几乎看不见），
+ * 而 background 用 0xFFF2F5F7 而不是纯白 —— 一整屏纯白在电视上偏刺眼。
+ */
+private val TvLightColors =
+    lightColorScheme(
+        primary = Color(0xFF00658C),
+        onPrimary = Color(0xFFFFFFFF),
+        secondary = Color(0xFF4B5A63),
+        onSecondary = Color(0xFFFFFFFF),
+        background = TvColors.BackgroundLight,
+        onBackground = Color(0xFF0F1A1F),
+        surface = Color(0xFFFFFFFF),
+        onSurface = Color(0xFF0F1A1F),
+        surfaceVariant = Color(0xFFE4EAEE),
+        onSurfaceVariant = Color(0xFF4B5A63),
     )
 
 /**
@@ -54,16 +85,21 @@ const val SAFE_AREA_FRACTION = 0.05f
 
 @Composable
 fun TvTheme(
+    dark: Boolean = true,
     fontScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
+    // 两个参数都参与 remember 的 key：否则改了设置要等下一次重组才生效
     val textStyles = remember(fontScale) { tvTextStyles(fontScale) }
 
     CompositionLocalProvider(
         LocalTvTextStyles provides textStyles,
         LocalTvFocusVisuals provides TvFocusVisuals(),
     ) {
-        MaterialTheme(colorScheme = TvDarkColors, content = content)
+        MaterialTheme(
+            colorScheme = if (dark) TvDarkColors else TvLightColors,
+            content = content,
+        )
     }
 }
 

@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.leimao.tv.core.data.RefreshInterval
 import com.leimao.tv.core.model.AppMode
+import com.leimao.tv.core.model.appearance.FontScale
+import com.leimao.tv.core.model.appearance.ThemeMode
 import com.leimao.tv.core.model.search.decodeSearchHistory
 import com.leimao.tv.core.model.search.encodeSearchHistory
 import com.leimao.tv.core.model.search.pushSearchHistory
@@ -44,6 +46,12 @@ interface SettingsStore {
     /** 搜索历史（SEARCH-07）：最近 10 条，新的在前。存原文，去重按归一化后的词 */
     val searchHistory: Flow<List<String>>
 
+    /** 界面主题（SET-02）：深色 / 浅色 / 跟随系统 */
+    val themeMode: Flow<ThemeMode>
+
+    /** 全局字号缩放（SET-02）。四档，只影响排版不影响布局 */
+    val fontScale: Flow<FontScale>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
@@ -59,6 +67,10 @@ interface SettingsStore {
     suspend fun forgetSearchQuery(query: String)
 
     suspend fun clearSearchHistory()
+
+    suspend fun setThemeMode(mode: ThemeMode)
+
+    suspend fun setFontScale(scale: FontScale)
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -91,6 +103,12 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
 
     override val searchHistory: Flow<List<String>> =
         context.tvSettings.data.map { decodeSearchHistory(it[KEY_SEARCH_HISTORY]) }
+
+    override val themeMode: Flow<ThemeMode> =
+        context.tvSettings.data.map { ThemeMode.fromStorage(it[KEY_THEME_MODE]) }
+
+    override val fontScale: Flow<FontScale> =
+        context.tvSettings.data.map { FontScale.fromStorage(it[KEY_FONT_SCALE]) }
 
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
@@ -136,6 +154,14 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         context.tvSettings.edit { it.remove(KEY_SEARCH_HISTORY) }
     }
 
+    override suspend fun setThemeMode(mode: ThemeMode) {
+        context.tvSettings.edit { it[KEY_THEME_MODE] = mode.name }
+    }
+
+    override suspend fun setFontScale(scale: FontScale) {
+        context.tvSettings.edit { it[KEY_FONT_SCALE] = scale.name }
+    }
+
     private companion object {
         val KEY_COMPLIANCE_AGREED = booleanPreferencesKey("compliance_agreed")
         val KEY_MODE = stringPreferencesKey("app_mode")
@@ -144,5 +170,7 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         val KEY_SEEK_STEP_MS = longPreferencesKey("seek_step_ms")
         val KEY_REFRESH_INTERVAL = stringPreferencesKey("refresh_interval")
         val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
     }
 }

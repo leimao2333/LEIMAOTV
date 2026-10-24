@@ -213,3 +213,33 @@ jobs:
                 --title "LEIMAOTV v$VERSION" --generate-notes --verify-tag
             fi
           fi
+
+      # RULES §10.4 第 7 条：发布后回下载一次，确认附件没被截断。
+      # 比的是「CI 刚签出来的包」与「CDN 上的附件」—— 本地产物与 CI 产物天然不等价
+      # （实测 v0.2.9.8 相差 1046 字节，签名与大小都正常），拿本地包当基准只会永远对不上
+      - name: 回下载比对（防上传截断）
+        env:
+          APK: ${{ steps.verify.outputs.apk }}
+        run: |
+          set -euo pipefail
+
+          EXPECT=$(cut -d' ' -f1 "$APK.sha256")
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$APK"
+
+          # 刚建好的 Release 在 CDN 上可能晚几秒才可取，所以重试而不是一次失败就认栽
+          ACTUAL=""
+          for i in 1 2 3 4; do
+            if curl -sSfL --retry 2 --retry-delay 3 -o /tmp/downloaded.apk "$URL"; then
+              ACTUAL=$(sha256sum /tmp/downloaded.apk | cut -d' ' -f1)
+              if [ "$EXPECT" = "$ACTUAL" ]; then
+                echo "回下载比对通过：$EXPECT"
+                exit 0
+              fi
+            fi
+            echo "第 $i 次没对上（期望 $EXPECT，实际 ${ACTUAL:-下载失败}），等 5 秒再试"
+            sleep 5
+          done
+
+          echo "::error::上传后的附件与构建产物 sha256 不一致（期望 $EXPECT，实际 ${ACTUAL:-下载失败}）。"
+          echo "::error::多半是上传被截断。别手动重传：删掉这个 Release 重打 tag，让流水线重跑一遍。"
+          exit 1

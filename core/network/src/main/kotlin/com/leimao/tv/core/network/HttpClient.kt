@@ -48,6 +48,14 @@ sealed interface FetchOutcome {
         val kind: FetchErrorKind,
         /** 只放对用户有意义的信息（HTTP 状态码 / 异常类型），**不放完整地址**（RULES §2.5） */
         val detail: String? = null,
+        /**
+         * 仅 [FetchErrorKind.HTTP] 有值。
+         *
+         * 单独给一个字段而不是让调用方从 `detail` 里抠 `"HTTP 404"`：404 与 403 在更新检查里是
+         * 两件完全不同的事（「还没发布过」与「查得太频繁」），靠解析自己拼的字符串来区分，
+         * 改一次文案就静默失效。
+         */
+        val httpStatus: Int? = null,
     ) : FetchOutcome
 }
 

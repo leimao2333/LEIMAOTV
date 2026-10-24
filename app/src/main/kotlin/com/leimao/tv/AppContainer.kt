@@ -1,9 +1,11 @@
 package com.leimao.tv
 
 import android.content.Context
+import android.os.Build
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.SearchRepository
 import com.leimao.tv.core.data.SourceRefresher
+import com.leimao.tv.core.data.UpdateChecker
 import com.leimao.tv.core.data.VodCatalogRefresher
 import com.leimao.tv.core.data.VodDetailLoader
 import com.leimao.tv.core.database.LeimaoDatabase
@@ -28,6 +30,7 @@ import com.leimao.tv.core.database.startup.RoomStartupFactsReader
 import com.leimao.tv.core.database.startup.StartupFactsReader
 import com.leimao.tv.core.model.network.NetworkSettings
 import com.leimao.tv.core.model.playlist.MergedChannel
+import com.leimao.tv.core.model.release.DeviceAbi
 import com.leimao.tv.core.network.AppHttp
 import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
@@ -35,6 +38,8 @@ import com.leimao.tv.core.network.buildNetworkClient
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
+import com.leimao.tv.core.version.AppVersion
+import com.leimao.tv.data.ApkInstaller
 import com.leimao.tv.data.CacheManager
 import com.leimao.tv.data.DataStoreSettingsStore
 import com.leimao.tv.data.SettingsStore
@@ -86,6 +91,24 @@ class AppContainer(context: Context) {
     private val okHttpClient: OkHttpClient = buildNetworkClient(AppHttp.client, networkSettings)
 
     val httpClient: HttpClient = OkHttpHttpClient(okHttpClient)
+
+    /**
+     * 检查更新（SET-07）：读 GitHub 的 Latest Release 并与当前版本比。
+     *
+     * 设备架构在构造时探一次就够了：ABI 不会中途变，每次检查都重读一遍只会让「选包」看起来像有状态。
+     *
+     * 注意声明位置：它依赖上面的 [httpClient]，而 Kotlin 的属性按**书写顺序**初始化 ——
+     * 挪到 `httpClient` 之前，拿到的就是一个 null。
+     */
+    val updateChecker: UpdateChecker =
+        UpdateChecker(
+            http = httpClient,
+            currentVersion = AppVersion.CURRENT_VERSION,
+            deviceAbi = DeviceAbi.fromAbi(Build.SUPPORTED_ABIS.firstOrNull()),
+        )
+
+    /** 下载与安装更新包（SET-07）：与网络层共用同一个 client，用户配的代理对它同样生效 */
+    val apkInstaller: ApkInstaller = ApkInstaller(context = appContext, client = okHttpClient)
 
     val sourceRepository: SourceRepository = RoomSourceRepository(database)
 

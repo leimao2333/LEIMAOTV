@@ -27,6 +27,9 @@ object TvRoute {
     /** 存储与缓存（SET-05）：看占了多少、一键清空 */
     const val CACHE = "cache"
 
+    /** 检查更新（SET-07）：读 GitHub 的 Latest Release，按附件名精确匹配 */
+    const val UPDATE = "update"
+
     /** 播放页带两个查询参数：频道 id（-1 = 尚未确定）与是否仍在载入频道。 */
     const val PLAYER = "player?channelId={channelId}&loading={loading}"
 

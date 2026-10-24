@@ -26,6 +26,8 @@ dependencies {
     api(project(":core:model"))
     api(project(":core:database"))
     api(project(":core:network"))
+    // 检查更新要比较「远端 tag」与「本地版本」（SET-07）：版本号的解析与比较只在 core:version 里有一份
+    implementation(project(":core:version"))
     api(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

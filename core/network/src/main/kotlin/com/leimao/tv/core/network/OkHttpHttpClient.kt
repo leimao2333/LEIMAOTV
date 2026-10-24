@@ -41,7 +41,11 @@ class OkHttpHttpClient(
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         // 只回状态码：body 里可能有服务端回显的地址，写进日志就泄露了（RULES §2.5）
-                        return@use FetchOutcome.Failure(FetchErrorKind.HTTP, "HTTP ${response.code}")
+                        return@use FetchOutcome.Failure(
+                            kind = FetchErrorKind.HTTP,
+                            detail = "HTTP ${response.code}",
+                            httpStatus = response.code,
+                        )
                     }
                     val text = response.body?.string().orEmpty()
                     if (text.isBlank()) {

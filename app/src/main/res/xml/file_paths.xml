@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 暴露的路径（SET-07）。
+
+  只开 `cacheDir/updates/` 一个子目录：给整个 cacheDir 等于把台标缓存也递给安装器，
+  而安装器只需要那一个包。范围越小，授权越不容易被别的东西拿去用。
+-->
+<paths>
+    <cache-path
+        name="updates"
+        path="updates/" />
+</paths>

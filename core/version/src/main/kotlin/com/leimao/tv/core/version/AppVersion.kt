@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.6"
+    const val CURRENT_VERSION: String = "0.2.9.7"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.7",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "设置里多了「检查更新」：进页面自动问一次有没有新版",
+                        "有新版本会列出这次改了什么，下载完按「安装」交给系统装",
+                        "按盒子的架构自动挑安装包，不会给你一个装不上的",
+                        "查不到时说明原因：还没发过版、查得太频繁，还是网络不通",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.6",
                 date = "2026-10-24",

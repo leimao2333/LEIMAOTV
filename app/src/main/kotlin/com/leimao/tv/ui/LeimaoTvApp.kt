@@ -14,6 +14,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -24,6 +26,7 @@ import androidx.navigation.navArgument
 import com.leimao.tv.AppContainer
 import com.leimao.tv.SourceRefreshWorker
 import com.leimao.tv.core.data.RefreshInterval
+import com.leimao.tv.core.data.UpdateCheckResult
 import com.leimao.tv.core.data.VodDetailResult
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.AppMode
@@ -37,6 +40,7 @@ import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.network.NetworkSettings
+import com.leimao.tv.core.model.release.ReleaseAsset
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodDetail
@@ -60,6 +64,8 @@ import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.TrackKind
 import com.leimao.tv.core.player.VideoSurfaceHost
+import com.leimao.tv.core.version.AppVersion
+import com.leimao.tv.data.ApkInstaller
 import com.leimao.tv.feature.iptv.PlayerScreen
 import com.leimao.tv.feature.iptv.PlayerUiState
 import com.leimao.tv.feature.iptv.ProgrammeLine
@@ -68,12 +74,15 @@ import com.leimao.tv.feature.iptv.neighborOf
 import com.leimao.tv.feature.settings.AppearanceSettingsScreen
 import com.leimao.tv.feature.settings.CacheScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
+import com.leimao.tv.feature.settings.DownloadProgress
 import com.leimao.tv.feature.settings.LicenseScreen
 import com.leimao.tv.feature.settings.NetworkSettingsScreen
 import com.leimao.tv.feature.settings.PlaybackSettingsScreen
 import com.leimao.tv.feature.settings.RefreshSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
+import com.leimao.tv.feature.settings.UpdateScreen
+import com.leimao.tv.feature.settings.UpdateUiState
 import com.leimao.tv.feature.vod.HeroItem
 import com.leimao.tv.feature.vod.VodDetailScreen
 import com.leimao.tv.feature.vod.VodDetailState
@@ -86,7 +95,9 @@ import com.leimao.tv.feature.vod.VodPlayerUiState
 import com.leimao.tv.feature.vod.VodSourceRow
 import com.leimao.tv.feature.vod.buildHeroItems
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * 导航图。页面树是**以播放页为根的单枢纽结构**（RULES §6.4）：
@@ -194,6 +205,7 @@ fun LeimaoTvApp(
                     onOpenNetworkSettings = { navController.navigate(TvRoute.NETWORK_SETTINGS) },
                     onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
                     onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
+                    onOpenUpdate = { navController.navigate(TvRoute.UPDATE) },
                     onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
                     onOpenCache = { navController.navigate(TvRoute.CACHE) },
                     onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
@@ -227,6 +239,11 @@ fun LeimaoTvApp(
             composable(TvRoute.LICENSE) {
                 BackHandler { navController.popBackStack() }
                 LicenseScreen()
+            }
+
+            composable(TvRoute.UPDATE) {
+                BackHandler { navController.popBackStack() }
+                UpdateRoute(container = container)
             }
 
             composable(TvRoute.PLAYBACK_SETTINGS) {
@@ -308,6 +325,103 @@ private fun CacheRoute(container: AppContainer) {
                     clearedBytes = (before - after.totalBytes).coerceAtLeast(0L)
                     clearing = false
                 }
+            }
+        },
+    )
+}
+
+/**
+ * 检查更新（SET-07）的接线：查 → 下 → 装。
+ *
+ * 三步都留在页面作用域里，所以**离开这一页下载就会停**。这是有意的：
+ * 更新包几十 MB，用户在下载中途按返回，多半是「不想装了」，而不是「希望它在后台继续占带宽」。
+ * 已经下好的包留在 cacheDir，下次进页面查完再点下载会重下一份（同一版本，代价可以接受）。
+ *
+ * 进页面自动查一次：用户点进「检查更新」这件事本身就是「我想知道有没有新版」，
+ * 再让他按一次「检查」等于把同一个意图问两遍。
+ */
+@Composable
+private fun UpdateRoute(container: AppContainer) {
+    var state by remember { mutableStateOf(UpdateUiState(currentVersion = AppVersion.CURRENT_VERSION)) }
+    val scope = rememberCoroutineScope()
+
+    fun check() {
+        if (state.checking) return
+        state = state.copy(checking = true, note = null)
+        scope.launch {
+            val result = container.updateChecker.check()
+            state =
+                state.copy(
+                    checking = false,
+                    result = result,
+                    // 结论换了就把上一版留下的状态清掉：否则会拿着旧包的路径去「安装」
+                    downloading = null,
+                    downloadedPath = null,
+                    needsInstallPermission = false,
+                )
+        }
+    }
+
+    fun download(asset: ReleaseAsset) {
+        state = state.copy(downloading = DownloadProgress(bytesRead = 0L, totalBytes = asset.sizeBytes), note = null)
+        scope.launch {
+            container.apkInstaller.download(asset.downloadUrl, asset.name).collect { event ->
+                when (event) {
+                    is ApkInstaller.DownloadEvent.Progress ->
+                        state =
+                            state.copy(
+                                downloading = DownloadProgress(event.bytesRead, event.totalBytes),
+                            )
+
+                    is ApkInstaller.DownloadEvent.Done ->
+                        state =
+                            state.copy(
+                                downloading = null,
+                                downloadedPath = event.file.absolutePath,
+                                // 下完才知道装不装得上：权限是系统设置，只能到这里再问一次
+                                needsInstallPermission = !container.apkInstaller.canInstall(),
+                            )
+
+                    is ApkInstaller.DownloadEvent.Failed ->
+                        state = state.copy(downloading = null, note = event.reason)
+                }
+            }
+        }
+    }
+
+    fun install() {
+        val path = state.downloadedPath ?: return
+        val launched = container.apkInstaller.install(File(path))
+        state =
+            state.copy(
+                note =
+                    if (launched) {
+                        "已打开系统安装界面；装完重新打开应用就生效"
+                    } else {
+                        "没能打开安装界面，包可能不完整，重新下载一次"
+                    },
+            )
+    }
+
+    LaunchedEffect(Unit) { check() }
+
+    // 从「允许安装未知应用」的设置页回来时重看一次开关：不然「去允许安装」会一直挂在按钮上
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (state.downloadedPath != null) {
+            state = state.copy(needsInstallPermission = !container.apkInstaller.canInstall())
+        }
+    }
+
+    UpdateScreen(
+        state = state,
+        onCheck = { check() },
+        onDownload = { (state.result as? UpdateCheckResult.Available)?.let { download(it.asset) } },
+        onInstall = { install() },
+        onOpenInstallSettings = {
+            val opened = container.apkInstaller.openInstallPermissionSettings()
+            if (!opened) {
+                // 老盒子没有这个设置页，只能给路径让人自己找
+                state = state.copy(note = "这台设备不能直接跳过去，请到「设置 → 安全 → 未知来源」手动允许")
             }
         },
     )
@@ -547,6 +661,7 @@ private fun HomeRoute(
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
+        onOpenUpdate = { navController.navigate(TvRoute.UPDATE) },
         onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
         onOpenCache = { navController.navigate(TvRoute.CACHE) },
         onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },

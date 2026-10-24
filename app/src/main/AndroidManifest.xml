@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- 应用内更新（SET-07）：下载新版包后交给系统安装器。声明它只为了「能发起安装」，
+         装与不装由系统界面上的用户决定，应用无法静默替换自己 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- required=false：盒子不一定声明 leanback，但仍是电视设备；置 true 会让部分盒子装不上 -->
     <uses-feature
         android:name="android.software.leanback"
@@ -36,6 +40,18 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 更新包的分享出口（SET-07）：安装器是另一个进程，读我们的 cacheDir 必须走 content:// +
+             一次性读授权。authorities 用 ${applicationId} 占位，debug 包（带 .debug 后缀）也自动对上 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

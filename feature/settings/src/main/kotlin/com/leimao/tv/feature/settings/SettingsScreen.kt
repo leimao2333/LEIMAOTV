@@ -39,6 +39,7 @@ fun SettingsScreen(
     onOpenNetworkSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     onOpenChangelog: () -> Unit,
+    onOpenUpdate: () -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenCache: () -> Unit,
     onOpenLicense: () -> Unit,
@@ -106,6 +107,12 @@ fun SettingsScreen(
         )
         Spacer(modifier = Modifier.height(12.dp))
 
+        SettingRow(
+            title = "检查更新",
+            subtitle = "去 GitHub 看看有没有新版本，有就直接下载安装（SET-07）",
+            onClick = onOpenUpdate,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         SettingRow(
             title = "更新日志",
             subtitle = "当前版本 ${AppVersion.CURRENT_VERSION}",

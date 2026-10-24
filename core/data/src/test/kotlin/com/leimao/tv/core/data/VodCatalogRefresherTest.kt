@@ -1,19 +1,12 @@
 package com.leimao.tv.core.data
 
-import com.leimao.tv.core.database.repository.MediaRepository
-import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
-import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.vod.VodCategory
 import com.leimao.tv.core.model.vod.VodDetail
 import com.leimao.tv.core.model.vod.VodPage
 import com.leimao.tv.core.model.vod.VodSummary
-import com.leimao.tv.core.network.FetchErrorKind
-import com.leimao.tv.core.network.FetchOutcome
-import com.leimao.tv.core.network.HttpClient
-import com.leimao.tv.core.network.RequestHeaders
 import com.leimao.tv.core.network.vod.VodFailure
 import com.leimao.tv.core.network.vod.VodFetchResult
 import com.leimao.tv.core.network.vod.VodSourceAdapter
@@ -269,88 +262,6 @@ class VodCatalogRefresherTest {
                     )
                 },
         )
-}
-
-private object FakeHttp : HttpClient {
-    override suspend fun fetch(
-        url: String,
-        headers: RequestHeaders,
-    ): FetchOutcome = FetchOutcome.Failure(FetchErrorKind.NETWORK, "单测不联网")
-}
-
-private class FakeSourceRepository(
-    private val data: List<Source>,
-) : SourceRepository {
-    override suspend fun list(): List<Source> = data
-
-    override suspend fun enabled(): List<Source> = data.filter { it.enabled }
-
-    override suspend fun find(id: Long): Source? = data.firstOrNull { it.id == id }
-
-    override suspend fun countEnabled(): Int = data.count { it.enabled }
-
-    override suspend fun countEnabledLive(): Int = data.count { it.enabled && it.type == SourceType.LIVE }
-
-    override suspend fun add(source: NewSource): Long = 0
-
-    override suspend fun delete(id: Long) = Unit
-
-    override suspend fun setEnabled(
-        id: Long,
-        enabled: Boolean,
-    ) = Unit
-
-    override suspend fun markRefreshed(
-        id: Long,
-        at: Long,
-        note: String?,
-    ) = Unit
-
-    override suspend fun move(
-        id: Long,
-        direction: Int,
-    ) = Unit
-
-    override suspend fun exportJson(): String = ""
-
-    override suspend fun importJson(json: String): Int = 0
-}
-
-private class FakeMediaRepository : MediaRepository {
-    /** 每次 replace 的 (sourceId, pages, now)，便于断言「哪些类型落库了」 */
-    val replaced = mutableListOf<Triple<Long, Map<ContentType, List<VodSummary>>, Long>>()
-
-    override suspend fun replace(
-        sourceId: Long,
-        pages: Map<ContentType, List<VodSummary>>,
-        now: Long,
-    ) {
-        replaced += Triple(sourceId, pages, now)
-    }
-
-    override suspend fun recent(limit: Int): List<VodSummary> = emptyList()
-
-    override suspend fun byType(
-        type: ContentType,
-        year: Int?,
-        area: String?,
-        limit: Int,
-    ): List<VodSummary> = emptyList()
-
-    override suspend fun bySource(
-        sourceId: Long,
-        limit: Int,
-    ): List<VodSummary> = emptyList()
-
-    override suspend fun yearsOf(type: ContentType): List<Int> = emptyList()
-
-    override suspend fun areasOf(type: ContentType): List<String> = emptyList()
-
-    override suspend fun lastFetchedAt(): Long? = null
-
-    override suspend fun clearSource(sourceId: Long) = Unit
-
-    override suspend fun isEmpty(): Boolean = true
 }
 
 private class FakeAdapter(

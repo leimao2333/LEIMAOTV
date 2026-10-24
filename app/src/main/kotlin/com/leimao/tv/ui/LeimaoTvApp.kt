@@ -22,6 +22,7 @@ import androidx.navigation.navArgument
 import com.leimao.tv.AppContainer
 import com.leimao.tv.SourceRefreshWorker
 import com.leimao.tv.core.data.RefreshInterval
+import com.leimao.tv.core.data.VodDetailResult
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
@@ -34,6 +35,7 @@ import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.network.BasicAuth
 import com.leimao.tv.core.network.RequestHeaders
+import com.leimao.tv.core.network.vod.VodFailure
 import com.leimao.tv.core.player.PlaybackRequest
 import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.core.player.VideoSurfaceHost
@@ -49,6 +51,9 @@ import com.leimao.tv.feature.settings.PlaybackSettingsScreen
 import com.leimao.tv.feature.settings.RefreshSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
+import com.leimao.tv.feature.vod.VodDetailScreen
+import com.leimao.tv.feature.vod.VodDetailState
+import com.leimao.tv.feature.vod.VodDetailStatus
 import com.leimao.tv.feature.vod.VodHomeState
 import com.leimao.tv.feature.vod.VodSourceRow
 import kotlinx.coroutines.delay
@@ -113,6 +118,16 @@ fun LeimaoTvApp(
 
             composable(TvRoute.HOME) {
                 HomeRoute(container = container, navController = navController, onExitApp = onExitApp)
+            }
+
+            composable(route = TvRoute.VOD_DETAIL, arguments = vodDetailArguments) { entry ->
+                VodDetailRoute(
+                    container = container,
+                    sourceId = entry.arguments?.getLong(ARG_SOURCE_ID) ?: 0L,
+                    sourceKey = entry.arguments?.getString(ARG_SOURCE_KEY).orEmpty(),
+                    onBack = { navController.popBackStack() },
+                    onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
+                )
             }
 
             composable(TvRoute.SEARCH) {
@@ -313,8 +328,8 @@ private fun HomeRoute(
                 },
                 onSelectYear = { vodYear = it },
                 onSelectArea = { vodArea = it },
-                onSelectMedia = {
-                    // 详情页是 VOD-04：先不跳转。跳到空页面比不跳更让人困惑
+                onSelectMedia = { summary ->
+                    navController.navigate(TvRoute.vodDetail(summary.sourceId, summary.sourceKey))
                 },
             ),
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
@@ -486,6 +501,97 @@ private fun SourceManagerRoute(
 }
 
 /**
+ * 影视详情页的接线（VOD-04）。
+ *
+ * 两段式载入：
+ * 1. **先读本地快照**——首页点进来时 `media` 表里一定已经有这一条，用它把标题和海报
+ *    先画出来，让用户立刻看见「点对了」，而不是对着白屏等一次往返；
+ * 2. **再回源拿详情**——简介、线路、选集只在详情接口里有。
+ *
+ * 回源失败时**不销毁 1 的画面**：status 变成 FAILED，头部照旧显示本地摘要，
+ * 只有选集区换成「没能读出来 + 重试」。整页塌成错误页是最难看的做法。
+ */
+@Composable
+private fun VodDetailRoute(
+    container: AppContainer,
+    sourceId: Long,
+    sourceKey: String,
+    onBack: () -> Unit,
+    onOpenSourceManager: () -> Unit,
+) {
+    BackHandler { onBack() }
+
+    var state by remember { mutableStateOf(VodDetailState()) }
+    // 重试计数器：改一下就重新跑一次 LaunchedEffect，不必自己管 Job
+    var reloadTag by remember { mutableStateOf(0) }
+
+    LaunchedEffect(sourceId, sourceKey, reloadTag) {
+        state =
+            state.copy(
+                summary = container.mediaRepository.find(sourceId, sourceKey) ?: state.summary,
+                status = VodDetailStatus.LOADING,
+                note = null,
+            )
+
+        when (val result = container.vodDetailLoader.load(sourceId, sourceKey)) {
+            is VodDetailResult.Loaded ->
+                state =
+                    state.copy(
+                        detail = result.detail,
+                        summary = result.detail.summary,
+                        status = VodDetailStatus.READY,
+                        note = null,
+                        // 换片要重置线路与选集：从 A 片的第 20 集返回、再点进 B 片，
+                        // 停在第 20 集毫无意义，而 B 片可能只有 10 集
+                        lineIndex = 0,
+                        episodeIndex = 0,
+                    )
+
+            VodDetailResult.Gone -> state = state.copy(status = VodDetailStatus.GONE)
+            VodDetailResult.NoSource -> state = state.copy(status = VodDetailStatus.NO_SOURCE)
+            is VodDetailResult.Failed ->
+                state =
+                    state.copy(
+                        status = VodDetailStatus.FAILED,
+                        note = describeDetailFailure(result.reason, result.detail),
+                    )
+        }
+    }
+
+    VodDetailScreen(
+        state = state,
+        onRetry = { reloadTag++ },
+        onSelectLine = { index -> state = state.copy(lineIndex = index, episodeIndex = 0) },
+        onToggleReverse = { state = state.copy(reversed = !state.reversed) },
+        onSelectEpisode = { shown ->
+            // 展示下标 → 原始下标在 state 里换算，这里不重复一遍倒序逻辑
+            val original = state.originalIndexAt(shown)
+            state = state.copy(episodeIndex = original)
+        },
+        onOpenSourceManager = onOpenSourceManager,
+    )
+}
+
+/**
+ * 详情页场景下的失败文案。
+ *
+ * 与源管理页那份**故意不同**：[VodFailure] 的注释里写明「同一个原因在不同场景下说法不同」。
+ * 这里源地址已经验证过（能进到详情页说明首页抓过内容），所以「返回的不是影视接口」
+ * 这种提示只会让人怀疑自己是不是点错了 —— 换成「对方接口这会儿不对」更准确。
+ */
+private fun describeDetailFailure(
+    failure: VodFailure,
+    detail: String?,
+): String =
+    when (failure) {
+        VodFailure.TIMEOUT -> "对方接口超时了，稍后再试一次"
+        VodFailure.HTTP -> "对方接口返回了错误（${detail ?: "HTTP 错误"}），可能是临时故障"
+        VodFailure.NETWORK -> "网络不通（${detail ?: "无法连接"}），检查一下盒子或路由"
+        VodFailure.EMPTY -> "对方返回了空内容，这部片可能刚下架"
+        VodFailure.NOT_VOD_SOURCE -> "对方返回的内容不像详情（${detail ?: "格式不符"}），过一会儿再试"
+    }
+
+/**
  * 从本地快照组装影视首页状态（VOD-03）。
  *
  * 为什么在 :app 而不在 feature 模块：读数据属于组装层的职责，feature 只拿现成数据 ——
@@ -523,6 +629,8 @@ private const val VOD_CACHE_TTL_MS = 30 * 60 * 1000L
 
 private const val ARG_CHANNEL_ID = "channelId"
 private const val ARG_LOADING = "loading"
+private const val ARG_SOURCE_ID = "sourceId"
+private const val ARG_SOURCE_KEY = "sourceKey"
 
 /**
  * 节目单对表间隔。
@@ -541,6 +649,17 @@ private val playerArguments =
         navArgument(ARG_LOADING) {
             type = NavType.BoolType
             defaultValue = false
+        },
+    )
+
+private val vodDetailArguments =
+    listOf(
+        navArgument(ARG_SOURCE_ID) { type = NavType.LongType },
+        // 必须给默认值：StringType 没有默认值时空串会让路由匹配失败，
+        // 那比进到页面里查不到更难看
+        navArgument(ARG_SOURCE_KEY) {
+            type = NavType.StringType
+            defaultValue = ""
         },
     )
 

@@ -29,4 +29,7 @@ dependencies {
     implementation(project(":core:designsystem"))
     // 海报加载与直播台标共用 Coil，内存/磁盘上限在 TvApp 里统一配置（RULES §7）
     implementation(libs.coil.compose)
+
+    // VodDetailState 里的倒序换算 / 副信息行都是纯函数，可在 JVM 上直接测
+    testImplementation(libs.junit)
 }

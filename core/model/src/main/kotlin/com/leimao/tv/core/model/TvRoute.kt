@@ -21,6 +21,12 @@ object TvRoute {
     /** 播放页带两个查询参数：频道 id（-1 = 尚未确定）与是否仍在载入频道。 */
     const val PLAYER = "player?channelId={channelId}&loading={loading}"
 
+    /**
+     * 影视详情（VOD-04）。用 `(sourceId, sourceKey)` 而不是单片 id 定位：
+     * 跨源的 `vod_id` 会撞，只有这一对唯一（见 `VodSummary` 的注释）。
+     */
+    const val VOD_DETAIL = "vod_detail?sourceId={sourceId}&sourceKey={sourceKey}"
+
     private const val NO_CHANNEL = -1L
 
     fun player(channelId: Long?, loading: Boolean = false): String =
@@ -28,4 +34,37 @@ object TvRoute {
 
     /** 从路由参数还原频道 id：-1 归一成 null，免得下游到处判魔法数。 */
     fun channelIdFrom(raw: Long): Long? = raw.takeIf { it != NO_CHANNEL }
+
+    fun vodDetail(
+        sourceId: Long,
+        sourceKey: String,
+    ): String = "vod_detail?sourceId=$sourceId&sourceKey=${percentEncode(sourceKey)}"
+
+    /**
+     * 极简百分号编码。
+     *
+     * 为什么自己写而不用 `URLEncoder`：后者按 `application/x-www-form-urlencoded` 把空格编成
+     * `+`，而导航组件按 URI 规范只认 `%20`，`+` 会被当成字面量原样传下去 ——
+     * 于是「片名里有空格」的条目详情页会永远查不到。这个模块又是纯 JVM（RULES §5.2），
+     * 借不到 `android.net.Uri`。二十行换一个不含糊的语义，值得。
+     *
+     * 只保留 URI 里无歧义的字符（字母、数字、`-._~`），其余一律编码：
+     * 宁可多编码几个字符，也不要在某个冷门字符上出一次「点进去是空的」。
+     */
+    internal fun percentEncode(value: String): String =
+        buildString(value.length) {
+            for (byte in value.toByteArray(Charsets.UTF_8)) {
+                val code = byte.toInt() and 0xFF
+                val char = code.toChar()
+                if (char in 'a'..'z' || char in 'A'..'Z' || char in '0'..'9' || char in "-._~") {
+                    append(char)
+                } else {
+                    append('%')
+                    append(HEX[code shr 4])
+                    append(HEX[code and 0x0F])
+                }
+            }
+        }
+
+    private const val HEX = "0123456789ABCDEF"
 }

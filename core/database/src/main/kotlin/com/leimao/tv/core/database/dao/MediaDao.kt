@@ -92,6 +92,18 @@ interface MediaDao {
     @Query("SELECT MAX(fetchedAt) FROM media")
     suspend fun lastFetchedAt(): Long?
 
+    /**
+     * 按跨源唯一键取一条（详情页进场时先把本地摘要渲染出来，不等网络）。
+     *
+     * 走 `(sourceId, sourceKey)` 的唯一索引，是一次主键级查找；返回 null 说明这条
+     * 从来没进过首页快照（例如源刚被清空），此时详情页只能直接等回源结果。
+     */
+    @Query("SELECT * FROM media WHERE sourceId = :sourceId AND sourceKey = :sourceKey")
+    suspend fun find(
+        sourceId: Long,
+        sourceKey: String,
+    ): MediaEntity?
+
     /** 源被删除时连带清理它的条目，避免首页出现点进去拉不到详情的历史残留 */
     @Query("DELETE FROM media WHERE sourceId = :sourceId")
     suspend fun clearSource(sourceId: Long)

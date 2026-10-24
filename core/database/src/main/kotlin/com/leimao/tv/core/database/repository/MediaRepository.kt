@@ -45,6 +45,12 @@ interface MediaRepository {
     /** 上次入库时间，用于「缓存多久没刷了」的判断 */
     suspend fun lastFetchedAt(): Long?
 
+    /** 按跨源唯一键取一条；库里没有时返回 null（详情页据此决定要不要先渲染占位） */
+    suspend fun find(
+        sourceId: Long,
+        sourceKey: String,
+    ): VodSummary?
+
     suspend fun clearSource(sourceId: Long)
 
     suspend fun isEmpty(): Boolean
@@ -90,6 +96,11 @@ class RoomMediaRepository(
     override suspend fun areasOf(type: ContentType): List<String> = dao.areasOf(type.name)
 
     override suspend fun lastFetchedAt(): Long? = dao.lastFetchedAt()
+
+    override suspend fun find(
+        sourceId: Long,
+        sourceKey: String,
+    ): VodSummary? = dao.find(sourceId, sourceKey)?.toSummary()
 
     override suspend fun clearSource(sourceId: Long) = dao.clearSource(sourceId)
 

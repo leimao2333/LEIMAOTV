@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.2.0"
+    const val CURRENT_VERSION: String = "0.2.3.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.3.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "影视详情页上线：简介、导演主演、线路切换、按集选集，倒序一键切换",
+                        "首页点海报就能进详情，进入时先用本地缓存的标题和海报撑住画面，不会白屏",
+                        "源下架、源被删、网络出错分别给出不同提示，不再一律显示「加载失败」",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.2.0",
                 date = "2026-10-24",

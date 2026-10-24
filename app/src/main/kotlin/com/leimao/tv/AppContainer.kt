@@ -4,6 +4,7 @@ import android.content.Context
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.VodCatalogRefresher
+import com.leimao.tv.core.data.VodDetailLoader
 import com.leimao.tv.core.database.LeimaoDatabase
 import com.leimao.tv.core.database.repository.ChannelRepository
 import com.leimao.tv.core.database.repository.ChannelWriter
@@ -86,6 +87,13 @@ class AppContainer(context: Context) {
         VodCatalogRefresher(
             sources = sourceRepository,
             media = mediaRepository,
+            http = httpClient,
+        )
+
+    /** 单片详情（VOD-04）：`(sourceId, sourceKey)` → 源 → 适配器 → 详情。不落库 */
+    val vodDetailLoader: VodDetailLoader =
+        VodDetailLoader(
+            sources = sourceRepository,
             http = httpClient,
         )
 

@@ -8,7 +8,7 @@
 
 图例：`- [ ]` 待办 / `- [x]` 已完成（末尾标版本）/ `⏸` 暂缓（标原因）
 
-当前进度：**66 / 80 条功能，4 / 4 项决策**（SET-02 部分完成，未计入） ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ 下一里程碑 **M2**
+当前进度：**67 / 80 条功能，4 / 4 项决策**（SET-02 部分完成，未计入） ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ 下一里程碑 **M2**
 
 ---
 
@@ -378,8 +378,23 @@
 - [ ] **SYS-04** 崩溃本地留档 ｜ P2
 - [ ] **SYS-06** 性能基准 ｜ P2
   - [ ] Macrobenchmark 覆盖 RULES §7 全部指标
-- [ ] **SYS-07** 发布流水线 ｜ P1
-  - [ ] 签名 + 分 ABI + Release 附件命名与上传
+- [x] **SYS-07** 发布流水线 ｜ P1（v0.2.9.8）
+  - [x] `.github/workflows/release.yml`：推 `v*` tag 即发版，包与附件**不经人手**
+  - [x] 签名：**密钥与 `keystore.properties` 都随仓库提交**（决定：签名与密钥一起放在库里），
+        发版不需要配任何 secret，换机器也能签；`.gitignore` 只放行 `keystore/leimao-tv.jks` 这一个文件
+  - [x] 写了配置却指不到密钥文件时**构建直接失败** —— 不许悄悄产出一个装不上的 unsigned 包
+  - [x] 上传前四道闸：tag 与 `versionName` 逐字符相等 / `versionCode` 合 §10.2 公式 /
+        `CHANGELOG.md` 有该版本条目 / `apksigner -v` 的 v2 = true；另加包名兜底
+  - [x] 附件命名照 §10.4 第 6 条：当前只发 `-universal.apk`（无 native so，一份包全 ABI 可装）。
+        不能改叫主名 —— 更新器把主名当 arm64 专用包，32 位设备会永远收不到更新；单测钉住
+  - [x] 附 `.sha256`；重跑时覆盖附件而不是报「release already exists」
+  - [x] `scripts/create-keystore.sh` 生成密钥并打印 base64；`docs/发布流程.md` 写首次配置与排障
+  - [x] 本地演练过：正常路径 + 六种失败情形（tag 不符 / code 算错 / 缺日志条目 / 多个 APK /
+        非四段版本号 / 密钥读不出来）逐条跑出预期结论
+  - [ ] **首次真发版**：推任意 tag 即可验完整链路；同一个 Release 也能让 SET-07 的
+        「下载 + 安装」真正闭环（目前 `/releases/latest` 仍回 404）
+  - [ ] 若仓库是公开的，考虑改私有：密钥在库里意味着「能 clone 的人就有签名能力」
+  - [ ] ABI 拆包：等接入 libVLC（PLAY-02 剩余项）才有意义，届时 arm64 那份才叫主名
 - [ ] **M4 验收**：RULES §7 性能红线逐项实测填表；§9.2 全流程走查；真机 + 模拟器双通过
 
 ---

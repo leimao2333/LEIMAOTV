@@ -435,20 +435,9 @@ private fun VideoSurface(player: Player?) {
 @Composable
 private fun PlayerTopBar(state: PlayerUiState, numberBuffer: String) {
     val playback = state.playback
-    val lineIndex =
-        when (playback) {
-            is PlaybackState.Playing -> playback.lineIndex
-            is PlaybackState.Preparing -> playback.lineIndex
-            is PlaybackState.Failed -> playback.lineIndex
-            PlaybackState.Idle -> 0
-        }
-    val lineCount =
-        when (playback) {
-            is PlaybackState.Playing -> playback.lineCount
-            is PlaybackState.Preparing -> playback.lineCount
-            is PlaybackState.Failed -> playback.lineCount
-            PlaybackState.Idle -> 1
-        }
+    // 线路位置在 PlaybackState 接口上，不必再按状态分支取值
+    val lineIndex = playback.lineIndex
+    val lineCount = playback.lineCount
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),

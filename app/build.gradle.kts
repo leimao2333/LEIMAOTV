@@ -13,10 +13,10 @@ android {
         minSdk = 21
         targetSdk = 35
 
-        // versionCode 按 RULES §10.2 公式算：0×1000000 + 2×10000 + 3×100 + 0 = 20300
+        // versionCode 按 RULES §10.2 公式算：0×1000000 + 2×10000 + 4×100 + 0 = 20400
         // versionName 必须与 AppVersion.CURRENT_VERSION 逐字符相等（SYS-10，单测钉住）
-        versionCode = 20300
-        versionName = "0.2.3.0"
+        versionCode = 20400
+        versionName = "0.2.4.0"
     }
 
     buildTypes {

@@ -343,14 +343,6 @@ private fun EpisodeToolbar(
         )
         Spacer(modifier = Modifier.width(18.dp))
         LineChip(text = if (reversed) "倒序" else "正序", selected = false, onClick = onToggleReverse)
-        Spacer(modifier = Modifier.width(18.dp))
-        // 说清「现在还不能播」：静默点了没反应，用户只会认为遥控器坏了
-        Text(
-            text = "选中即记录，播放随下个版本开放",
-            style = TvText.current.hint,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
     }
 }
 

@@ -66,7 +66,7 @@ class Media3PlayerController(
                             _state.value =
                                 PlaybackState.Preparing(
                                     url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                                    channelId = current.channelId,
+                                    item = current.item,
                                     lineIndex = lineIndex,
                                     lineCount = lines.size,
                                 )
@@ -76,15 +76,28 @@ class Media3PlayerController(
                             _state.value =
                                 PlaybackState.Playing(
                                     url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                                    channelId = current.channelId,
+                                    item = current.item,
                                     lineIndex = lineIndex,
                                     lineCount = lines.size,
                                 )
                         }
 
                         Player.STATE_ENDED ->
-                            // 直播流正常不该「播完」；真结束了按断流处理，走同一条重连路径
-                            handleFailure(reason = REASON_STREAM_ENDED)
+                            // 直播流正常不该「播完」，真结束了按断流处理，走同一条重连路径；
+                            // 点播播完是正常结局，交给上层决定下一集（VOD-05）——
+                            // 这里若是也走 handleFailure，每集播完都会重播最后几秒再报错
+                            if (current.kind == PlaybackKind.VOD) {
+                                stopWatchdog()
+                                _state.value =
+                                    PlaybackState.Ended(
+                                        url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
+                                        item = current.item,
+                                        lineIndex = lineIndex,
+                                        lineCount = lines.size,
+                                    )
+                            } else {
+                                handleFailure(reason = REASON_STREAM_ENDED)
+                            }
                     }
                 }
 
@@ -129,6 +142,23 @@ class Media3PlayerController(
         _state.value = PlaybackState.Idle
     }
 
+    override fun pause() {
+        videoPlayer.pause()
+    }
+
+    override fun resume() {
+        videoPlayer.play()
+    }
+
+    /** 位置与时长直接问内核。时长未知（直播 / 还没拿到 manifest）时 Media3 返回 0 或负数 */
+    override fun seekTo(positionMs: Long) {
+        videoPlayer.seekTo(positionMs.coerceAtLeast(0L))
+    }
+
+    override fun positionMs(): Long = videoPlayer.currentPosition.coerceAtLeast(0L)
+
+    override fun durationMs(): Long = videoPlayer.duration.coerceAtLeast(0L)
+
     override fun release() {
         stopWatchdog()
         request = null
@@ -144,7 +174,7 @@ class Media3PlayerController(
         _state.value =
             PlaybackState.Preparing(
                 url = url,
-                channelId = current.channelId,
+                item = current.item,
                 lineIndex = lineIndex,
                 lineCount = lines.size,
             )
@@ -211,7 +241,7 @@ class Media3PlayerController(
         _state.value =
             PlaybackState.Failed(
                 url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                channelId = current.channelId,
+                item = current.item,
                 reason = reason,
                 lineIndex = lineIndex,
                 lineCount = lines.size,

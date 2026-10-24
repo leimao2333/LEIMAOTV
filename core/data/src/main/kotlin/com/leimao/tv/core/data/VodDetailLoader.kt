@@ -17,7 +17,16 @@ import com.leimao.tv.core.network.vod.VodSourceRef
  * 源删了该去源管理，条目下架了该返回首页，网络挂了该重试 —— 给错按钮比不给更糟。
  */
 sealed interface VodDetailResult {
-    data class Loaded(val detail: VodDetail) : VodDetailResult
+    /**
+     * [headers] 是这个源要求的 UA / Referer（VOD-05）。
+     *
+     * 跟着结果一起带出来，是为了让播放页拿到的就是**同一份**请求头 ——
+     * 详情能拉到、播放器却拉不到，绝大多数时候就是播放请求少了 `Referer`。
+     */
+    data class Loaded(
+        val detail: VodDetail,
+        val headers: Map<String, String> = emptyMap(),
+    ) : VodDetailResult
 
     /** 源还在，但它自己也查不到这条（下架 / 改 id）。不是错误，是内容没了 */
     data object Gone : VodDetailResult
@@ -56,9 +65,10 @@ class VodDetailLoader(
             return VodDetailResult.NoSource
         }
 
+        val headers = source.toRequestHeaders()
         val adapter =
             adapterFactory(
-                VodSourceRef(id = source.id, baseUrl = source.url, headers = source.toRequestHeaders()),
+                VodSourceRef(id = source.id, baseUrl = source.url, headers = headers),
             )
 
         return when (val result = adapter.detail(sourceKey)) {
@@ -67,7 +77,9 @@ class VodDetailLoader(
 
             is VodFetchResult.Success ->
                 // Success(null) 是「源说查无此片」，与抓取失败严格区分（VOD-01 的约定）
-                result.value?.let { VodDetailResult.Loaded(it) } ?: VodDetailResult.Gone
+                result.value?.let {
+                    VodDetailResult.Loaded(it, headers.toPlaybackHeaders())
+                } ?: VodDetailResult.Gone
         }
     }
 }

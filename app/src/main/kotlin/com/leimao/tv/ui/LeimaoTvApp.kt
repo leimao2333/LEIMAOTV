@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -33,11 +34,19 @@ import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.startup.StartDestination
+import com.leimao.tv.core.model.vod.VodDetail
+import com.leimao.tv.core.model.vod.episodeName
+import com.leimao.tv.core.model.vod.episodeUrls
+import com.leimao.tv.core.model.vod.nextEpisode
+import com.leimao.tv.core.model.vod.previousEpisode
 import com.leimao.tv.core.network.BasicAuth
 import com.leimao.tv.core.network.RequestHeaders
 import com.leimao.tv.core.network.vod.VodFailure
+import com.leimao.tv.core.player.PlaybackItem
+import com.leimao.tv.core.player.PlaybackKind
 import com.leimao.tv.core.player.PlaybackRequest
 import com.leimao.tv.core.player.PlaybackSettings
+import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.VideoSurfaceHost
 import com.leimao.tv.feature.iptv.PlayerScreen
 import com.leimao.tv.feature.iptv.PlayerUiState
@@ -55,6 +64,9 @@ import com.leimao.tv.feature.vod.VodDetailScreen
 import com.leimao.tv.feature.vod.VodDetailState
 import com.leimao.tv.feature.vod.VodDetailStatus
 import com.leimao.tv.feature.vod.VodHomeState
+import com.leimao.tv.feature.vod.VodPlayerActions
+import com.leimao.tv.feature.vod.VodPlayerScreen
+import com.leimao.tv.feature.vod.VodPlayerUiState
 import com.leimao.tv.feature.vod.VodSourceRow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -123,10 +135,23 @@ fun LeimaoTvApp(
             composable(route = TvRoute.VOD_DETAIL, arguments = vodDetailArguments) { entry ->
                 VodDetailRoute(
                     container = container,
+                    navController = navController,
                     sourceId = entry.arguments?.getLong(ARG_SOURCE_ID) ?: 0L,
                     sourceKey = entry.arguments?.getString(ARG_SOURCE_KEY).orEmpty(),
                     onBack = { navController.popBackStack() },
                     onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
+                )
+            }
+
+            composable(route = TvRoute.VOD_PLAY, arguments = vodPlayArguments) { entry ->
+                VodPlayRoute(
+                    container = container,
+                    sourceId = entry.arguments?.getLong(ARG_SOURCE_ID) ?: 0L,
+                    sourceKey = entry.arguments?.getString(ARG_SOURCE_KEY).orEmpty(),
+                    initialLine = entry.arguments?.getInt(ARG_LINE_INDEX) ?: 0,
+                    initialEpisode = entry.arguments?.getInt(ARG_EPISODE_INDEX) ?: 0,
+                    // 回详情页而不是回首页：用户是从详情页点进来的，退回去该看到选集
+                    onBack = { navController.popBackStack() },
                 )
             }
 
@@ -383,10 +408,11 @@ private fun PlayerRoute(
         epgProgrammes = emptyList()
         container.player.play(
             PlaybackRequest(
-                channelId = channel.id,
+                item = PlaybackItem.Channel(channel.id),
                 url = config.lines.first(),
                 headers = config.toHeaders(),
                 lines = config.lines,
+                kind = PlaybackKind.LIVE,
             ),
         )
         // 记住「刚看了这个台」：启动落点优先级 #1 读的就是这条记录（§6.6）
@@ -514,6 +540,7 @@ private fun SourceManagerRoute(
 @Composable
 private fun VodDetailRoute(
     container: AppContainer,
+    navController: NavHostController,
     sourceId: Long,
     sourceKey: String,
     onBack: () -> Unit,
@@ -567,6 +594,11 @@ private fun VodDetailRoute(
             // 展示下标 → 原始下标在 state 里换算，这里不重复一遍倒序逻辑
             val original = state.originalIndexAt(shown)
             state = state.copy(episodeIndex = original)
+            // 点一集就播这一集（VOD-05）：播放页自己会再拉一次详情拿全集地址，
+            // 所以这里只传「哪条线路的第几集」，不传地址
+            navController.navigate(
+                TvRoute.vodPlay(sourceId, sourceKey, state.lineIndex, original),
+            )
         },
         onOpenSourceManager = onOpenSourceManager,
     )
@@ -590,6 +622,175 @@ private fun describeDetailFailure(
         VodFailure.EMPTY -> "对方返回了空内容，这部片可能刚下架"
         VodFailure.NOT_VOD_SOURCE -> "对方返回的内容不像详情（${detail ?: "格式不符"}），过一会儿再试"
     }
+
+/**
+ * 影视播放页的接线（VOD-05）。
+ *
+ * 三件事在这里缝起来：**拉详情**（拿全集地址）、**起播**（走同一个内核，但 kind = VOD）、
+ * **自动连播**（监听 Ended 决定下一集）。缝在 :app 是因为它同时碰到导航参数、播放器实例
+ * 与数据加载三样东西，而这三样都归 :app 管（RULES §5.5）。
+ *
+ * 为什么不把剧集列表从详情页传过来：一集一个地址，几十上百条，塞不进导航参数；
+ * 而重新拉一次详情只是一个请求，比在两层之间维护一份「传过去的快照」便宜得多。
+ */
+@Composable
+private fun VodPlayRoute(
+    container: AppContainer,
+    sourceId: Long,
+    sourceKey: String,
+    initialLine: Int,
+    initialEpisode: Int,
+    onBack: () -> Unit,
+) {
+    val playback by container.player.state.collectAsStateWithLifecycle()
+    val settings by
+        container.settings.playbackSettings.collectAsStateWithLifecycle(
+            initialValue = PlaybackSettings.DEFAULT,
+        )
+
+    var detail by remember { mutableStateOf<VodDetail?>(null) }
+    var headers by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var lineIndex by remember { mutableIntStateOf(initialLine) }
+    var episodeIndex by remember { mutableIntStateOf(initialEpisode) }
+    var positionMs by remember { mutableStateOf(0L) }
+    var durationMs by remember { mutableStateOf(0L) }
+    var preparing by remember { mutableStateOf(true) }
+    var finished by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    /** 起播某一集。地址为空时不给内核喂空串 —— 那会得到一个「解析失败」的错误码，说不清是哪一步坏 */
+    fun playEpisodeAt(
+        line: Int,
+        episode: Int,
+    ) {
+        val current = detail ?: return
+        val urls = current.episodeUrls(line, episode)
+        if (urls.isEmpty()) {
+            preparing = false
+            note = "这一集没有播放地址，换一条线路试试"
+            return
+        }
+        lineIndex = line
+        episodeIndex = episode
+        finished = false
+        preparing = false
+        note = null
+        positionMs = 0L
+        durationMs = 0L
+        container.player.play(
+            PlaybackRequest(
+                item = PlaybackItem.Episode(sourceId = sourceId, sourceKey = sourceKey, index = episode),
+                url = urls.first(),
+                // 影视 CDN 大多校验 Referer，少了它表现为「详情能拉到、一播就 403」
+                headers = headers,
+                lines = urls,
+                kind = PlaybackKind.VOD,
+            ),
+        )
+    }
+
+    // 详情只拉一次：切集、连播都复用这份，不再打网络
+    LaunchedEffect(sourceId, sourceKey) {
+        when (val result = container.vodDetailLoader.load(sourceId, sourceKey)) {
+            is VodDetailResult.Loaded -> {
+                detail = result.detail
+                headers = result.headers
+                playEpisodeAt(initialLine, initialEpisode)
+            }
+
+            VodDetailResult.Gone -> {
+                preparing = false
+                note = "源里已经找不到这部片子了"
+            }
+
+            VodDetailResult.NoSource -> {
+                preparing = false
+                note = "这个影视源已经不可用了"
+            }
+
+            is VodDetailResult.Failed -> {
+                preparing = false
+                note = describeDetailFailure(result.reason, result.detail)
+            }
+        }
+    }
+
+    // 自动连播：内核说「播完了」就接下一集。
+    // 依赖整个 playback 而不只是 Ended：起播后状态变成 Preparing，这个 effect 会重跑，
+    // 于是同一集的 Ended 不会被处理两次
+    LaunchedEffect(playback) {
+        if (playback !is PlaybackState.Ended) return@LaunchedEffect
+        val current = detail ?: return@LaunchedEffect
+        val next = current.nextEpisode(lineIndex, episodeIndex)
+        if (next == null) {
+            finished = true
+        } else {
+            playEpisodeAt(next.lineIndex, next.episodeIndex)
+        }
+    }
+
+    // 进度轮询：500ms 一次。内核没有位置回调，而进度条只需要「肉眼看着在走」，
+    // 再密就是在为看不见的精度烧 CPU
+    LaunchedEffect(playback) {
+        if (playback !is PlaybackState.Playing) return@LaunchedEffect
+        while (true) {
+            positionMs = container.player.positionMs()
+            durationMs = container.player.durationMs()
+            delay(POSITION_POLL_MS)
+        }
+    }
+
+    val current = detail
+    val line = current?.lines?.getOrNull(lineIndex)
+    VodPlayerScreen(
+        state =
+            VodPlayerUiState(
+                title = current?.summary?.name.orEmpty(),
+                episodeName = current?.episodeName(lineIndex, episodeIndex).orEmpty(),
+                episodeIndex = episodeIndex,
+                episodeCount = line?.episodes?.size ?: 0,
+                lineName = line?.name.orEmpty(),
+                lineIndex = lineIndex,
+                lineCount = current?.lines?.size ?: 0,
+                playback = playback,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                finished = finished,
+                preparing = preparing,
+                note = note,
+            ),
+        actions =
+            VodPlayerActions(
+                onTogglePause = {
+                    if (playback is PlaybackState.Playing) container.player.pause() else container.player.resume()
+                },
+                onSeekBy = { delta ->
+                    val target = (positionMs + delta).coerceIn(0L, maxOf(durationMs, 0L))
+                    container.player.seekTo(target)
+                    positionMs = target
+                },
+                onPrevious = {
+                    current?.previousEpisode(lineIndex, episodeIndex)?.let {
+                        playEpisodeAt(it.lineIndex, it.episodeIndex)
+                    }
+                },
+                onNext = {
+                    current?.nextEpisode(lineIndex, episodeIndex)?.let {
+                        playEpisodeAt(it.lineIndex, it.episodeIndex)
+                    }
+                },
+                onSelectEpisode = { index -> playEpisodeAt(lineIndex, index) },
+                onRetry = { playEpisodeAt(lineIndex, episodeIndex) },
+                onBack = {
+                    // 离开就停：影视是长视频，挂在后台继续拉流既费流量又会让回直播时打架
+                    container.player.stop()
+                    onBack()
+                },
+            ),
+        videoPlayer = (container.player as? VideoSurfaceHost)?.videoPlayer,
+        seekStepMs = settings.seekIncrementMs,
+    )
+}
 
 /**
  * 从本地快照组装影视首页状态（VOD-03）。
@@ -631,6 +832,8 @@ private const val ARG_CHANNEL_ID = "channelId"
 private const val ARG_LOADING = "loading"
 private const val ARG_SOURCE_ID = "sourceId"
 private const val ARG_SOURCE_KEY = "sourceKey"
+private const val ARG_LINE_INDEX = "lineIndex"
+private const val ARG_EPISODE_INDEX = "episodeIndex"
 
 /**
  * 节目单对表间隔。
@@ -639,6 +842,9 @@ private const val ARG_SOURCE_KEY = "sourceKey"
  * 再密就是在为「精确到秒」做无用功 —— 每次都要过一遍 Room 的时间窗查询。
  */
 private const val EPG_REFRESH_MS = 60_000L
+
+/** 影视进度轮询间隔：肉眼看着在走就够了，再密只是烧 CPU */
+private const val POSITION_POLL_MS = 500L
 
 private val playerArguments =
     listOf(
@@ -662,6 +868,19 @@ private val vodDetailArguments =
             defaultValue = ""
         },
     )
+
+private val vodPlayArguments =
+    vodDetailArguments +
+        listOf(
+            navArgument(ARG_LINE_INDEX) {
+                type = NavType.IntType
+                defaultValue = 0
+            },
+            navArgument(ARG_EPISODE_INDEX) {
+                type = NavType.IntType
+                defaultValue = 0
+            },
+        )
 
 private fun StartDestination.toRoute(): String =
     when (this) {

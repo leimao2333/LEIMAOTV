@@ -42,6 +42,17 @@ class StubPlayerController : PlayerController {
         _state.value = PlaybackState.Idle
     }
 
+    override fun pause() = Unit
+
+    override fun resume() = Unit
+
+    /** 占位内核不解码，位置永远是 0：进度条会自己隐藏，正好符合「没有画面就没有进度」 */
+    override fun seekTo(positionMs: Long) = Unit
+
+    override fun positionMs(): Long = 0L
+
+    override fun durationMs(): Long = 0L
+
     override fun release() {
         current = null
         _state.value = PlaybackState.Idle
@@ -54,14 +65,14 @@ class StubPlayerController : PlayerController {
         _state.value =
             PlaybackState.Preparing(
                 url = url,
-                channelId = request.channelId,
+                item = request.item,
                 lineIndex = lineIndex,
                 lineCount = lines.size,
             )
         _state.value =
             PlaybackState.Playing(
                 url = url,
-                channelId = request.channelId,
+                item = request.item,
                 lineIndex = lineIndex,
                 lineCount = lines.size,
             )

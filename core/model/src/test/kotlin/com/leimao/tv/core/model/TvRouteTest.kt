@@ -46,6 +46,15 @@ class TvRouteTest {
     }
 
     @Test
+    fun `播放路由带上线路与集号`() {
+        // 从详情页点第 12 集，进来就该播第 12 集，而不是「先播第一集再让用户自己跳」
+        assertEquals(
+            "vod_play?sourceId=3&sourceKey=88&lineIndex=1&episodeIndex=11",
+            TvRoute.vodPlay(3, "88", lineIndex = 1, episodeIndex = 11),
+        )
+    }
+
+    @Test
     fun `频道 id 的魔法数归一成 null`() {
         assertEquals(null, TvRoute.channelIdFrom(-1L))
         assertEquals(9L, TvRoute.channelIdFrom(9L))

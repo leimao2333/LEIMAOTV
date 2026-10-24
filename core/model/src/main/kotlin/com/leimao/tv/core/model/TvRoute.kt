@@ -27,6 +27,14 @@ object TvRoute {
      */
     const val VOD_DETAIL = "vod_detail?sourceId={sourceId}&sourceKey={sourceKey}"
 
+    /**
+     * 影视播放（VOD-05）。带上线路与集号：从详情页点某一集进来，就直接播那一集，
+     * 而不是「先播第一集再让用户自己跳」。
+     */
+    const val VOD_PLAY =
+        "vod_play?sourceId={sourceId}&sourceKey={sourceKey}" +
+            "&lineIndex={lineIndex}&episodeIndex={episodeIndex}"
+
     private const val NO_CHANNEL = -1L
 
     fun player(channelId: Long?, loading: Boolean = false): String =
@@ -39,6 +47,15 @@ object TvRoute {
         sourceId: Long,
         sourceKey: String,
     ): String = "vod_detail?sourceId=$sourceId&sourceKey=${percentEncode(sourceKey)}"
+
+    fun vodPlay(
+        sourceId: Long,
+        sourceKey: String,
+        lineIndex: Int,
+        episodeIndex: Int,
+    ): String =
+        "vod_play?sourceId=$sourceId&sourceKey=${percentEncode(sourceKey)}" +
+            "&lineIndex=$lineIndex&episodeIndex=$episodeIndex"
 
     /**
      * 极简百分号编码。

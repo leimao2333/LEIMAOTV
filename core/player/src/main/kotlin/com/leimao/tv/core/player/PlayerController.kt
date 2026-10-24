@@ -4,37 +4,97 @@ import androidx.media3.common.Player
 import kotlinx.coroutines.flow.StateFlow
 
 /**
+ * 播的是什么。
+ *
+ * 内核**不解读**这个类型，只原样回传 —— 它的唯一用途是让状态自己说明「这次播的是哪一个」，
+ * 上层据此决定播完之后该干什么（换台 / 下一集）。做成 sealed 而不是一个 `Long`，
+ * 是因为影视的一条片子由「源 + 片 + 集」三样共同确定，压进一个数字就得靠约定编码，
+ * 而约定编码出错时不会有任何提示。
+ */
+sealed interface PlaybackItem {
+    /** 直播频道 */
+    data class Channel(val channelId: Long) : PlaybackItem
+
+    /** 影视剧集。[index] 是**源里的原始下标**，不是倒序后的位置（VOD-04 的约定） */
+    data class Episode(
+        val sourceId: Long,
+        val sourceKey: String,
+        val index: Int,
+    ) : PlaybackItem
+}
+
+/**
+ * 直播还是点播（VOD-05）。
+ *
+ * 这个区分只影响一件事，但它是致命的：**播放结束怎么处理**。
+ * 直播流「播完」意味着断流，该重连该换线；点播「播完」是正常结局，
+ * 当失败处理只会让用户看到同一集的最后几秒反复重播。
+ */
+enum class PlaybackKind {
+    LIVE,
+    VOD,
+}
+
+/**
  * 一次起播请求。
  *
  * 带上**全部线路**而不是单个地址：播放失败时「换下一条线路」是内核自己的职责
  * （PLAY-02 的降级链），让 UI 去拼下一轮的地址，等于把降级逻辑拆散在两层。
  */
 data class PlaybackRequest(
-    val channelId: Long,
+    val item: PlaybackItem,
     val url: String,
     val headers: Map<String, String> = emptyMap(),
     /** 至少一条；第一条通常等于 [url] */
     val lines: List<String> = listOf(url),
+    val kind: PlaybackKind = PlaybackKind.LIVE,
 ) {
     val normalizedLines: List<String> get() = if (lines.isEmpty()) listOf(url) else lines
 }
 
 /** 播放状态机。UI 只读它，不直接碰内核（架构设计 §6）。 */
 sealed interface PlaybackState {
-    data object Idle : PlaybackState
+    /**
+     * 线路位置提到接口上，四个状态实现里本来就有这两个字段。
+     *
+     * 不这么做的话，每个读线路号的界面都要写一遍四分支 `when`，而每加一个状态
+     * （比如 VOD-05 的 [Ended]）就得回头把所有 `when` 补一遍 —— 编译器会拦住，但
+     * 拦的是「所有用到的地方」，代价是把「加一个状态」变成一次跨模块改动。
+     */
+    val lineIndex: Int
+    val lineCount: Int
+
+    data object Idle : PlaybackState {
+        override val lineIndex: Int get() = 0
+        override val lineCount: Int get() = 0
+    }
 
     data class Preparing(
         val url: String,
-        val channelId: Long,
-        val lineIndex: Int,
-        val lineCount: Int,
+        val item: PlaybackItem,
+        override val lineIndex: Int,
+        override val lineCount: Int,
     ) : PlaybackState
 
     data class Playing(
         val url: String,
-        val channelId: Long,
-        val lineIndex: Int,
-        val lineCount: Int,
+        val item: PlaybackItem,
+        override val lineIndex: Int,
+        override val lineCount: Int,
+    ) : PlaybackState
+
+    /**
+     * 点播播完了（VOD-05）。
+     *
+     * 单独立一个状态而不是复用 [Failed]：播完是**正常结局**，页面上该说的是
+     * 「已播完，接下来看什么」，而失败要提供重试与换线。混在一起的话，每一集播完
+     * 用户都会看到一块红色错误框。
+     */
+    data class Ended(
+        val url: String,
+        val item: PlaybackItem,
+        override val lineIndex: Int,
+        override val lineCount: Int,
     ) : PlaybackState
 
     /**
@@ -43,10 +103,10 @@ sealed interface PlaybackState {
      */
     data class Failed(
         val url: String,
-        val channelId: Long,
+        val item: PlaybackItem,
         val reason: String,
-        val lineIndex: Int,
-        val lineCount: Int,
+        override val lineIndex: Int,
+        override val lineCount: Int,
     ) : PlaybackState {
         val canSwitchLine: Boolean get() = lineCount > 1
     }
@@ -68,6 +128,30 @@ interface PlayerController {
 
     /** 切换到相邻线路；[delta] 为 +1 / -1。返回是否切换成功（只有一条线路时返回 false） */
     fun switchLine(delta: Int): Boolean
+
+    /**
+     * 暂停 / 继续（点播用）。
+     *
+     * 直播页没有这个按钮，但内核必须支持：影视播放用户去倒杯水回来，不该错过剧情。
+     * 暂停的是本地渲染与缓冲，不影响上游。
+     */
+    fun pause()
+
+    fun resume()
+
+    /**
+     * 跳到某个位置（点播用）。
+     *
+     * 放在接口上而不是让 UI 直接摸 Media3 的 `Player.seekTo`：一旦 UI 拿到内核类型，
+     * 「换内核不改 UI」这条就破了。直播内核可以忽略这个调用。
+     */
+    fun seekTo(positionMs: Long)
+
+    /** 当前播放位置（毫秒）。还没起播时为 0 —— UI 用它画进度，不要自己猜。 */
+    fun positionMs(): Long
+
+    /** 总时长（毫秒）。直播或时长未知时为 0，UI 据此隐藏进度条。 */
+    fun durationMs(): Long
 
     fun stop()
 

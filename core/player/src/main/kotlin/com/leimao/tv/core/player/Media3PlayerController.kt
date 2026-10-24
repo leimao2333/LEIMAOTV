@@ -1,6 +1,7 @@
 package com.leimao.tv.core.player
 
 import android.content.Context
+import android.view.View
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -13,6 +14,8 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -64,7 +67,16 @@ class Media3PlayerController(
         val kind: TrackKind,
     )
 
-    override val videoPlayer: ExoPlayer = buildPlayer()
+    private val videoPlayer: ExoPlayer = buildPlayer()
+
+    override fun createSurfaceView(context: Context): View =
+        PlayerView(context).apply {
+            useController = false
+            // 直播不裁画面：宁可留黑边，也不要把台标和字幕切掉
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            setShutterBackgroundColor(android.graphics.Color.BLACK)
+            player = videoPlayer
+        }
 
     private var request: PlaybackRequest? = null
     private var lineIndex = 0
@@ -193,6 +205,10 @@ class Media3PlayerController(
     /** 位置与时长直接问内核。时长未知（直播 / 还没拿到 manifest）时 Media3 返回 0 或负数 */
     override fun seekTo(positionMs: Long) {
         videoPlayer.seekTo(positionMs.coerceAtLeast(0L))
+    }
+
+    override fun setSpeed(speed: Float) {
+        videoPlayer.setPlaybackSpeed(speed.coerceIn(0.25f, 4f))
     }
 
     override fun positionMs(): Long = videoPlayer.currentPosition.coerceAtLeast(0L)

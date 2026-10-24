@@ -197,6 +197,8 @@ fun LeimaoTvApp(
 
             composable(TvRoute.SETTINGS) {
                 BackHandler { navController.popBackStack() }
+                val bootAutostart by
+                    container.settings.bootAutostart.collectAsStateWithLifecycle(initialValue = false)
                 SettingsScreen(
                     onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
                     onOpenAppearanceSettings = {
@@ -209,6 +211,12 @@ fun LeimaoTvApp(
                     onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
                     onOpenCache = { navController.navigate(TvRoute.CACHE) },
                     onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
+                    bootAutostart = bootAutostart,
+                    onToggleBootAutostart = { enabled ->
+                        container.applicationScope.launch {
+                            container.settings.setBootAutostart(enabled)
+                        }
+                    },
                 )
             }
 
@@ -506,6 +514,9 @@ private fun HomeRoute(
         HomeSection.entries.firstOrNull { it.name == (pickedSectionName ?: savedSectionName) }
             ?: HomeSection.LIVE
     val scope = rememberCoroutineScope()
+    // 开机自启动（SET-08）：内嵌设置页开关的数据源
+    val bootAutostart by
+        container.settings.bootAutostart.collectAsStateWithLifecycle(initialValue = false)
 
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -608,6 +619,11 @@ private fun HomeRoute(
             scope.launch { container.settings.setLastSection(picked.name) }
         },
         onModeChange = { next -> scope.launch { container.settings.setMode(next) } },
+        // 开机自启动（SET-08）：首页内嵌设置页与独立设置路由读的是同一份 DataStore
+        bootAutostart = bootAutostart,
+        onToggleBootAutostart = { enabled ->
+            container.applicationScope.launch { container.settings.setBootAutostart(enabled) }
+        },
         onOpenPlayer = {
             scope.launch {
                 // 回播放页时继续播上次那个台，不重建播放器（§6.4 最后一条）。
@@ -793,7 +809,7 @@ private fun PlayerRoute(
                 epgProgrammes = epgProgrammes,
                 tracks = tracks,
             ),
-        videoPlayer = (container.player as? VideoSurfaceHost)?.videoPlayer,
+        surfaceHost = container.player as? VideoSurfaceHost,
         onSwitchChannel = { delta ->
             val next = neighborOf(channels, current?.id, delta)
             if (next != null) scope.launch { startChannel(next.id) }
@@ -833,6 +849,7 @@ private fun SourceManagerRoute(
         epgImporter = container.epgImporter,
         epgRepository = container.epgRepository,
         vodRefresher = container.vodCatalogRefresher,
+        healthChecker = container.sourceHealthChecker,
         onBack =
             if (isFirstRun) {
                 // 无源引导页按返回 = 退出确认（§6.6 降级 2：没有可播内容，不设主页中转）
@@ -1031,6 +1048,12 @@ private fun VodPlayRoute(
         container.settings.playbackSettings.collectAsStateWithLifecycle(
             initialValue = PlaybackSettings.DEFAULT,
         )
+
+    // 起播即用记忆速度（PLAY-05）：速度是「播放的属性」，进播放页就该生效，
+    // 不等用户按一次面板 —— 否则「记忆」只对这一集之后的操作生效，这次还是原速
+    LaunchedEffect(settings.playbackSpeed) {
+        container.player.setSpeed(settings.playbackSpeed)
+    }
 
     var detail by remember { mutableStateOf<VodDetail?>(null) }
     var headers by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -1385,8 +1408,18 @@ private fun VodPlayRoute(
                     onBack()
                 },
             ),
-        videoPlayer = (container.player as? VideoSurfaceHost)?.videoPlayer,
+        surfaceHost = container.player as? VideoSurfaceHost,
         seekStepMs = settings.seekIncrementMs,
+        speed = settings.playbackSpeed,
+        // 长按快进的临时速度：只改内核不落库，松手回记忆值
+        onApplySpeed = { container.player.setSpeed(it) },
+        // 倍速面板的选择：落库记忆（PLAY-05），下次起播直接沿用
+        onRememberSpeed = { newSpeed ->
+            container.player.setSpeed(newSpeed)
+            container.applicationScope.launch {
+                container.settings.setPlaybackSettings(settings.copy(playbackSpeed = newSpeed))
+            }
+        },
     )
 }
 

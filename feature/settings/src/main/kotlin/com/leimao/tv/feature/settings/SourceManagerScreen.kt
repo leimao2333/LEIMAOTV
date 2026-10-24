@@ -84,6 +84,8 @@ fun SourceManagerScreen(
      * 为 null 时添加影视源只入库不预抓，首页首次进入时再抓。
      */
     vodRefresher: VodCatalogRefresher? = null,
+    /** 源健康检查（LIVE-09）。可空；为 null 时不显示「健康检查」按钮 */
+    healthChecker: com.leimao.tv.core.data.SourceHealthChecker? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -250,6 +252,24 @@ fun SourceManagerScreen(
                         },
                     ) {
                         Text(text = "全部刷新", style = TvText.current.label)
+                    }
+                    if (healthChecker != null) {
+                        FocusableCard(
+                            onClick = {
+                                scope.launch {
+                                    busy = true
+                                    // 状态行先给出「在查」的明确提示：并发探测也要几秒，
+                                    // 不说明的话用户只会觉得按钮按了没反应
+                                    status = "正在逐条探测可用性…"
+                                    val healths = healthChecker.checkAll()
+                                    status = healthSummary(healths)
+                                    busy = false
+                                }
+                            },
+                            enabled = !busy,
+                        ) {
+                            Text(text = "健康检查", style = TvText.current.label)
+                        }
                     }
                     if (epgImporter != null) {
                         FocusableCard(onClick = { pickEpg.launch(arrayOf("*/*")) }) {
@@ -563,6 +583,32 @@ private fun summarize(results: List<RefreshResult>): String {
     val failed = results.size - done.size
     return "刷新完成：${done.size} 个源成功、$failed 个失败，共 $channels 个频道"
 }
+
+/**
+ * 健康检查结果 → 一句人话（LIVE-09）。
+ *
+ * 抽成 internal 纯函数是为了单测：真实探测要等网络。失效的源**逐个点名**，
+ * 「3 个失败」与「「A」「B」连不上」是两种信息量 —— 前者让人不知所措，后者直接能动手。
+ */
+internal fun healthSummary(healths: List<com.leimao.tv.core.data.SourceHealthChecker.Health>): String {
+    if (healths.isEmpty()) return "没有启用的源可查"
+    val ok = healths.count { it.ok }
+    val slowest = healths.filter { it.ok }.maxByOrNull { it.latencyMs }
+    val failed = healths.filter { !it.ok }
+    val head = "健康检查：$ok / ${healths.size} 个源可用"
+    val slow =
+        slowest?.takeIf { it.latencyMs >= SLOW_SOURCE_MS }?.let { "；最慢：「${it.sourceName}」${it.latencyMs}ms" }.orEmpty()
+    val dead =
+        if (failed.isEmpty()) {
+            ""
+        } else {
+            "；失效：" + failed.joinToString("、") { "「${it.sourceName}」（${it.detail ?: "未知"}）" }
+        }
+    return head + slow + dead
+}
+
+/** 超过这个延时的源在结果里点名提醒：能通但很慢，用户刷不动时第一个该怀疑它 */
+internal const val SLOW_SOURCE_MS = 3_000L
 
 /**
  * 节目单导入结果 → 一句人话。

@@ -43,6 +43,9 @@ fun SettingsScreen(
     onOpenSourceManager: () -> Unit,
     onOpenCache: () -> Unit,
     onOpenLicense: () -> Unit,
+    /** 开机自启动（SET-08）。默认关闭；开关状态由路由层从 DataStore 读进来 */
+    bootAutostart: Boolean = false,
+    onToggleBootAutostart: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
 ) {
@@ -97,6 +100,19 @@ fun SettingsScreen(
             title = "存储与缓存",
             subtitle = "看看台标占了多少地方，占多了可以一键清空（SET-05）",
             onClick = onOpenCache,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        // 开机自启动（SET-08）：一行两态，点一下切换。遥控器上没有独立开关控件，
+        // 「整行可点、副标题写清当前状态」比一个难聚焦的 Switch 更适合电视
+        SettingRow(
+            title = "开机自启动",
+            subtitle =
+                if (bootAutostart) {
+                    "已开启：设备开机 / 重启后会自动打开本应用 · 点一下关闭"
+                } else {
+                    "已关闭：开机后不自动打开 · 点一下开启（SET-08）"
+                },
+            onClick = { onToggleBootAutostart(!bootAutostart) },
         )
 
         Spacer(modifier = Modifier.height(28.dp))

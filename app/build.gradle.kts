@@ -9,9 +9,8 @@ plugins {
 /**
  * 发版签名材料（SYS-07）。
  *
- * `keystore.properties` 与密钥文件都不进仓库（`.gitignore` 已排），首次配置看 `docs/发布流程.md`；
- * CI 里由工作流从 secrets 还原成同一个文件，所以本地与流水线走的是**同一条**代码路径，
- * 不存在「本地能签、CI 签不出来」这种只在发版当天才发现的差异。
+ * 密钥（`keystore/leimao-tv.jks`）与签名配置（`keystore.properties`）都随仓库提交，
+ * 发版不需要配任何 GitHub secret，换台机器照样签得出包（用户决定，见 RULES §10.6）。
  */
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties =
@@ -43,10 +42,10 @@ android {
         minSdk = 21
         targetSdk = 35
 
-        // versionCode 按 RULES §10.2 公式算：0×1000000 + 2×10000 + 9×100 + 9 = 20909
+        // versionCode 按 RULES §10.2 公式算：0×1000000 + 2×10000 + 9×100 + 10 = 20910
         // versionName 必须与 AppVersion.CURRENT_VERSION 逐字符相等（SYS-10，单测钉住）
-        versionCode = 20909
-        versionName = "0.2.9.9"
+        versionCode = 20910
+        versionName = "0.2.9.10"
     }
 
     signingConfigs {
@@ -86,6 +85,18 @@ android {
         buildConfig = true
     }
 
+    // ABI 拆包（PLAY-02）：接入 libVLC 后 native so 按架构拆成三个包，各自只带本架构的 so。
+    // arm64 那份叫主名（leimao-tv-v<版本>.apk），与 ApkAssets.pick 的优先级对齐（RULES §10.4）。
+    // 只对 release 拆：debug 是开发包（applicationId 带 .debug 后缀），拆了也只是多占磁盘
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -96,6 +107,28 @@ android {
 
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/DEPENDENCIES")
+    }
+
+    // 拆包产物重命名（PLAY-02 / RULES §10.4 第 6 条）：
+    //   arm64  → leimao-tv-v<版本>.apk（主名，ApkAssets.arm64 的首选）
+    //   v7a    → leimao-tv-v<版本>-v7a.apk
+    //   fat    → leimao-tv-v<版本>-universal.apk
+    // 名字必须与 core:model 里 ApkAssets 的定义逐字一致（应用内更新器按名精确匹配）。
+    // 只对 release 重命名：debug 保持默认名（app-debug.apk），别让它和 release 抢同一个名字
+    applicationVariants.all {
+        val variant = this
+        if (variant.buildType.name != "release") return@all
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val abi = output.getFilter(com.android.build.OutputFile.ABI) ?: "universal"
+            val suffix =
+                when (abi) {
+                    "arm64-v8a" -> ""
+                    "armeabi-v7a" -> "-v7a"
+                    else -> "-universal"
+                }
+            output.outputFileName = "leimao-tv-v${variant.versionName}$suffix.apk"
+        }
     }
 }
 

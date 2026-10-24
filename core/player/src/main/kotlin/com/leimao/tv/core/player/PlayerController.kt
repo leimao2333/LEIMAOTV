@@ -1,6 +1,7 @@
 package com.leimao.tv.core.player
 
-import androidx.media3.common.Player
+import android.content.Context
+import android.view.View
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -203,6 +204,14 @@ interface PlayerController {
      */
     fun seekTo(positionMs: Long)
 
+    /**
+     * 设置播放速度（点播用，PLAY-05 / VOD-11）。
+     *
+     * 1.0f = 原速。直播内核应忽略：直播没有「快点播完」的概念，加速只会追上
+     * 直播边缘然后疯狂缓冲。点播的「长按快进」也走这里（临时调到 2×/3×，松手回原速）。
+     */
+    fun setSpeed(speed: Float)
+
     /** 当前播放位置（毫秒）。还没起播时为 0 —— UI 用它画进度，不要自己猜。 */
     fun positionMs(): Long
 
@@ -215,11 +224,17 @@ interface PlayerController {
 }
 
 /**
- * 「这块内核能把播放画面挂到 View 上」的标记接口。
+ * 「这块内核能把播放画面挂到 View 上」的标记接口（PLAY-01 / PLAY-02）。
  *
- * 为什么单独一个接口：`PlayerController` 要保持内核无关，不能出现 Media3 的 `Player` 类型；
- * 而 PlayerView 偏偏需要它。用标记接口隔离，UI 侧只在自己支持的情况下拿画面。
+ * 为什么单独一个接口：`PlayerController` 要保持内核无关，不能出现 Media3 的 `Player`
+ * 或 VLC 的 `SurfaceView` 类型；而播放画面偏偏需要其中一个。这里把「怎么画」收敛成一个
+ * 纯 `View` 工厂（[createSurfaceView]），UI 拿到它原样塞进 `AndroidView` 即可 ——
+ * 换内核时 UI 一行都不用改，这是「换内核不改 UI」（架构设计 §6）在画面这一侧的关键。
+ *
+ * 为什么用 `Context -> View` 而不是直接给 `View`：内核可能还没起播，也可能中途重建
+ * （VLC 的 surface 要跟着 `SurfaceView` 生命周期走），把「创建」交给内核比 UI 反复
+ * 猜测「该不该 new 一个」更稳。
  */
 interface VideoSurfaceHost {
-    val videoPlayer: Player
+    fun createSurfaceView(context: Context): View
 }

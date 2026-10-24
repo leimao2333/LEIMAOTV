@@ -18,9 +18,33 @@ import androidx.media3.exoplayer.DefaultLoadControl
 data class PlaybackSettings(
     val bufferProfile: BufferProfile = BufferProfile.BALANCED,
     val seekIncrementMs: Long = SeekStep.SECONDS_30.millis,
+    /** 记住的播放速度（PLAY-05）。1.0 = 原速；只对点播生效 */
+    val playbackSpeed: Float = 1.0f,
 ) {
     companion object {
         val DEFAULT = PlaybackSettings()
+    }
+}
+
+/** 点播倍速档位（PLAY-05）。档位是离散的：连续调速在遥控器上没有操作方式。 */
+enum class PlaybackSpeed(
+    val label: String,
+    val value: Float,
+) {
+    S_0_75("0.75×", 0.75f),
+    S_1_0("1.0×", 1.0f),
+    S_1_25("1.25×", 1.25f),
+    S_1_5("1.5×", 1.5f),
+    S_2_0("2.0×", 2.0f),
+    S_3_0("3.0×", 3.0f),
+    ;
+
+    companion object {
+        fun fromValue(value: Float): PlaybackSpeed =
+            entries.firstOrNull { it.value == value } ?: S_1_0
+
+        fun fromName(name: String?): PlaybackSpeed =
+            entries.firstOrNull { it.name == name } ?: S_1_0
     }
 }
 

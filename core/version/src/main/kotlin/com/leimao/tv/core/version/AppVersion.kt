@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.9"
+    const val CURRENT_VERSION: String = "0.2.9.10"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,19 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.10",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "播不起来的频道多一条活路：硬解失败会自动换软解内核再试一次",
+                        "影视播放多了「倍速」：0.75 到 3 倍可选，选了会记住；进度条上长按快进",
+                        "去内容里操作时左侧导航栏自动收起，按左随时叫回来，画面更宽了",
+                        "设置里多了「开机自启动」：打开后盒子开机 / 重启会自动进应用",
+                        "源管理多了「健康检查」：一次测出每条源通不通、快不快",
+                        "应用崩溃时会留一份本地记录，报障时能拿出线索（不上传）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.9",
                 date = "2026-10-24",

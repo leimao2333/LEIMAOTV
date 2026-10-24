@@ -83,4 +83,33 @@ class SourceJsonTest {
             // 预期
         }
     }
+
+    @Test
+    fun `聚合源 sources json 格式可解析`() {
+        // leimaotv-sources 仓库 dist/sources.json 的真实形态：
+        // 每个源只有 type/name/url/enabled 四个字段，不含 userAgent 等可选字段，
+        // 且允许出现 enabled=false 的 VOD 源。这条钉住「聚合源清单能直接导入」。
+        val json =
+            """
+            {
+              "version": 1,
+              "sources": [
+                { "type": "LIVE", "name": "IPTV4 · 综合直播", "url": "https://live.example.com/tv/iptv4.txt", "enabled": true },
+                { "type": "LIVE", "name": "IPTV6 · 某源", "url": "https://example.com/iptv6.txt", "enabled": true },
+                { "type": "VOD", "name": "某影视配置", "url": "https://example.com/vod.txt", "enabled": false }
+              ]
+            }
+            """.trimIndent()
+
+        val decoded = SourceJson.decode(json)
+
+        assertEquals(3, decoded.size)
+        assertEquals("IPTV4 · 综合直播", decoded[0].name)
+        assertEquals(SourceType.LIVE, decoded[0].type)
+        assertTrue(decoded[0].enabled)
+        assertEquals(null, decoded[0].userAgent)
+        assertEquals(SourceType.VOD, decoded[2].type)
+        assertEquals(false, decoded[2].enabled)
+        assertEquals("某影视配置", decoded[2].name)
+    }
 }

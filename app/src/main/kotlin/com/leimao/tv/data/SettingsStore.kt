@@ -60,6 +60,9 @@ interface SettingsStore {
     /** 网络设置（SET-04）。整包读写；改动**下次启动生效**，见 [NetworkSettings] 的说明 */
     val networkSettings: Flow<NetworkSettings>
 
+    /** 开机自启动（SET-08）。默认关闭；只有这个开关开着时 BootReceiver 才会拉起应用 */
+    val bootAutostart: Flow<Boolean>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
@@ -86,6 +89,8 @@ interface SettingsStore {
 
     /** `null` = 直连。地址的合法性由调用方先用 `parseProxyAddress` 校过 */
     suspend fun setProxy(proxy: ProxyConfig?)
+
+    suspend fun setBootAutostart(enabled: Boolean)
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -108,6 +113,9 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
             PlaybackSettings(
                 bufferProfile = BufferProfile.fromName(prefs[KEY_BUFFER_PROFILE]),
                 seekIncrementMs = prefs[KEY_SEEK_STEP_MS] ?: PlaybackSettings.DEFAULT.seekIncrementMs,
+                playbackSpeed =
+                    prefs[KEY_PLAYBACK_SPEED]?.toFloatOrNull()
+                        ?: PlaybackSettings.DEFAULT.playbackSpeed,
             )
         }
 
@@ -134,6 +142,9 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
             )
         }
 
+    override val bootAutostart: Flow<Boolean> =
+        context.tvSettings.data.map { it[KEY_BOOT_AUTOSTART] ?: false }
+
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
     }
@@ -152,7 +163,12 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         context.tvSettings.edit { prefs ->
             prefs[KEY_BUFFER_PROFILE] = settings.bufferProfile.name
             prefs[KEY_SEEK_STEP_MS] = settings.seekIncrementMs
+            prefs[KEY_PLAYBACK_SPEED] = settings.playbackSpeed.toString()
         }
+    }
+
+    override suspend fun setBootAutostart(enabled: Boolean) {
+        context.tvSettings.edit { it[KEY_BOOT_AUTOSTART] = enabled }
     }
 
     override suspend fun setRefreshInterval(interval: RefreshInterval) {
@@ -207,6 +223,8 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         val KEY_LAST_SECTION = stringPreferencesKey("last_section")
         val KEY_BUFFER_PROFILE = stringPreferencesKey("buffer_profile")
         val KEY_SEEK_STEP_MS = longPreferencesKey("seek_step_ms")
+        val KEY_PLAYBACK_SPEED = stringPreferencesKey("playback_speed")
+        val KEY_BOOT_AUTOSTART = booleanPreferencesKey("boot_autostart")
         val KEY_REFRESH_INTERVAL = stringPreferencesKey("refresh_interval")
         val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")

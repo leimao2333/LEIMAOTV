@@ -2,6 +2,8 @@ package com.leimao.tv.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,10 +26,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -150,6 +154,9 @@ fun HomeScreen(
     onOpenAppearanceSettings: () -> Unit,
     onOpenNetworkSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
+    /** 开机自启动（SET-08）当前状态。首页内嵌的设置页与独立设置路由共用同一份真相 */
+    bootAutostart: Boolean = false,
+    onToggleBootAutostart: (Boolean) -> Unit = {},
     onExit: () -> Unit,
     /** 「搜索」分区的内容，由路由层提供（见 [ContentArea] 里的说明） */
     searchContent: @Composable () -> Unit,
@@ -159,7 +166,41 @@ fun HomeScreen(
     val firstNavFocus = remember { FocusRequester() }
     val stayFocus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { firstNavFocus.requestFocus() }
+    // 导航栏自动隐藏（SET-02）。
+    //
+    // 驱动信号用「内容区是否有焦点」而不是「导航栏是否失焦」：导航栏内部节点之间移动
+    // （ModeSwitch ↔ 导航项）也会互相失焦，按失焦驱动会让导航栏在焦点还在它身上时
+    // 就消失 —— 焦点直接丢掉，这正是这个需求卡了一个里程碑、只能等真机的原因。
+    // 内容区的 onFocusChanged 只在焦点真正进/出内容区时变，是唯一可靠的信号。
+    //
+    // 收起时左侧留一个 56dp 的窄条：完全隐藏后左侧没有任何可聚焦目标，按 ← 焦点
+    // 无处可去。窄条是收起状态下唯一的焦点目标，接住焦点立刻展开 —— 这是「回得来」的保证。
+    var navExpanded by rememberSaveable { mutableStateOf(true) }
+
+    // 焦点迁移冷静期（模拟器实测抓到的焦点回弹）：
+    // 窄条拿到焦点 → 展开 → 窄条销毁 → LaunchedEffect 抢焦点到第一个导航项。但抢焦点
+    // 跑不过焦点系统的「就近回填」—— 窄条销毁的瞬间焦点先落到内容区，内容区的
+    // hasFocus=true 又把导航栏收回去，两个 onFocusChanged 打架，导航栏在展开/收起间
+    // 震荡后死区。解法：窄条触发展开时开一个短暂冷静期，期间内容区不响应 hasFocus，
+    // 给 LaunchedEffect 完成迁移留出窗口。
+    var collapseSuppressedUntil by remember { mutableStateOf(0L) }
+
+    // navExpanded 变 true 时（含首帧）把焦点接到第一个导航项。注意这步是必须的而不是
+    // 锦上添花：从窄条展开是一次 if/else 重组，窄条节点被销毁，落在它身上的焦点会跟着
+    // 丢掉 —— 不主动接回，界面就进入「没有任何焦点」的死区，遥控器再按什么都没反应。
+    // 先等一帧再请求：窄条销毁触发的这次重组里，导航项是刚插入的节点，立刻请求会
+    // 因节点未完成布局而落空（模拟器实测焦点落到根 View 上）。
+    LaunchedEffect(navExpanded) {
+        if (navExpanded) {
+            withFrameNanos {}
+            runCatching { firstNavFocus.requestFocus() }
+        }
+    }
+
+    // 从播放页 BACK 回来时，rememberSaveable 会把收起状态（navExpanded=false）一并恢复：
+    // 收起态首帧没有任何初始焦点落点（上面的 effect 只在展开时请求），直接死区。
+    // 回首页 = 回到导航起点，强制展开一次 —— 下次进内容区还会照常收起，不丢用户状态。
+    LaunchedEffect(Unit) { if (!navExpanded) navExpanded = true }
     LaunchedEffect(showExitConfirm) { if (showExitConfirm) stayFocus.requestFocus() }
 
     // 主页按返回 = 退出确认，不回到播放页，避免「播放 ↔ 主页」来回打转（§6.4）
@@ -173,36 +214,72 @@ fun HomeScreen(
     ) {
         SafeAreaContainer {
             Row(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier =
-                        Modifier
-                            .width(232.dp)
-                            .fillMaxHeight()
-                            .verticalScroll(rememberScrollState()),
-                ) {
-                    ModeSwitch(
-                        mode = mode,
-                        onToggle = {
-                            val next = if (mode == AppMode.LIVE) AppMode.VOD else AppMode.LIVE
-                            // 切模式必须把当前分区一起带过去，否则会出现「模式是影视、内容还是直播」的错位
-                            val nextSection = if (next == AppMode.LIVE) HomeSection.LIVE else HomeSection.MOVIE
-                            onSectionChange(nextSection)
-                            onModeChange(next)
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    HomeSection.forMode(mode).forEachIndexed { index, item ->
-                        NavItem(
-                            section = item,
-                            selected = section == item,
-                            modifier = if (index == 0) Modifier.focusRequester(firstNavFocus) else Modifier,
-                            onClick = {
-                                onSectionChange(item)
-                                item.mode?.let { target -> if (target != mode) onModeChange(target) }
+                if (navExpanded) {
+                    Column(
+                        modifier =
+                            Modifier
+                                .width(232.dp)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState())
+                                .onFocusChanged { if (it.hasFocus) navExpanded = true },
+                    ) {
+                        ModeSwitch(
+                            mode = mode,
+                            onToggle = {
+                                val next = if (mode == AppMode.LIVE) AppMode.VOD else AppMode.LIVE
+                                // 切模式必须把当前分区一起带过去，否则会出现「模式是影视、内容还是直播」的错位
+                                val nextSection = if (next == AppMode.LIVE) HomeSection.LIVE else HomeSection.MOVIE
+                                onSectionChange(nextSection)
+                                onModeChange(next)
                             },
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        HomeSection.forMode(mode).forEachIndexed { index, item ->
+                            NavItem(
+                                section = item,
+                                selected = section == item,
+                                modifier = if (index == 0) Modifier.focusRequester(firstNavFocus) else Modifier,
+                                onClick = {
+                                    onSectionChange(item)
+                                    item.mode?.let { target -> if (target != mode) onModeChange(target) }
+                                },
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                } else {
+                    // 窄条：收起状态下左侧唯一的焦点目标。按 ← 焦点自然落到它身上，
+                    // 落上即展开；OK / Enter 也能展开（万焦点是从别处进来的）。
+                    // 必须 focusable()：clickable 默认 focusable 但焦点搜索对它的命中
+                    // 不如显式 focusable() 稳定（模拟器实测：去掉 focusable 后按 ← 焦点
+                    // 根本到不了窄条，纹丝不动）。onFocusChanged 要放在 focusable 之前，
+                    // 它只观察链内侧的焦点目标。
+                    Box(
+                        modifier =
+                            Modifier
+                                .width(56.dp)
+                                .fillMaxHeight()
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .onFocusChanged {
+                                    if (it.isFocused) {
+                                        navExpanded = true
+                                        // 焦点从窄条迁到导航项需要一帧，期间内容区可能被
+                                        // 焦点系统就近回填，别让它把导航栏又收回去
+                                        collapseSuppressedUntil = System.currentTimeMillis() + 500
+                                    }
+                                }
+                                .focusable()
+                                .clickable { navExpanded = true }
+                                .padding(8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "◀\n菜\n单",
+                            style = TvText.current.hint,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
                     }
                 }
 
@@ -212,7 +289,14 @@ fun HomeScreen(
                     modifier =
                         Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
+                            .fillMaxHeight()
+                            // 焦点进内容区 = 用户在操作内容 → 收起导航栏（SET-02）。
+                            // hasFocus 而不是 isFocused：焦点在内容区任何子孙节点上都该收
+                            .onFocusChanged {
+                                if (it.hasFocus && System.currentTimeMillis() >= collapseSuppressedUntil) {
+                                    navExpanded = false
+                                }
+                            },
                 ) {
                     ContentArea(
                         section = section,
@@ -235,6 +319,8 @@ fun HomeScreen(
                         onOpenAppearanceSettings = onOpenAppearanceSettings,
                         onOpenNetworkSettings = onOpenNetworkSettings,
                         onOpenRefreshSettings = onOpenRefreshSettings,
+                        bootAutostart = bootAutostart,
+                        onToggleBootAutostart = onToggleBootAutostart,
                         searchContent = searchContent,
                     )
                 }
@@ -273,6 +359,9 @@ private fun ContentArea(
     onOpenAppearanceSettings: () -> Unit,
     onOpenNetworkSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
+    /** 开机自启动（SET-08），透传给内嵌的设置页 */
+    bootAutostart: Boolean = false,
+    onToggleBootAutostart: (Boolean) -> Unit = {},
     /**
      * 「搜索」分区的内容。
      *
@@ -317,6 +406,8 @@ private fun ContentArea(
                 onOpenLicense = onOpenLicense,
                 onOpenCache = onOpenCache,
                 autoFocus = false,
+                bootAutostart = bootAutostart,
+                onToggleBootAutostart = onToggleBootAutostart,
             )
         // 影视板块的五个栏目（电影/电视剧/动漫/综艺/体育）共用同一个首页，
         // 「当前是哪一类」由 vodState.selectedType 决定 —— 导航点击时在 HomeRoute 里同步过去。

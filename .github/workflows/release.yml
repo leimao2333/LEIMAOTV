@@ -126,24 +126,30 @@ jobs:
             exit 1
           fi
 
-          # 现在只有一个包（没有 native so，三份拆包内容完全一样）。真做了 ABI 拆包
-          # 就得在这里补「哪个包叫什么名」的映射，否则宁可直接失败也别传一个错名字
+          # ABI 拆包（PLAY-02）：接入 libVLC 后产出三份，各带各架构的 native so。
+          # 名字在 app/build.gradle.kts 里已经改成 leimao-tv-v<版本>[-v7a|-universal].apk，
+          # 与 core:model 里 ApkAssets 的定义逐字一致（应用内更新器按名精确匹配）。
+          # arm64 那份叫主名，v7a 与 universal 是它的两个变体（RULES §10.4 第 6 条）。
           count=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | wc -l)
-          if [ "$count" -ne 1 ]; then
-            echo "::error::release 目录里有 $count 个 APK，命名规则还没为拆包做准备（RULES §10.4 第 6 条）。"
+          if [ "$count" -ne 3 ]; then
+            echo "::error::release 目录里有 $count 个 APK，应为 3 个（arm64 / v7a / universal）。"
             find app/build/outputs/apk/release -maxdepth 1 -name '*.apk'
             exit 1
           fi
-          SRC=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk')
 
-          # 名字必须与 core:model 里 ApkAssets 的定义逐字一致（应用内更新器按名精确匹配）。
-          #
-          # 为什么叫 -universal 而不是主名：现在一个 native so 都没有，这一份包在 32 位与 64 位
-          # 盒子上都能装，它**就是** universal 包。叫主名（arm64）的话，ApkAssets.pick 对 32 位
-          # 设备只认 v7a / universal，那些盒子会永远收不到更新 —— 而包明明是能装的。
-          # 等接入 libVLC 真做了 ABI 拆包，再把 arm64 那份叫主名，pick 的选择顺序不用改。
-          APK="leimao-tv-v$VERSION-universal.apk"
-          cp "$SRC" "$APK"
+          ARM64="leimao-tv-v$VERSION.apk"
+          V7A="leimao-tv-v$VERSION-v7a.apk"
+          UNIVERSAL="leimao-tv-v$VERSION-universal.apk"
+          for name in "$ARM64" "$V7A" "$UNIVERSAL"; do
+            if [ ! -f "app/build/outputs/apk/release/$name" ]; then
+              echo "::error::缺 $name，拆包命名与 RULES §10.4 第 6 条不符。"
+              ls -l app/build/outputs/apk/release/
+              exit 1
+            fi
+          done
+          cp "app/build/outputs/apk/release/$ARM64" "$ARM64"
+          cp "app/build/outputs/apk/release/$V7A" "$V7A"
+          cp "app/build/outputs/apk/release/$UNIVERSAL" "$UNIVERSAL"
 
           # 托管 runner 上两个变量都在；取不到时明确报错，别让 find 对着空路径瞎找
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
@@ -153,43 +159,47 @@ jobs:
           fi
           BUILD_TOOLS=$(find "$SDK/build-tools" -maxdepth 1 -mindepth 1 | sort -V | tail -1)
 
-          # RULES §10.4 第 4 条：v2 签名必须为 true
+          # RULES §10.4 第 4 条：v2 签名必须为 true。三个包都要验，任何一个没签上都不能发
           # -v 不能省：不带它 apksigner 只打印证书，不打印 "Verified using vN scheme" 那几行，
           # 下面那句 grep 会永远失败（而且看起来像「包没签上」）
-          SIG=$("$BUILD_TOOLS/apksigner" verify -v --print-certs "$APK" 2>&1) || {
-            echo "::error::apksigner 校验失败，包没签上："
-            echo "$SIG"
-            exit 1
-          }
-          # apksigner 会对每个没被签名保护的 META-INF 条目报一条 WARNING，一次八十多行，
-          # 真正要看的只有下面这几行
-          grep -E 'Verified using|Number of signers|Signer #1 certificate DN' <<< "$SIG" || true
-          if ! grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' <<< "$SIG"; then
-            echo "::error::v2 签名不是 true，按 RULES §10.4 第 4 条不能发。"
-            exit 1
-          fi
+          for APK in "$ARM64" "$V7A" "$UNIVERSAL"; do
+            SIG=$("$BUILD_TOOLS/apksigner" verify -v --print-certs "$APK" 2>&1) || {
+              echo "::error::apksigner 校验失败，$APK 没签上："
+              echo "$SIG"
+              exit 1
+            }
+            if ! grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' <<< "$SIG"; then
+              echo "::error::$APK 的 v2 签名不是 true，按 RULES §10.4 第 4 条不能发。"
+              exit 1
+            fi
+            # 包名兜底：万一哪天 configuration 出错编出了别的 applicationId，
+            # 至少别把它当作正式包发出去
+            BADGING=$("$BUILD_TOOLS/aapt2" dump badging "$APK" | head -1)
+            if ! grep -q "package: name='com.leimao.tv'" <<< "$BADGING"; then
+              echo "::error::$APK 的包名不是 com.leimao.tv。"
+              exit 1
+            fi
+            echo "✅ $APK：v2 签名真、包名对"
+          done
 
-          # 包名兜底：万一哪天 configuration 出错编出了别的 applicationId，
-          # 至少别把它当作正式包发出去
-          BADGING=$("$BUILD_TOOLS/aapt2" dump badging "$APK" | head -1)
-          echo "$BADGING"
-          if ! grep -q "package: name='com.leimao.tv'" <<< "$BADGING"; then
-            echo "::error::包名不是 com.leimao.tv。"
-            exit 1
-          fi
-
-          sha256sum "$APK" > "$APK.sha256"
+          for APK in "$ARM64" "$V7A" "$UNIVERSAL"; do
+            sha256sum "$APK" > "$APK.sha256"
+          done
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "arm64=$ARM64" >> "$GITHUB_OUTPUT"
+          echo "v7a=$V7A" >> "$GITHUB_OUTPUT"
+          echo "universal=$UNIVERSAL" >> "$GITHUB_OUTPUT"
           echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
-          ls -l "$APK"
+          ls -l "$ARM64" "$V7A" "$UNIVERSAL"
 
       - name: 发布到 GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.verify.outputs.version }}
-          APK: ${{ steps.verify.outputs.apk }}
+          ARM64: ${{ steps.verify.outputs.arm64 }}
+          V7A: ${{ steps.verify.outputs.v7a }}
+          UNIVERSAL: ${{ steps.verify.outputs.universal }}
         run: |
           set -euo pipefail
 
@@ -199,17 +209,20 @@ jobs:
             echo "::warning::tag 没有注解，Release 正文改用 GitHub 自动生成。下次用 git tag -a 打。"
           fi
 
+          # 三个拆包 + 三个 sha256，一次传完
+          ASSETS=("$ARM64" "$ARM64.sha256" "$V7A" "$V7A.sha256" "$UNIVERSAL" "$UNIVERSAL.sha256")
+
           # 重跑时释放已存在：改成覆盖附件，而不是报 "release already exists" 就停在那儿，
           # 让人去手工点上传（最容易传错文件的一步）
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release 已存在，覆盖附件"
-            gh release upload "$GITHUB_REF_NAME" "$APK" "$APK.sha256" --clobber
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
           else
             if [ -n "$NOTES" ]; then
-              gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" \
+              gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
                 --title "LEIMAOTV v$VERSION" --notes "$NOTES" --verify-tag
             else
-              gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" \
+              gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
                 --title "LEIMAOTV v$VERSION" --generate-notes --verify-tag
             fi
           fi
@@ -219,27 +232,32 @@ jobs:
       # （实测 v0.2.9.8 相差 1046 字节，签名与大小都正常），拿本地包当基准只会永远对不上
       - name: 回下载比对（防上传截断）
         env:
-          APK: ${{ steps.verify.outputs.apk }}
+          ARM64: ${{ steps.verify.outputs.arm64 }}
+          V7A: ${{ steps.verify.outputs.v7a }}
+          UNIVERSAL: ${{ steps.verify.outputs.universal }}
         run: |
           set -euo pipefail
 
-          EXPECT=$(cut -d' ' -f1 "$APK.sha256")
-          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$APK"
+          # 三个包都要回下载对一遍：任何一个被截断都不能当没看见
+          for APK in "$ARM64" "$V7A" "$UNIVERSAL"; do
+            EXPECT=$(cut -d' ' -f1 "$APK.sha256")
+            URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$APK"
 
-          # 刚建好的 Release 在 CDN 上可能晚几秒才可取，所以重试而不是一次失败就认栽
-          ACTUAL=""
-          for i in 1 2 3 4; do
-            if curl -sSfL --retry 2 --retry-delay 3 -o /tmp/downloaded.apk "$URL"; then
-              ACTUAL=$(sha256sum /tmp/downloaded.apk | cut -d' ' -f1)
-              if [ "$EXPECT" = "$ACTUAL" ]; then
-                echo "回下载比对通过：$EXPECT"
-                exit 0
+            # 刚建好的 Release 在 CDN 上可能晚几秒才可取，所以重试而不是一次失败就认栽
+            ACTUAL=""
+            for i in 1 2 3 4; do
+              if curl -sSfL --retry 2 --retry-delay 3 -o /tmp/downloaded.apk "$URL"; then
+                ACTUAL=$(sha256sum /tmp/downloaded.apk | cut -d' ' -f1)
+                if [ "$EXPECT" = "$ACTUAL" ]; then
+                  echo "回下载比对通过：$APK $EXPECT"
+                  continue 2
+                fi
               fi
-            fi
-            echo "第 $i 次没对上（期望 $EXPECT，实际 ${ACTUAL:-下载失败}），等 5 秒再试"
-            sleep 5
-          done
+              echo "第 $i 次没对上 $APK（期望 $EXPECT，实际 ${ACTUAL:-下载失败}），等 5 秒再试"
+              sleep 5
+            done
 
-          echo "::error::上传后的附件与构建产物 sha256 不一致（期望 $EXPECT，实际 ${ACTUAL:-下载失败}）。"
-          echo "::error::多半是上传被截断。别手动重传：删掉这个 Release 重打 tag，让流水线重跑一遍。"
-          exit 1
+            echo "::error::$APK 上传后的附件与构建产物 sha256 不一致（期望 $EXPECT，实际 ${ACTUAL:-下载失败}）。"
+            echo "::error::多半是上传被截断。别手动重传：删掉这个 Release 重打 tag，让流水线重跑一遍。"
+            exit 1
+          done

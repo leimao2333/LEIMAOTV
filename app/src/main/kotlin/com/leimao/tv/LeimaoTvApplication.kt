@@ -7,6 +7,7 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.leimao.tv.core.data.RefreshInterval
 import com.leimao.tv.data.CacheManager
+import com.leimao.tv.data.CrashArchive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -25,6 +26,8 @@ class LeimaoTvApplication :
 
     override fun onCreate() {
         super.onCreate()
+        // 崩溃本地留档（SYS-04）：必须最先装 —— 装晚一步，容器构造期间的崩溃就漏掉了
+        CrashArchive.install(this)
         container = AppContainer(this)
         // EPG 定时刷新（LIVE-23）：幂等注册，用 UPDATE 覆盖旧周期。没有配置节目单
         // 订阅地址时 Worker 会空跑直接退出，不产生任何打扰。

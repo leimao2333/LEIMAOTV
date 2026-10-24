@@ -126,6 +126,7 @@ class StartupResolverTest {
         private val themeModeFlow = MutableStateFlow(ThemeMode.DEFAULT)
         private val fontScaleFlow = MutableStateFlow(FontScale.DEFAULT)
         private val networkSettingsFlow = MutableStateFlow(NetworkSettings())
+        private val bootAutostartFlow = MutableStateFlow(false)
 
         override val complianceAgreed: Flow<Boolean> = agreedFlow
         override val mode: Flow<AppMode> = modeFlow
@@ -136,6 +137,7 @@ class StartupResolverTest {
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val fontScale: Flow<FontScale> = fontScaleFlow
         override val networkSettings: Flow<NetworkSettings> = networkSettingsFlow
+        override val bootAutostart: Flow<Boolean> = bootAutostartFlow
 
         override suspend fun setComplianceAgreed(agreed: Boolean) {
             agreedFlow.value = agreed
@@ -187,6 +189,10 @@ class StartupResolverTest {
 
         override suspend fun setProxy(proxy: ProxyConfig?) {
             networkSettingsFlow.value = networkSettingsFlow.value.copy(proxy = proxy)
+        }
+
+        override suspend fun setBootAutostart(enabled: Boolean) {
+            bootAutostartFlow.value = enabled
         }
     }
 }

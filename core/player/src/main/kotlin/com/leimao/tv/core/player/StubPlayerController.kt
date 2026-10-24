@@ -62,6 +62,8 @@ class StubPlayerController : PlayerController {
     /** 占位内核不解码，位置永远是 0：进度条会自己隐藏，正好符合「没有画面就没有进度」 */
     override fun seekTo(positionMs: Long) = Unit
 
+    override fun setSpeed(speed: Float) = Unit
+
     override fun positionMs(): Long = 0L
 
     override fun durationMs(): Long = 0L

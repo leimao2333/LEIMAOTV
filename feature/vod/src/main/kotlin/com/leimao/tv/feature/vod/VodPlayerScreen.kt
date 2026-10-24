@@ -49,15 +49,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.Player
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
+import com.leimao.tv.core.player.PlaybackSpeed
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.PlaybackTrack
+import com.leimao.tv.core.player.VideoSurfaceHost
 import kotlinx.coroutines.delay
 
 /** 播放页的全部动作。抽成一个类而不是七个回调参数：调用点清爽，加动作也不改签名。 */
@@ -85,7 +84,7 @@ data class VodPlayerActions(
  * 用一个枚举而不是两个布尔：两个布尔能出现「选集和线路同时打开」这种画不出来的状态，
  * 而返回键的优先级也得跟着分成四支。
  */
-private enum class VodPanel { None, Episodes, Lines, Audio, Text }
+private enum class VodPanel { None, Episodes, Lines, Audio, Text, Speed }
 
 /**
  * 影视播放页（VOD-05）。
@@ -102,8 +101,14 @@ private enum class VodPanel { None, Episodes, Lines, Audio, Text }
 fun VodPlayerScreen(
     state: VodPlayerUiState,
     actions: VodPlayerActions,
-    videoPlayer: Player?,
+    surfaceHost: VideoSurfaceHost?,
     seekStepMs: Long,
+    /** 当前生效的播放速度（PLAY-05）：来自设置里的记忆值，随设置变化重组 */
+    speed: Float,
+    /** 临时改速度（VOD-11 长按快进用）：只改内核，不写设置 —— 松手就恢复，不该被记住 */
+    onApplySpeed: (Float) -> Unit,
+    /** 从倍速面板选速度（PLAY-05）：写入设置记忆，下次起播还是这个速度 */
+    onRememberSpeed: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var controlsVisible by remember { mutableStateOf(true) }
@@ -182,7 +187,7 @@ fun VodPlayerScreen(
                     false
                 },
     ) {
-        VideoSurface(player = videoPlayer)
+        VideoSurface(surfaceHost = surfaceHost)
 
         // ---- 顶部：片名与集数 ----
         Hud(
@@ -266,20 +271,26 @@ fun VodPlayerScreen(
                     seekStepMs = seekStepMs,
                     onSeekBy = actions.onSeekBy,
                     onTogglePause = actions.onTogglePause,
+                    // 长按快进（VOD-11）：按住 ←/→ 一段后切 2×，松手回记忆速度。
+                    // 只临时生效，不写设置 —— 「按住了两秒」不是用户想改记忆速度的意思
+                    rememberedSpeed = speed,
+                    onApplySpeed = onApplySpeed,
                 )
                 Spacer(modifier = Modifier.height(14.dp))
                 ControlButtons(
                     state = state,
                     actions = actions,
+                    speed = speed,
                     onOpenPanel = { panel = VodPanel.Episodes },
                     onOpenLines = { panel = VodPanel.Lines },
                     onOpenAudio = { panel = VodPanel.Audio },
                     onOpenText = { panel = VodPanel.Text },
+                    onOpenSpeed = { panel = VodPanel.Speed },
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     // 这套控制条的「← → 是快进」不可能自己看出来，必须写在屏幕上
-                    text = "进度条上 ← → 快进快退 · OK 暂停/继续 · 返回 收起控制条",
+                    text = "进度条上 ← → 快进快退 · 长按 2× 快放 · OK 暂停/继续 · 返回 收起控制条",
                     style = TvText.current.hint,
                     color = Color(0xFF8A9AA6),
                 )
@@ -345,6 +356,17 @@ fun VodPlayerScreen(
                     onDismiss = { panel = VodPanel.None },
                 )
 
+            VodPanel.Speed ->
+                SpeedPanel(
+                    current = speed,
+                    firstFocus = panelFocus,
+                    onSelect = { value ->
+                        panel = VodPanel.None
+                        onRememberSpeed(value)
+                    },
+                    onDismiss = { panel = VodPanel.None },
+                )
+
             VodPanel.None -> Unit
         }
     }
@@ -377,8 +399,8 @@ private fun Hud(
 
 /** 播放画面。没有内核（占位实现）时给一块安静的渐变，而不是「白屏 + 转圈」 */
 @Composable
-private fun VideoSurface(player: Player?) {
-    if (player == null) {
+private fun VideoSurface(surfaceHost: VideoSurfaceHost?) {
+    if (surfaceHost == null) {
         Box(
             modifier =
                 Modifier
@@ -390,16 +412,7 @@ private fun VideoSurface(player: Player?) {
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
-        factory = { context ->
-            PlayerView(context).apply {
-                useController = false
-                // 影视同样不裁画面：字幕被切掉一条边就看不全了
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-                this.player = player
-            }
-        },
-        update = { view -> view.player = player },
+        factory = { context -> surfaceHost.createSurfaceView(context) },
     )
 }
 
@@ -418,6 +431,8 @@ private fun ProgressRow(
     seekStepMs: Long,
     onSeekBy: (Long) -> Unit,
     onTogglePause: () -> Unit,
+    rememberedSpeed: Float,
+    onApplySpeed: (Float) -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text = formatTime(state.positionMs), style = TvText.current.hint, color = Color.White)
@@ -433,14 +448,29 @@ private fun ProgressRow(
                     // 拦截左右键当 seek 用。onPreviewKeyEvent 只有在这个节点持有焦点时才收到，
                     // 所以不会影响按钮行里方向键的正常导航
                     .onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when (event.key) {
-                            Key.DirectionLeft -> {
+                        when {
+                            // 长按快进（VOD-11）：方向键按住不放（系统开始连发 KeyDown）时
+                            // 切到 2×，松手（KeyUp）回记忆速度。按一下的 seek 照旧 ——
+                            // 「点按是挪，按住是跑」和打字时的退格是同一种手感
+                            event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) &&
+                                event.nativeKeyEvent.repeatCount >= LONG_PRESS_REPEAT_THRESHOLD -> {
+                                onApplySpeed(FAST_SPEED)
+                                true
+                            }
+
+                            event.type == KeyEventType.KeyUp &&
+                                (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) -> {
+                                onApplySpeed(rememberedSpeed)
+                                false
+                            }
+
+                            event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft -> {
                                 onSeekBy(-seekStepMs)
                                 true
                             }
 
-                            Key.DirectionRight -> {
+                            event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight -> {
                                 onSeekBy(seekStepMs)
                                 true
                             }
@@ -479,10 +509,12 @@ private fun ProgressRow(
 private fun ControlButtons(
     state: VodPlayerUiState,
     actions: VodPlayerActions,
+    speed: Float,
     onOpenPanel: () -> Unit,
     onOpenLines: () -> Unit,
     onOpenAudio: () -> Unit,
     onOpenText: () -> Unit,
+    onOpenSpeed: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         ControlButton(text = "上一集", enabled = state.hasPrevious, onClick = actions.onPrevious)
@@ -505,12 +537,99 @@ private fun ControlButtons(
                 onClick = onOpenText,
             )
         }
+        // 倍速（PLAY-05）常驻：点播看囤剧时 2× 是刚需，没有「没有倍速」的片子
+        ControlButton(
+            text = if (speed == 1f) "倍速" else "倍速 $speed×",
+            enabled = true,
+            onClick = onOpenSpeed,
+        )
         ControlButton(
             text = if (state.favorited) "已收藏" else "收藏",
             enabled = true,
             onClick = actions.onToggleFavorite,
         )
         ControlButton(text = "返回", enabled = true, onClick = actions.onBack)
+    }
+}
+
+/**
+ * 倍速面板（PLAY-05）。
+ *
+ * 选中即写入记忆：用户选 1.5× 说明他想**接下来也用 1.5×**，否则他每次起播都得
+ * 再按一遍 —— 「记住」就是这个功能与一个临时调速按钮的全部区别。
+ */
+@Composable
+private fun SpeedPanel(
+    current: Float,
+    firstFocus: FocusRequester,
+    onSelect: (Float) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xF20B0F12))
+                .padding(horizontal = 48.dp, vertical = 32.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "播放速度",
+                    style = TvText.current.title,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "选了会记住，下次起播还是这个速度",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                FocusableCard(onClick = onDismiss) {
+                    Text(
+                        text = "关闭",
+                        style = TvText.current.body,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                items(items = PlaybackSpeed.entries.toList()) { option ->
+                    val selected = option.value == current
+                    FocusableCard(
+                        onClick = { onSelect(option.value) },
+                        focusRequester = if (selected) firstFocus else null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = option.label,
+                                style = TvText.current.body,
+                                color =
+                                    if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            if (selected) {
+                                Text(
+                                    text = "正在用",
+                                    style = TvText.current.hint,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -896,6 +1015,12 @@ internal fun formatTime(ms: Long): String {
 }
 
 private const val CONTROLS_AUTO_HIDE_MS = 5_000L
+
+/** 长按判定（VOD-11）：系统连发第 2 个 KeyDown（repeatCount ≥ 1）就算按住，再快点按不到这里 */
+private const val LONG_PRESS_REPEAT_THRESHOLD = 1
+
+/** 长按快进的临时速度 */
+private const val FAST_SPEED = 2f
 
 private const val HUD_FADE_MS = 150
 

@@ -43,9 +43,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.Player
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.components.TvTextField
@@ -58,6 +55,7 @@ import com.leimao.tv.core.model.epg.buildEpgTimeline
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.PlaybackTrack
 import com.leimao.tv.core.player.TrackKind
+import com.leimao.tv.core.player.VideoSurfaceHost
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -159,7 +157,7 @@ data class PlayerUiState(
 @Composable
 fun PlayerScreen(
     state: PlayerUiState,
-    videoPlayer: Player?,
+    surfaceHost: VideoSurfaceHost?,
     onSwitchChannel: (Int) -> Unit,
     onSelectChannel: (Long) -> Unit,
     onSwitchLine: (Int) -> Unit,
@@ -324,7 +322,7 @@ fun PlayerScreen(
                     )
                 },
     ) {
-        VideoSurface(player = videoPlayer)
+        VideoSurface(surfaceHost = surfaceHost)
 
         // 文字压在画面上必须有自己的衬底：真实源的画面又亮又白（台标、公告页），
         // 白字直接叠上去等于看不见。上下各压一层渐变，中间完全透明，不挡画面。
@@ -461,8 +459,8 @@ fun PlayerScreen(
 
 /** 播放画面。没有内核（占位实现）时给一块安静的渐变，而不是「白屏 + 转圈」。 */
 @Composable
-private fun VideoSurface(player: Player?) {
-    if (player == null) {
+private fun VideoSurface(surfaceHost: VideoSurfaceHost?) {
+    if (surfaceHost == null) {
         Box(
             modifier =
                 Modifier
@@ -474,16 +472,7 @@ private fun VideoSurface(player: Player?) {
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
-        factory = { context ->
-            PlayerView(context).apply {
-                useController = false
-                // 直播不裁画面：宁可留黑边，也不要把台标和字幕切掉
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-                this.player = player
-            }
-        },
-        update = { view -> view.player = player },
+        factory = { context -> surfaceHost.createSurfaceView(context) },
     )
 }
 

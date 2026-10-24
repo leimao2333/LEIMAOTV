@@ -165,7 +165,8 @@ RULES §10.4 命名并把包挂到 Release 上（`.github/workflows/release.yml`
 
 - 开发环境：JDK 17 + Android SDK 35（compileSdk 35 / minSdk 21 / targetSdk 35）+ Gradle 8.7
 - 运行目标：Android TV 模拟器（1080p）或真机盒子（Android 5.0+）
-- 调试包会种一条 `example.com` 演示源，用来走通「启动直达播放」这条链路；
+- 调试包会种一条聚合测试源（`leimao2333/leimaotv-sources` 的 `dist/live.txt`）并走真实
+  「抓取 → 解析 → 落库」链路拉取真实频道，用来走通「启动直达播放」这条链路；
   其代码只在 `app/src/debug`，**正式包不含任何演示数据**
 
 ## 项目规则（迭代必读）

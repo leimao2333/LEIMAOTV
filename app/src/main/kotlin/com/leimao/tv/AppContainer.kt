@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.SearchRepository
+import com.leimao.tv.core.data.SourceHealthChecker
 import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.UpdateChecker
 import com.leimao.tv.core.data.VodCatalogRefresher
@@ -36,8 +37,10 @@ import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
 import com.leimao.tv.core.network.buildNetworkClient
 import com.leimao.tv.core.player.BufferProfile
+import com.leimao.tv.core.player.FallbackPlayerController
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
+import com.leimao.tv.core.player.VlcPlayerController
 import com.leimao.tv.core.version.AppVersion
 import com.leimao.tv.data.ApkInstaller
 import com.leimao.tv.data.CacheManager
@@ -111,6 +114,11 @@ class AppContainer(context: Context) {
     val apkInstaller: ApkInstaller = ApkInstaller(context = appContext, client = okHttpClient)
 
     val sourceRepository: SourceRepository = RoomSourceRepository(database)
+
+    /** 源健康检查（LIVE-09）：只探测可达性，不解析不落库，与刷新互不干扰。
+     * 必须声明在 [sourceRepository] 与 `httpClient` 之后 —— 属性按书写顺序初始化（MEMORY 坑） */
+    val sourceHealthChecker: SourceHealthChecker =
+        SourceHealthChecker(sources = sourceRepository, http = httpClient)
 
     val channelRepository: ChannelRepository = RoomChannelRepository(database)
 
@@ -201,10 +209,16 @@ class AppContainer(context: Context) {
      * 冷启动预算里可忽略（真正的播放起播仍走异步）。
      */
     val player: PlayerController =
-        Media3PlayerController(
-            context = appContext,
-            okHttpClient = okHttpClient,
-            bufferProfile = currentBufferProfile(settings),
+        FallbackPlayerController(
+            primary =
+                Media3PlayerController(
+                    context = appContext,
+                    okHttpClient = okHttpClient,
+                    bufferProfile = currentBufferProfile(settings),
+                ),
+            // 软解兜底（PLAY-02 / D-02）：Media3 把整份请求的所有线路都试过仍失败时接管。
+            // VLC 自己重连/换线的预算与 Media3 一致，保证「换内核」不改变失败观感。
+            fallback = VlcPlayerController(context = appContext),
         )
 
     private fun currentBufferProfile(settings: SettingsStore): BufferProfile =

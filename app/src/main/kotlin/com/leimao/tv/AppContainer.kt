@@ -3,16 +3,19 @@ package com.leimao.tv
 import android.content.Context
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.SourceRefresher
+import com.leimao.tv.core.data.VodCatalogRefresher
 import com.leimao.tv.core.database.LeimaoDatabase
 import com.leimao.tv.core.database.repository.ChannelRepository
 import com.leimao.tv.core.database.repository.ChannelWriter
 import com.leimao.tv.core.database.repository.EpgRepository
 import com.leimao.tv.core.database.repository.FavoriteRepository
 import com.leimao.tv.core.database.repository.HistoryRepository
+import com.leimao.tv.core.database.repository.MediaRepository
 import com.leimao.tv.core.database.repository.RoomChannelRepository
 import com.leimao.tv.core.database.repository.RoomChannelWriter
 import com.leimao.tv.core.database.repository.RoomFavoriteRepository
 import com.leimao.tv.core.database.repository.RoomHistoryRepository
+import com.leimao.tv.core.database.repository.RoomMediaRepository
 import com.leimao.tv.core.database.repository.RoomSourceRepository
 import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.startup.RoomStartupFactsReader
@@ -72,6 +75,17 @@ class AppContainer(context: Context) {
         SourceRefresher(
             sources = sourceRepository,
             writer = channelWriter,
+            http = httpClient,
+        )
+
+    /** 影视条目缓存（VOD-03）。首页只读它，不等网络 */
+    val mediaRepository: MediaRepository = RoomMediaRepository(database)
+
+    /** 影视源 → 分类 → 每类首页 → 落库。与直播的 [sourceRefresher] 是两条独立链路 */
+    val vodCatalogRefresher: VodCatalogRefresher =
+        VodCatalogRefresher(
+            sources = sourceRepository,
+            media = mediaRepository,
             http = httpClient,
         )
 

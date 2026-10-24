@@ -12,6 +12,7 @@ import com.leimao.tv.core.database.dao.EpgDao
 import com.leimao.tv.core.database.dao.EpgSourceDao
 import com.leimao.tv.core.database.dao.FavoriteDao
 import com.leimao.tv.core.database.dao.HistoryDao
+import com.leimao.tv.core.database.dao.MediaDao
 import com.leimao.tv.core.database.dao.SourceDao
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.entity.ChannelLineEntity
@@ -20,6 +21,7 @@ import com.leimao.tv.core.database.entity.EpgProgrammeEntity
 import com.leimao.tv.core.database.entity.EpgSourceEntity
 import com.leimao.tv.core.database.entity.FavoriteEntity
 import com.leimao.tv.core.database.entity.HistoryEntity
+import com.leimao.tv.core.database.entity.MediaEntity
 import com.leimao.tv.core.database.entity.SourceEntity
 
 /**
@@ -43,8 +45,9 @@ import com.leimao.tv.core.database.entity.SourceEntity
         EpgChannelEntity::class,
         EpgProgrammeEntity::class,
         EpgSourceEntity::class,
+        MediaEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -61,6 +64,8 @@ abstract class LeimaoDatabase : RoomDatabase() {
     abstract fun epgDao(): EpgDao
 
     abstract fun epgSourceDao(): EpgSourceDao
+
+    abstract fun mediaDao(): MediaDao
 
     companion object {
         private const val DB_NAME = "leimao-tv.db"
@@ -216,9 +221,51 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 5 → 6：加影视条目表（VOD-03）。
+         *
+         * 仍是纯加法。这张表是**可再生的缓存** —— 用户真正的资产（源 / 频道 / 收藏 / 历史）
+         * 一行都不动，升级后首页自动重新抓一遍就填满了。
+         */
+        val MIGRATION_5_6: Migration =
+            object : Migration(5, 6) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `media` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`sourceId` INTEGER NOT NULL, " +
+                            "`sourceKey` TEXT NOT NULL, " +
+                            "`type` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, " +
+                            "`poster` TEXT, " +
+                            "`year` INTEGER, " +
+                            "`area` TEXT, " +
+                            "`remarks` TEXT, " +
+                            "`updatedAt` INTEGER NOT NULL, " +
+                            "`fetchedAt` INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS `index_media_sourceId_sourceKey` " +
+                            "ON `media` (`sourceId`, `sourceKey`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_media_type_updatedAt` " +
+                            "ON `media` (`type`, `updatedAt`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_media_sourceId_updatedAt` " +
+                            "ON `media` (`sourceId`, `updatedAt`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_media_updatedAt` " +
+                            "ON `media` (`updatedAt`)",
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
     }
 }

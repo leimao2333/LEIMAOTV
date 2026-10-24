@@ -187,6 +187,8 @@ class SourceRefresherTest {
 
         override suspend fun countEnabled(): Int = data.count { it.enabled }
 
+        override suspend fun countEnabledLive(): Int = data.count { it.enabled && it.type == "LIVE" }
+
         override suspend fun add(source: NewSource): Long {
             val id = nextId++
             data +=

@@ -40,14 +40,18 @@ import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.RefreshFailure
 import com.leimao.tv.core.data.RefreshResult
 import com.leimao.tv.core.data.SourceRefresher
+import com.leimao.tv.core.data.VodCatalogRefresher
+import com.leimao.tv.core.data.VodCatalogReport
 import com.leimao.tv.core.database.repository.EpgImportSummary
 import com.leimao.tv.core.database.repository.EpgRepository
 import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
 import com.leimao.tv.core.database.repository.SourceRepository
+import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
+import com.leimao.tv.core.network.vod.VodFailure
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,6 +79,11 @@ fun SourceManagerScreen(
     isFirstRun: Boolean = false,
     epgImporter: EpgImporter? = null,
     epgRepository: EpgRepository? = null,
+    /**
+     * 影视源的刷新器（VOD-03）。可空是为了让预览与旧测试不必造全套依赖；
+     * 为 null 时添加影视源只入库不预抓，首页首次进入时再抓。
+     */
+    vodRefresher: VodCatalogRefresher? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -347,14 +356,16 @@ fun SourceManagerScreen(
     if (adding) {
         AddSourceDialog(
             onDismiss = { adding = false },
-            onConfirm = { name, url, userAgent, referer, basicUser, basicPass ->
+            onConfirm = { type, name, url, userAgent, referer, basicUser, basicPass ->
                 adding = false
                 scope.launch {
                     busy = true
                     val id =
                         sourceRepository.add(
                             NewSource(
-                                name = name.ifBlank { "订阅源" },
+                                type = type,
+                                // 影视源的默认名与直播分开：源管理页一眼能看出这条是干什么的
+                                name = name.ifBlank { if (type == SourceType.VOD) "影视源" else "订阅源" },
                                 url = url.trim(),
                                 userAgent = userAgent.takeIf { it.isNotBlank() },
                                 referer = referer.takeIf { it.isNotBlank() },
@@ -362,11 +373,22 @@ fun SourceManagerScreen(
                                 basicPass = basicPass.takeIf { it.isNotBlank() },
                             ),
                         )
-                    val result = refresher.refresh(id)
-                    status = describe(result)
-                    busy = false
-                    reload()
-                    if (result is RefreshResult.Done) onSourcesChanged()
+                    if (type == SourceType.VOD) {
+                        // 影视源不走直播刷新（那是播放列表解析，必然失败）。
+                        // 加完立刻抓一次，好让用户当场知道这个接口到底通不通。
+                        val source = sourceRepository.find(id)
+                        status = describeVod(vodRefresher?.refresh(listOfNotNull(source)))
+                        busy = false
+                        reload()
+                        // 刻意**不**调用 onSourcesChanged：直播链路没有任何变化，
+                        // 触发启动落点重算只会把只加了影视源的用户甩回「还没有源」的引导页
+                    } else {
+                        val result = refresher.refresh(id)
+                        status = describe(result)
+                        busy = false
+                        reload()
+                        if (result is RefreshResult.Done) onSourcesChanged()
+                    }
                 }
             },
         )
@@ -504,6 +526,35 @@ internal fun describe(result: RefreshResult): String =
                 RefreshFailure.NO_CHANNELS -> "刷新失败：内容不是 M3U / TXT 播放列表"
                 RefreshFailure.SOURCE_MISSING -> "这个源已经不存在了"
             }
+    }
+
+/**
+ * 影视源刷新结果 → 一句人话（VOD-03）。
+ *
+ * 与 [describe] 分开写：两种源「成功」的指标不同（频道数 vs 条目数与分类数），
+ * 失败原因也各有一套，混在一个 when 里最后只会互相串味。
+ */
+internal fun describeVod(report: VodCatalogReport?): String {
+    if (report == null) return "已添加影视源"
+    val outcome = report.outcomes.firstOrNull() ?: return "已添加影视源"
+    if (outcome.ok) {
+        return "「${outcome.sourceName}」已更新：${outcome.itemCount} 条内容、${outcome.fetchedTypes.size} 个分类"
+    }
+    val reason = outcome.failure?.let { describeVodFailure(it, outcome.detail) } ?: "源里没有能识别的分类"
+    return "「${outcome.sourceName}」已添加，但没抓到内容：$reason"
+}
+
+private fun describeVodFailure(
+    failure: VodFailure,
+    detail: String?,
+): String =
+    when (failure) {
+        VodFailure.TIMEOUT -> "接口超时，源没有在规定时间内响应"
+        VodFailure.HTTP -> "接口返回了错误状态（${detail ?: "HTTP"}）"
+        VodFailure.NETWORK -> "网络不可达（${detail ?: "无法连接"}）"
+        VodFailure.EMPTY -> "接口返回的内容是空的"
+        VodFailure.NOT_VOD_SOURCE ->
+            "返回的不是影视接口（${detail ?: "格式不符"}），确认地址形如 …/api.php/provide/vod"
     }
 
 private fun summarize(results: List<RefreshResult>): String {

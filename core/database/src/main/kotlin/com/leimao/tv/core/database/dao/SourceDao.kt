@@ -12,6 +12,15 @@ interface SourceDao {
     @Query("SELECT COUNT(*) FROM source WHERE enabled = 1")
     suspend fun countEnabled(): Int
 
+    /**
+     * 启用的**直播**源数量。
+     *
+     * 启动落点问的是「有没有台可播」，影视源不算 —— 只加了影视源的用户
+     * 不该被丢进播放页等十秒的载入提示（VOD-03 引入 type 后必须区分）。
+     */
+    @Query("SELECT COUNT(*) FROM source WHERE enabled = 1 AND type = 'LIVE'")
+    suspend fun countEnabledLive(): Int
+
     @Query("SELECT COUNT(*) FROM source")
     suspend fun countAll(): Int
 

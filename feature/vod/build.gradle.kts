@@ -27,4 +27,6 @@ android {
 dependencies {
     api(project(":core:model"))
     implementation(project(":core:designsystem"))
+    // 海报加载与直播台标共用 Coil，内存/磁盘上限在 TvApp 里统一配置（RULES §7）
+    implementation(libs.coil.compose)
 }

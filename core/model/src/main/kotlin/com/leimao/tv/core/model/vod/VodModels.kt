@@ -31,6 +31,13 @@ data class VodSummary(
     val remarks: String? = null,
     val year: Int? = null,
     val area: String? = null,
+    /**
+     * 源侧更新时间（毫秒），来自 `vod_time`。
+     *
+     * 首页「最近更新」按它排序；源没给或格式认不出时为 null，
+     * 落库时回落到入库时间 —— 排序不能因为缺字段就乱（VOD-03）。
+     */
+    val updatedAt: Long? = null,
 )
 
 /** 一集（或一部电影的唯一一条播放地址）。[name] 可能是「第01集」，也可能为空。 */

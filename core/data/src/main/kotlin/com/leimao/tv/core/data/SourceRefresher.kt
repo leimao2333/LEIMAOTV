@@ -5,10 +5,10 @@ import com.leimao.tv.core.database.repository.ChannelWriter
 import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
 import com.leimao.tv.core.database.repository.SourceRepository
+import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.playlist.ParsedPlaylist
 import com.leimao.tv.core.model.playlist.PlaylistFormat
 import com.leimao.tv.core.model.playlist.mergeChannels
-import com.leimao.tv.core.network.BasicAuth
 import com.leimao.tv.core.network.FetchErrorKind
 import com.leimao.tv.core.network.FetchOutcome
 import com.leimao.tv.core.network.HttpClient
@@ -64,7 +64,7 @@ class SourceRefresher(
     suspend fun refresh(sourceId: Long): RefreshResult {
         val source = sources.find(sourceId) ?: return RefreshResult.Failed(sourceId, RefreshFailure.SOURCE_MISSING)
 
-        val outcome = http.fetch(source.url, source.toHeaders())
+        val outcome = http.fetch(source.url, source.toRequestHeaders())
         if (outcome is FetchOutcome.Failure) {
             sources.markRefreshed(sourceId, clock(), describe(outcome))
             return RefreshResult.Failed(sourceId, outcome.kind.toRefreshFailure(), outcome.detail)
@@ -75,7 +75,11 @@ class SourceRefresher(
     }
 
     suspend fun refreshAll(): List<RefreshResult> =
-        sources.enabled().map { source -> refresh(source.id) }
+        sources.enabled()
+            // 影视源不是播放列表：拿它走直播解析只会失败，并给源管理页写一条
+            // 「内容不是 M3U/TXT」的脏记录。两条链路各刷各的（VOD-03）
+            .filter { it.type == SourceType.LIVE }
+            .map { source -> refresh(source.id) }
 
     /**
      * 本地文件导入（LIVE-04）。
@@ -150,16 +154,6 @@ class SourceRefresher(
         const val NOTE_NO_CHANNELS = "解析失败：内容不是 M3U / TXT 播放列表"
     }
 }
-
-private fun Source.toHeaders(): RequestHeaders =
-    RequestHeaders(
-        userAgent = userAgent?.takeIf { it.isNotBlank() },
-        referer = referer?.takeIf { it.isNotBlank() },
-        basicAuth =
-            basicUser?.takeIf { it.isNotBlank() }?.let { user ->
-                BasicAuth(username = user, password = basicPass.orEmpty())
-            },
-    )
 
 private fun FetchErrorKind.toRefreshFailure(): RefreshFailure =
     when (this) {

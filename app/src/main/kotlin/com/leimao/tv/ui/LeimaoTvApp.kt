@@ -22,8 +22,10 @@ import androidx.navigation.navArgument
 import com.leimao.tv.AppContainer
 import com.leimao.tv.SourceRefreshWorker
 import com.leimao.tv.core.data.RefreshInterval
+import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.SearchScope
 import com.leimao.tv.core.model.TvRoute
 import com.leimao.tv.core.model.epg.EpgProgramme
@@ -47,6 +49,8 @@ import com.leimao.tv.feature.settings.PlaybackSettingsScreen
 import com.leimao.tv.feature.settings.RefreshSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
+import com.leimao.tv.feature.vod.VodHomeState
+import com.leimao.tv.feature.vod.VodSourceRow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -237,6 +241,44 @@ private fun HomeRoute(
         recentChannels = container.historyRepository.recent()
     }
 
+    // ---- 影视首页（VOD-03）----
+    // 类型 / 年份 / 地区三个「用户选择」用 rememberSaveable：进详情页再返回时不该被重置
+    var vodState by remember { mutableStateOf(VodHomeState()) }
+    var vodTypeName by rememberSaveable { mutableStateOf(ContentType.MOVIE.name) }
+    var vodYear by rememberSaveable { mutableStateOf<Int?>(null) }
+    var vodArea by rememberSaveable { mutableStateOf<String?>(null) }
+    // 后台刷新完成一次就 +1，用来驱动下面的重新读库
+    var vodRevision by remember { mutableStateOf(0) }
+    val vodType = ContentType.entries.firstOrNull { it.name == vodTypeName } ?: ContentType.MOVIE
+
+    // 点导航「电视剧」要真的切到电视剧，而不是停在电影
+    LaunchedEffect(section) {
+        val mapped = section.toVodType() ?: return@LaunchedEffect
+        if (mapped.name != vodTypeName) {
+            vodTypeName = mapped.name
+            vodYear = null
+            vodArea = null
+        }
+    }
+
+    // 进影视板块时按缓存时效决定要不要回源：一个源就是「分类 + 每类首页」七八个请求，
+    // 每次切板块都打一轮既慢又容易被对方限流
+    LaunchedEffect(mode) {
+        if (mode != AppMode.VOD) return@LaunchedEffect
+        val last = container.mediaRepository.lastFetchedAt()
+        val stale = last == null || System.currentTimeMillis() - last > VOD_CACHE_TTL_MS
+        if (!stale) return@LaunchedEffect
+        vodState = vodState.copy(loading = true)
+        container.vodCatalogRefresher.refreshAll()
+        vodRevision++
+    }
+
+    // 读库组装：类型 / 筛选 / 刷新完成，任一变化都重算。首页只读本地快照，不等网络
+    LaunchedEffect(mode, vodTypeName, vodYear, vodArea, vodRevision) {
+        if (mode != AppMode.VOD) return@LaunchedEffect
+        vodState = loadVodHomeState(container, vodType, vodYear, vodArea)
+    }
+
     HomeScreen(
         mode = mode,
         section = section,
@@ -256,6 +298,25 @@ private fun HomeRoute(
         channels = channels,
         favoriteIds = favoriteIds,
         recentChannels = recentChannels,
+        vodState = vodState,
+        vodActions =
+            VodHomeActions(
+                onSelectType = { type ->
+                    vodTypeName = type.name
+                    vodYear = null
+                    vodArea = null
+                    // 有导航项的类型顺带同步导航高亮；短剧 / 纪录片没有导航项，保持当前项不动
+                    type.toHomeSection()?.let { mapped ->
+                        pickedSectionName = mapped.name
+                        scope.launch { container.settings.setLastSection(mapped.name) }
+                    }
+                },
+                onSelectYear = { vodYear = it },
+                onSelectArea = { vodArea = it },
+                onSelectMedia = {
+                    // 详情页是 VOD-04：先不跳转。跳到空页面比不跳更让人困惑
+                },
+            ),
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
@@ -407,6 +468,7 @@ private fun SourceManagerRoute(
         refresher = container.sourceRefresher,
         epgImporter = container.epgImporter,
         epgRepository = container.epgRepository,
+        vodRefresher = container.vodCatalogRefresher,
         onBack =
             if (isFirstRun) {
                 // 无源引导页按返回 = 退出确认（§6.6 降级 2：没有可播内容，不设主页中转）
@@ -422,6 +484,42 @@ private fun SourceManagerRoute(
         },
     )
 }
+
+/**
+ * 从本地快照组装影视首页状态（VOD-03）。
+ *
+ * 为什么在 :app 而不在 feature 模块：读数据属于组装层的职责，feature 只拿现成数据 ——
+ * 与直播板块把 `channels` 传进 HomeScreen 是同一套做法（架构设计 §1 的依赖方向）。
+ */
+private suspend fun loadVodHomeState(
+    container: AppContainer,
+    type: ContentType,
+    year: Int?,
+    area: String?,
+): VodHomeState {
+    val media = container.mediaRepository
+    val vodSources = container.sourceRepository.list().filter { it.type == SourceType.VOD && it.enabled }
+    val rows =
+        vodSources.mapNotNull { source ->
+            val items = media.bySource(source.id)
+            // 这次没抓到内容的源不占一行空白
+            if (items.isEmpty()) null else VodSourceRow(source.id, source.name, items)
+        }
+    return VodHomeState(
+        selectedType = type,
+        years = media.yearsOf(type),
+        areas = media.areasOf(type),
+        selectedYear = year,
+        selectedArea = area,
+        items = media.byType(type, year, area),
+        recent = media.recent(),
+        sourceRows = rows,
+        hasSource = vodSources.isNotEmpty(),
+    )
+}
+
+/** 影视首页缓存有效期：半小时内直接读库，不为「切个板块」打一轮请求 */
+private const val VOD_CACHE_TTL_MS = 30 * 60 * 1000L
 
 private const val ARG_CHANNEL_ID = "channelId"
 private const val ARG_LOADING = "loading"

@@ -198,6 +198,9 @@ object AppleCmsVodParser {
             remarks = obj.text("vod_remarks")?.trim()?.takeIf { it.isNotEmpty() },
             year = parseYear(obj.text("vod_year")),
             area = obj.text("vod_area")?.trim()?.takeIf { it.isNotEmpty() },
+            // 源侧更新时间：「最近更新」的排序依据。解析不出就留着 null，
+            // 由落库方回落到入库时间（VOD-03）
+            updatedAt = VodTime.parse(obj.text("vod_time")),
         )
     }
 

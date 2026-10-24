@@ -2,7 +2,9 @@ package com.leimao.tv.feature.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -25,10 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.designsystem.components.TvTextField
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
@@ -46,6 +50,7 @@ import com.leimao.tv.core.designsystem.theme.TvText
 fun AddSourceDialog(
     onDismiss: () -> Unit,
     onConfirm: (
+        type: String,
         name: String,
         url: String,
         userAgent: String,
@@ -54,6 +59,7 @@ fun AddSourceDialog(
         basicPass: String,
     ) -> Unit,
 ) {
+    var type by rememberSaveable { mutableStateOf(SourceType.LIVE) }
     var name by rememberSaveable { mutableStateOf("") }
     var url by rememberSaveable { mutableStateOf("") }
     var userAgent by rememberSaveable { mutableStateOf("") }
@@ -86,10 +92,38 @@ fun AddSourceDialog(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "支持 M3U / M3U8 / TXT。地址应当是你能合法访问的订阅源。",
+                text =
+                    if (type == SourceType.VOD) {
+                        "影视接口（苹果CMS / TVBox 系采集接口，形如 …/api.php/provide/vod）。"
+                    } else {
+                        "支持 M3U / M3U8 / TXT。地址应当是你能合法访问的订阅源。"
+                    },
                 style = TvText.current.hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 类型决定后面走哪条链路：直播是「下载播放列表 → 解析频道」，
+            // 影视是「调采集接口 → 按分类抓条目」，填错了只会得到一条抓取失败
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "类型",
+                    style = TvText.current.label,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(56.dp),
+                )
+                TypeChip(
+                    text = "直播",
+                    selected = type == SourceType.LIVE,
+                    onClick = { type = SourceType.LIVE },
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                TypeChip(
+                    text = "影视",
+                    selected = type == SourceType.VOD,
+                    onClick = { type = SourceType.VOD },
+                )
+            }
             Spacer(modifier = Modifier.height(12.dp))
 
             // 输入区可滚动、按钮固定在底部：投影仪/低端盒子上的字体放大也挤不掉按钮
@@ -178,7 +212,7 @@ fun AddSourceDialog(
                         if (url.isBlank()) {
                             urlFieldFocus.requestFocus()
                         } else {
-                            onConfirm(name, url, userAgent, referer, basicUser, basicPass)
+                            onConfirm(type, name, url, userAgent, referer, basicUser, basicPass)
                         }
                     },
                 ) {
@@ -188,6 +222,41 @@ fun AddSourceDialog(
                     Text(text = "取消", style = TvText.current.label)
                 }
             }
+        }
+    }
+}
+
+/**
+ * 类型选择 chip（VOD-03）。
+ *
+ * 选中态用「文字变色 + 底部短横线」而不是换背景：换背景会和焦点描边撞色，
+ * 用户分不清「这个我选了」还是「焦点刚好停在这」。
+ */
+@Composable
+private fun TypeChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    FocusableCard(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = text,
+                style = TvText.current.body,
+                color = if (selected) accent else MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Box(
+                modifier =
+                    Modifier
+                        .width(16.dp)
+                        .height(2.dp)
+                        .background(if (selected) accent else Color.Transparent),
+            )
         }
     }
 }

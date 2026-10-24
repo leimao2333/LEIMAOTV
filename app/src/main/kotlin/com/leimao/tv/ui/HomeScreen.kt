@@ -40,13 +40,16 @@ import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.SearchScope
+import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.feature.iptv.ChannelBrowser
 import com.leimao.tv.feature.iptv.ChannelLogo
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.vod.VodHomeScreen
+import com.leimao.tv.feature.vod.VodHomeState
 
 /**
  * 主页左侧导航项。
@@ -83,6 +86,34 @@ enum class HomeSection(
     }
 }
 
+/** 导航项 → 影视类型。没有对应导航项的（搜索/设置/直播）返回 null。 */
+internal fun HomeSection.toVodType(): ContentType? =
+    when (this) {
+        HomeSection.MOVIE -> ContentType.MOVIE
+        HomeSection.SERIES -> ContentType.TV_SERIES
+        HomeSection.ANIME -> ContentType.ANIME
+        HomeSection.VARIETY -> ContentType.VARIETY
+        HomeSection.SPORTS -> ContentType.SPORTS
+        else -> null
+    }
+
+/** 影视类型 → 导航项，仅限有导航项的五类；短剧 / 纪录片返回 null */
+internal fun ContentType.toHomeSection(): HomeSection? =
+    HomeSection.entries.firstOrNull { it.toVodType() == this }
+
+/**
+ * 影视首页的四个交互出口。
+ *
+ * 打包成一个对象而不是四个平铺参数：HomeScreen 的参数列表已经长到「再加就要数不清」，
+ * 而它们本来就是同一块内容区的配套回调，打包后调用处也不容易漏传。
+ */
+data class VodHomeActions(
+    val onSelectType: (ContentType) -> Unit,
+    val onSelectYear: (Int?) -> Unit,
+    val onSelectArea: (String?) -> Unit,
+    val onSelectMedia: (VodSummary) -> Unit,
+)
+
 /**
  * 主页 —— 唯一的枢纽（RULES §6.4）。
  *
@@ -100,6 +131,8 @@ fun HomeScreen(
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
+    vodState: VodHomeState,
+    vodActions: VodHomeActions,
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
@@ -175,6 +208,8 @@ fun HomeScreen(
                         channels = channels,
                         favoriteIds = favoriteIds,
                         recentChannels = recentChannels,
+                        vodState = vodState,
+                        vodActions = vodActions,
                         onOpenChannel = onOpenChannel,
                         onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
@@ -204,6 +239,8 @@ private fun ContentArea(
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
+    vodState: VodHomeState,
+    vodActions: VodHomeActions,
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
@@ -247,7 +284,20 @@ private fun ContentArea(
                 onOpenLicense = onOpenLicense,
                 autoFocus = false,
             )
-        else -> VodHomeScreen(autoFocus = false)
+        // 影视板块的五个栏目（电影/电视剧/动漫/综艺/体育）共用同一个首页，
+        // 「当前是哪一类」由 vodState.selectedType 决定 —— 导航点击时在 HomeRoute 里同步过去。
+        // 这里不再用 effectiveSection 覆盖类型：短剧 / 纪录片没有导航项，
+        // 一覆盖就会被弹回电影，用户点了等于没点。
+        else ->
+            VodHomeScreen(
+                state = vodState,
+                onSelectType = vodActions.onSelectType,
+                onSelectYear = vodActions.onSelectYear,
+                onSelectArea = vodActions.onSelectArea,
+                onSelectMedia = vodActions.onSelectMedia,
+                onOpenSourceManager = onOpenSourceManager,
+                autoFocus = false,
+            )
     }
 }
 

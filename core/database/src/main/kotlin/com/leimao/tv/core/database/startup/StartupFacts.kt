@@ -42,7 +42,8 @@ class RoomStartupFactsReader(
 
         val sourceDao = database.sourceDao()
         val channelDao = database.channelDao()
-        val hasEnabledSource = sourceDao.countEnabled() > 0
+        // 只数直播源：只有影视源的用户没有「台」可播，应该走无源引导而不是播放页骨架
+        val hasEnabledSource = sourceDao.countEnabledLive() > 0
 
         return StartupFacts(
             hasEnabledSource = hasEnabledSource,

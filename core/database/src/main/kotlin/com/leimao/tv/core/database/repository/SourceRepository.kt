@@ -13,6 +13,9 @@ interface SourceRepository {
 
     suspend fun countEnabled(): Int
 
+    /** 只数直播源。启动落点判定用它，影视源不算「有台可播」（VOD-03） */
+    suspend fun countEnabledLive(): Int
+
     suspend fun add(source: NewSource): Long
 
     suspend fun delete(id: Long)
@@ -45,6 +48,8 @@ class RoomSourceRepository(
 
     override suspend fun countEnabled(): Int = dao.countEnabled()
 
+    override suspend fun countEnabledLive(): Int = dao.countEnabledLive()
+
     override suspend fun add(source: NewSource): Long {
         val nextOrder = dao.maxSortOrder() + 1
         return dao.insert(
@@ -62,7 +67,16 @@ class RoomSourceRepository(
         )
     }
 
-    override suspend fun delete(id: Long) = dao.deleteById(id)
+    /**
+     * 删源时连带清掉它的影视条目（VOD-03）。
+     *
+     * 不清的话，首页会留着点进去却拉不到详情的残留卡片 —— 那些只是缓存，
+     * 删干净才符合「删了就没了」的直觉（收藏 / 历史属于用户数据，另有级联规则）。
+     */
+    override suspend fun delete(id: Long) {
+        dao.deleteById(id)
+        database.mediaDao().clearSource(id)
+    }
 
     override suspend fun setEnabled(id: Long, enabled: Boolean) = dao.setEnabled(id, enabled)
 

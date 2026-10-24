@@ -31,9 +31,17 @@ class ApkAssetsTest {
 
     @Test
     fun `只有 universal 时任何设备都退到它`() {
+        // 这条钉住的是发版产物的命名（SYS-07）：现在没有 native so，流水线只传一份包，
+        // 名字取 -universal。要是改叫主名（arm64），32 位盒子会永远收不到更新 ——
+        // 而下一条用例正说明「主名对 32 位等于没有包」
         val assets = listOf(asset("leimao-tv-v0.2.9.7-universal.apk"))
-        assertEquals("leimao-tv-v0.2.9.7-universal.apk", ApkAssets.pick(assets, "0.2.9.7", DeviceAbi.ARM64)?.name)
-        assertEquals("leimao-tv-v0.2.9.7-universal.apk", ApkAssets.pick(assets, "0.2.9.7", DeviceAbi.ARM32)?.name)
+        DeviceAbi.entries.forEach { abi ->
+            assertEquals(
+                "universal 包应当对所有架构可选（$abi）",
+                "leimao-tv-v0.2.9.7-universal.apk",
+                ApkAssets.pick(assets, "0.2.9.7", abi)?.name,
+            )
+        }
     }
 
     @Test

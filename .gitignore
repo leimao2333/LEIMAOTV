@@ -14,11 +14,16 @@ captures/
 *.class
 output-metadata.json
 
-# 签名材料（本仓库不存放密钥；如后续需要，按 RULES.md §10.3 单独约定）
-keystore/
-keystore.properties
+# 签名材料（决定：密钥随仓库走，见 docs/发布流程.md「为什么密钥在仓库里」）
+# 只放行这一把密钥与这一份配置，别的 .jks / keystore 一律不进 ——
+# 有人临时拷一份别的密钥进来不该被 git add -A 顺手带走
 *.jks
 *.keystore
+keystore/*
+!keystore/leimao-tv.jks
+
+# 本地演练发版流程时留下的校验和文件（正式的由 CI 生成并上传 Release）
+*.apk.sha256
 
 # 系统与编辑器
 .DS_Store

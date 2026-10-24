@@ -121,7 +121,8 @@
 
 详细条目见 [docs/功能清单.md](docs/功能清单.md)（需求台账），
 逐条执行项见 [TODO.md](TODO.md)（按里程碑拆好的动手清单），
-架构决策见 [docs/架构设计.md](docs/架构设计.md)。
+架构决策见 [docs/架构设计.md](docs/架构设计.md)，
+发版与签名配置见 [docs/发布流程.md](docs/发布流程.md)。
 
 ## 版本规范
 
@@ -154,10 +155,13 @@
 
 ```bash
 ./gradlew :app:assembleDebug          # 调试包
-./gradlew :app:assembleRelease        # 发布包（按 ABI 拆分在 M4 补）
+./gradlew :app:assembleRelease        # 发布包（密钥就在仓库里，签得出；见 docs/发布流程.md）
 ./gradlew test                        # 全部单测（含纯 Kotlin 模块）
 ./gradlew ktlintCheck                 # 代码风格
 ```
+
+发版不手工打 APK：推一个 `v<版本>` tag，GitHub Actions 会跑测试、签名、按
+RULES §10.4 命名并把包挂到 Release 上（`.github/workflows/release.yml`）。
 
 - 开发环境：JDK 17 + Android SDK 35（compileSdk 35 / minSdk 21 / targetSdk 35）+ Gradle 8.7
 - 运行目标：Android TV 模拟器（1080p）或真机盒子（Android 5.0+）

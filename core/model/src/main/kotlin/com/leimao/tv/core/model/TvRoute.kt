@@ -30,10 +30,12 @@ object TvRoute {
     /**
      * 影视播放（VOD-05）。带上线路与集号：从详情页点某一集进来，就直接播那一集，
      * 而不是「先播第一集再让用户自己跳」。
+     *
+     * `startMs` 是续播点（VOD-06）：从「继续观看」进来时不是从头开始。
      */
     const val VOD_PLAY =
         "vod_play?sourceId={sourceId}&sourceKey={sourceKey}" +
-            "&lineIndex={lineIndex}&episodeIndex={episodeIndex}"
+            "&lineIndex={lineIndex}&episodeIndex={episodeIndex}&startMs={startMs}"
 
     private const val NO_CHANNEL = -1L
 
@@ -53,9 +55,12 @@ object TvRoute {
         sourceKey: String,
         lineIndex: Int,
         episodeIndex: Int,
+        startPositionMs: Long = 0L,
     ): String =
         "vod_play?sourceId=$sourceId&sourceKey=${percentEncode(sourceKey)}" +
-            "&lineIndex=$lineIndex&episodeIndex=$episodeIndex"
+            "&lineIndex=$lineIndex&episodeIndex=$episodeIndex" +
+            // 负数在这里就归一：路由参数一路走到播放器，不必每层都判一次
+            "&startMs=${startPositionMs.coerceAtLeast(0L)}"
 
     /**
      * 极简百分号编码。

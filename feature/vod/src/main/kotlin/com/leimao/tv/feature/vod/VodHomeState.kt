@@ -1,6 +1,7 @@
 package com.leimao.tv.feature.vod
 
 import com.leimao.tv.core.model.ContentType
+import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
 
 /**
@@ -44,6 +45,13 @@ data class VodHomeState(
     val items: List<VodSummary> = emptyList(),
     /** 全库最近更新 */
     val recent: List<VodSummary> = emptyList(),
+    /**
+     * 继续观看（VOD-06）。
+     *
+     * 放在筛选之上、且**筛选时不隐藏**：用户切到「2024 / 美国」是想找新片，
+     * 但「我昨天看到第 12 集」这件事跟筛选条件无关 —— 藏起来只会让他以为进度丢了。
+     */
+    val continueWatching: List<VodContinueItem> = emptyList(),
     /** 每源一行 */
     val sourceRows: List<VodSourceRow> = emptyList(),
     val loading: Boolean = false,
@@ -55,5 +63,6 @@ data class VodHomeState(
     val filtering: Boolean get() = selectedYear != null || selectedArea != null
 
     /** 三块内容全空 —— 此时渲染空态，而不是一堆空行 */
-    val blank: Boolean get() = items.isEmpty() && recent.isEmpty() && sourceRows.isEmpty()
+    val blank: Boolean
+        get() = items.isEmpty() && recent.isEmpty() && sourceRows.isEmpty() && continueWatching.isEmpty()
 }

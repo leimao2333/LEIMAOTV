@@ -40,9 +40,10 @@ import coil.compose.AsyncImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.vod.VodEpisode
+import com.leimao.tv.core.model.vod.VodProgress
 
 /**
- * 影视详情页（VOD-04）：简介、线路、选集、倒序。
+ * 影视详情页（VOD-04）：简介、线路、选集、倒序，以及「继续观看」（VOD-06）。
  *
  * 版面用一个 [LazyVerticalGrid] 兜住整页，而不是「外层滚动 + 内层网格」——
  * 后者在电视上有个致命问题：焦点走到网格边界时，方向键会被内层吃掉，页面滚不动，
@@ -51,9 +52,8 @@ import com.leimao.tv.core.model.vod.VodEpisode
  * 集数用 8 列小格而不是海报：一部剧 40 集，海报要滚六七屏才能看到最后，
  * 而用户在第 3 屏就已经想换成「直接给我第 20 集」了。
  *
- * 关于「点选集能不能播」：**这一版还不播**。影视播放不是直播播放器加个地址就行
- * （没有节目单、没有换台，但要记进度、要连播），那是 VOD-05 的范围。
- * 所以选集在本页只做「选中」，并在工具行明说一句，免得用户以为按坏了。
+ * 看过一半的片子，进页面第一眼该看到的是**继续观看**而不是第 1 集 —— 所以有进度时
+ * 初始焦点落在续播按钮上，没有时才落到第一集（见下面的 LaunchedEffect）。
  */
 @Composable
 fun VodDetailScreen(
@@ -62,17 +62,21 @@ fun VodDetailScreen(
     onSelectLine: (Int) -> Unit,
     onToggleReverse: () -> Unit,
     onSelectEpisode: (Int) -> Unit,
+    onResume: (VodProgress) -> Unit,
     onOpenSourceManager: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val firstEpisode = remember { FocusRequester() }
+    val resumeButton = remember { FocusRequester() }
 
     // 切线路后选集整批换掉，焦点会掉到无处可落。等一帧再要，与首页 chip 同一套做法。
-    // 只依赖 lineIndex：切倒序时用户正停在倒序按钮上，这时抢焦点是打断而不是帮忙。
-    LaunchedEffect(state.lineIndex, state.ready) {
-        if (!state.ready || state.episodes.isEmpty()) return@LaunchedEffect
+    // 依赖 lineIndex / ready / 有无进度：三者任一变化都意味着「该停的地方变了」。
+    // 不依赖 reversed：切倒序时用户正停在倒序按钮上，这时抢焦点是打断而不是帮忙。
+    LaunchedEffect(state.lineIndex, state.ready, state.progress) {
+        if (!state.ready) return@LaunchedEffect
         withFrameNanos { }
-        runCatching { firstEpisode.requestFocus() }
+        val target = if (state.progress != null) resumeButton else firstEpisode
+        runCatching { target.requestFocus() }
     }
 
     LazyVerticalGrid(
@@ -128,6 +132,16 @@ fun VodDetailScreen(
                 }
 
             VodDetailStatus.READY -> {
+                state.progress?.let { progress ->
+                    fullSpan {
+                        ResumeRow(
+                            progress = progress,
+                            onResume = { onResume(progress) },
+                            focusRequester = resumeButton,
+                        )
+                    }
+                }
+
                 if (state.lines.size > 1) {
                     fullSpan {
                         Column {
@@ -343,6 +357,52 @@ private fun EpisodeToolbar(
         )
         Spacer(modifier = Modifier.width(18.dp))
         LineChip(text = if (reversed) "倒序" else "正序", selected = false, onClick = onToggleReverse)
+    }
+}
+
+/**
+ * 继续观看（VOD-06）。
+ *
+ * 只说「第几集 + 看到第几分钟」，不写「播放」两个字：整个按钮就是「从这儿接着看」，
+ * 加了动词反而像要跳去另一个页面。右那句小字是给「我就想从头看」的人一个出口 ——
+ * 否则他唯一能试的动作是点这个按钮，然后又得自己拖进度条回 0。
+ */
+@Composable
+private fun ResumeRow(
+    progress: VodProgress,
+    onResume: () -> Unit,
+    focusRequester: FocusRequester,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(bottom = 4.dp),
+    ) {
+        FocusableCard(
+            onClick = onResume,
+            focusRequester = focusRequester,
+            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "继续观看",
+                    style = TvText.current.body,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "${progress.episodeLabel} · ${formatTime(progress.positionMs)}",
+                    style = TvText.current.body,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = "想从头看，就在下面的选集里随便点一集",
+            style = TvText.current.hint,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
     }
 }
 

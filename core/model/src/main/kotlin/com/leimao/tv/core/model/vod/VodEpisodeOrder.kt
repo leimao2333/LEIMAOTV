@@ -75,6 +75,20 @@ fun VodDetail.episodeAt(
 ): VodEpisode? = lines.getOrNull(lineIndex)?.episodes?.getOrNull(episodeIndex)
 
 /**
+ * 这条进度在这份详情里还成立吗（VOD-06）。
+ *
+ * 源会变：一部剧上周 40 集，这周可能只剩 30 集；线路也可能少了一条。
+ * 拿一条指向「第 40 集」的进度去起播，得到的是一句「这一集没有播放地址」——
+ * 用户完全不知道该怎么办。所以进详情页时先验一遍：不成立就当没进度，
+ * 从头开始总好过点进去撞墙。
+ */
+fun VodDetail.acceptsProgress(progress: VodProgress): Boolean {
+    if (progress.lineIndex < 0 || progress.episodeIndex < 0) return false
+    val episodes = lines.getOrNull(progress.lineIndex)?.episodes ?: return false
+    return progress.episodeIndex < episodes.size
+}
+
+/**
  * 同一集在各条线路上的地址，供内核做降级链（PLAY-02）。
  *
  * 注意**不是**「一条线路的所有集」：内核的 `lines` 语义是「同一份内容的多条备选地址」，

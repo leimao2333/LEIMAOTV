@@ -48,6 +48,14 @@ data class PlaybackRequest(
     /** 至少一条；第一条通常等于 [url] */
     val lines: List<String> = listOf(url),
     val kind: PlaybackKind = PlaybackKind.LIVE,
+    /**
+     * 从第几毫秒开始播（VOD-06 的「继续观看」）。
+     *
+     * 交给内核而不是「起播后再 seek」：seek 在还没 prepare 完时会被忽略或落到 0，
+     * 用户看到的是从头开始，而他明明点的是「继续」。Media3 的
+     * `setMediaSource(source, startPositionMs)` 是唯一在建流时就带位置的入口。
+     */
+    val startPositionMs: Long = 0L,
 ) {
     val normalizedLines: List<String> get() = if (lines.isEmpty()) listOf(url) else lines
 }

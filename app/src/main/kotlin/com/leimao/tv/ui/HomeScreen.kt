@@ -42,6 +42,7 @@ import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.SearchScope
+import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.feature.iptv.ChannelBrowser
 import com.leimao.tv.feature.iptv.ChannelLogo
@@ -112,6 +113,7 @@ data class VodHomeActions(
     val onSelectYear: (Int?) -> Unit,
     val onSelectArea: (String?) -> Unit,
     val onSelectMedia: (VodSummary) -> Unit,
+    val onResume: (VodContinueItem) -> Unit,
 )
 
 /**
@@ -295,6 +297,7 @@ private fun ContentArea(
                 onSelectYear = vodActions.onSelectYear,
                 onSelectArea = vodActions.onSelectArea,
                 onSelectMedia = vodActions.onSelectMedia,
+                onResume = vodActions.onResume,
                 onOpenSourceManager = onOpenSourceManager,
                 autoFocus = false,
             )

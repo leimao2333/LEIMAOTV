@@ -3,6 +3,7 @@ package com.leimao.tv.feature.vod
 import com.leimao.tv.core.model.vod.VodDetail
 import com.leimao.tv.core.model.vod.VodEpisode
 import com.leimao.tv.core.model.vod.VodLine
+import com.leimao.tv.core.model.vod.VodProgress
 import com.leimao.tv.core.model.vod.VodSummary
 
 /** 详情页的四种结局。UI 必须对每一种给出**不同的说法**（见 [VodDetailStatus] 的注释）。 */
@@ -43,6 +44,13 @@ data class VodDetailState(
     val lineIndex: Int = 0,
     val episodeIndex: Int = 0,
     val reversed: Boolean = false,
+    /**
+     * 上次看到哪儿（VOD-06）。为 null 表示这部片没看过、或已经看完。
+     *
+     * 与 [lineIndex] / [episodeIndex] 分开存：那两个是**当前选中**（用户可能正在翻选集），
+     * 这个是「上次真的播到哪」，点「继续观看」时用它，翻选集不该把它改掉。
+     */
+    val progress: VodProgress? = null,
 ) {
     /** 标题 / 海报优先取回源结果：详情里的字段比首页快照新 */
     val title: String get() = detail?.summary?.name ?: summary?.name.orEmpty()

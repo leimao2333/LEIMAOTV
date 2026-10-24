@@ -76,6 +76,9 @@ class RoomSourceRepository(
     override suspend fun delete(id: Long) {
         dao.deleteById(id)
         database.mediaDao().clearSource(id)
+        // 进度没有外键（见 VodProgressEntity 的注释），源没了就得显式清：
+        // 否则「继续观看」里会留一条点进去必然失败的记录
+        database.vodProgressDao().clearSource(id)
     }
 
     override suspend fun setEnabled(id: Long, enabled: Boolean) = dao.setEnabled(id, enabled)

@@ -49,8 +49,27 @@ class TvRouteTest {
     fun `播放路由带上线路与集号`() {
         // 从详情页点第 12 集，进来就该播第 12 集，而不是「先播第一集再让用户自己跳」
         assertEquals(
-            "vod_play?sourceId=3&sourceKey=88&lineIndex=1&episodeIndex=11",
+            "vod_play?sourceId=3&sourceKey=88&lineIndex=1&episodeIndex=11&startMs=0",
             TvRoute.vodPlay(3, "88", lineIndex = 1, episodeIndex = 11),
+        )
+    }
+
+    @Test
+    fun `续播点进路由`() {
+        // VOD-06：从「继续观看」进来要带上看到的位置，否则用户又得自己拖
+        assertEquals(
+            "vod_play?sourceId=3&sourceKey=88&lineIndex=0&episodeIndex=4&startMs=754000",
+            TvRoute.vodPlay(3, "88", lineIndex = 0, episodeIndex = 4, startPositionMs = 754_000L),
+        )
+    }
+
+    @Test
+    fun `负的续播点归一成 0`() {
+        // 内核偶尔上报 -1（位置还没算出来）。带着负数一路走到播放器，
+        // Media3 会抛 IllegalSeekPositionException —— 那是一次崩溃，不是一次降级
+        assertEquals(
+            "vod_play?sourceId=1&sourceKey=k&lineIndex=0&episodeIndex=0&startMs=0",
+            TvRoute.vodPlay(1, "k", lineIndex = 0, episodeIndex = 0, startPositionMs = -1L),
         )
     }
 

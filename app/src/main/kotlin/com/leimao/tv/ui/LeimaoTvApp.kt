@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -35,6 +36,9 @@ import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.model.vod.VodDetail
+import com.leimao.tv.core.model.vod.VodProgress
+import com.leimao.tv.core.model.vod.VodProgressRules
+import com.leimao.tv.core.model.vod.acceptsProgress
 import com.leimao.tv.core.model.vod.episodeName
 import com.leimao.tv.core.model.vod.episodeUrls
 import com.leimao.tv.core.model.vod.nextEpisode
@@ -150,6 +154,7 @@ fun LeimaoTvApp(
                     sourceKey = entry.arguments?.getString(ARG_SOURCE_KEY).orEmpty(),
                     initialLine = entry.arguments?.getInt(ARG_LINE_INDEX) ?: 0,
                     initialEpisode = entry.arguments?.getInt(ARG_EPISODE_INDEX) ?: 0,
+                    initialPositionMs = entry.arguments?.getLong(ARG_START_MS) ?: 0L,
                     // 回详情页而不是回首页：用户是从详情页点进来的，退回去该看到选集
                     onBack = { navController.popBackStack() },
                 )
@@ -356,6 +361,19 @@ private fun HomeRoute(
                 onSelectMedia = { summary ->
                     navController.navigate(TvRoute.vodDetail(summary.sourceId, summary.sourceKey))
                 },
+                // 直接进播放页而不是先回详情页：用户点的就是「接着看」，
+                // 中间插一页详情等于让他再确认一次自己刚做过的决定
+                onResume = { item ->
+                    navController.navigate(
+                        TvRoute.vodPlay(
+                            sourceId = item.progress.sourceId,
+                            sourceKey = item.progress.sourceKey,
+                            lineIndex = item.progress.lineIndex,
+                            episodeIndex = item.progress.episodeIndex,
+                            startPositionMs = item.progress.positionMs,
+                        ),
+                    )
+                },
             ),
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
@@ -553,26 +571,37 @@ private fun VodDetailRoute(
     var reloadTag by remember { mutableStateOf(0) }
 
     LaunchedEffect(sourceId, sourceKey, reloadTag) {
+        // 进度只在本地库，进页面顺手读一次，不和回源串行
+        val saved = container.vodProgressRepository.find(sourceId, sourceKey)
         state =
             state.copy(
                 summary = container.mediaRepository.find(sourceId, sourceKey) ?: state.summary,
                 status = VodDetailStatus.LOADING,
                 note = null,
+                progress = saved,
             )
 
         when (val result = container.vodDetailLoader.load(sourceId, sourceKey)) {
-            is VodDetailResult.Loaded ->
+            is VodDetailResult.Loaded -> {
+                // 进度指向的线路/集在源里可能已经不存在了（源换了集数、少了一条线）。
+                // 这种进度不能拿去起播，也不能让详情页停在第 40 集却只有 30 集可选 ——
+                // 直接当「没进度」处理，界面回到第 1 集，用户只会觉得进度没了，
+                // 而不会点进一个必然失败的页面
+                val resume = saved?.takeIf { result.detail.acceptsProgress(it) }
                 state =
                     state.copy(
                         detail = result.detail,
                         summary = result.detail.summary,
                         status = VodDetailStatus.READY,
                         note = null,
-                        // 换片要重置线路与选集：从 A 片的第 20 集返回、再点进 B 片，
+                        progress = resume,
+                        // 有进度就停在看到那一集；否则回到第一集。
+                        // 换片同样落到这里：从 A 片的第 20 集返回再点进 B 片，
                         // 停在第 20 集毫无意义，而 B 片可能只有 10 集
-                        lineIndex = 0,
-                        episodeIndex = 0,
+                        lineIndex = resume?.lineIndex ?: 0,
+                        episodeIndex = resume?.episodeIndex ?: 0,
                     )
+            }
 
             VodDetailResult.Gone -> state = state.copy(status = VodDetailStatus.GONE)
             VodDetailResult.NoSource -> state = state.copy(status = VodDetailStatus.NO_SOURCE)
@@ -600,6 +629,18 @@ private fun VodDetailRoute(
                 TvRoute.vodPlay(sourceId, sourceKey, state.lineIndex, original),
             )
         },
+        // 继续观看（VOD-06）：线路、集号、位置三样都来自进度，不从头开始
+        onResume = { progress ->
+            navController.navigate(
+                TvRoute.vodPlay(
+                    sourceId = sourceId,
+                    sourceKey = sourceKey,
+                    lineIndex = progress.lineIndex,
+                    episodeIndex = progress.episodeIndex,
+                    startPositionMs = progress.positionMs,
+                ),
+            )
+        },
         onOpenSourceManager = onOpenSourceManager,
     )
 }
@@ -624,11 +665,12 @@ private fun describeDetailFailure(
     }
 
 /**
- * 影视播放页的接线（VOD-05）。
+ * 影视播放页的接线（VOD-05 / VOD-06）。
  *
- * 三件事在这里缝起来：**拉详情**（拿全集地址）、**起播**（走同一个内核，但 kind = VOD）、
- * **自动连播**（监听 Ended 决定下一集）。缝在 :app 是因为它同时碰到导航参数、播放器实例
- * 与数据加载三样东西，而这三样都归 :app 管（RULES §5.5）。
+ * 四件事在这里缝起来：**拉详情**（拿全集地址）、**起播**（走同一个内核，但 kind = VOD）、
+ * **自动连播**（监听 Ended 决定下一集）、**记进度**（10 秒一次 + 离开时补一次）。
+ * 缝在 :app 是因为它同时碰到导航参数、播放器实例与数据加载三样东西，
+ * 而这三样都归 :app 管（RULES §5.5）。
  *
  * 为什么不把剧集列表从详情页传过来：一集一个地址，几十上百条，塞不进导航参数；
  * 而重新拉一次详情只是一个请求，比在两层之间维护一份「传过去的快照」便宜得多。
@@ -640,6 +682,7 @@ private fun VodPlayRoute(
     sourceKey: String,
     initialLine: Int,
     initialEpisode: Int,
+    initialPositionMs: Long,
     onBack: () -> Unit,
 ) {
     val playback by container.player.state.collectAsStateWithLifecycle()
@@ -658,10 +701,96 @@ private fun VodPlayRoute(
     var finished by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
 
+    /**
+     * 上次落库时的位置，用来算「离上次写够不够 10 秒」。
+     *
+     * 换集时归零（[playEpisodeAt] 里）：不归零的话，从 42:00 换到下一集后，
+     * 要等新一集播到 42 分钟才会再写一次 —— 而那期间退出就什么都没记下。
+     */
+    var lastSavedMs by remember { mutableStateOf(0L) }
+
+    /**
+     * 写一次进度（VOD-06）。
+     *
+     * 用应用级作用域而不是页面作用域：**离开页面那一刻也要能写**。
+     * 页面作用域在 `onDispose` 里已经被取消，写库请求会随之作废，
+     * 用户退出播放时最后那几分钟就白看了。
+     *
+     * 参数可以显式传：换集时要写的是「上一集的位置」，而那一刻
+     * `episodeIndex` 已经被改成新集了。
+     *
+     * 这里**不删**任何东西。删除（看完 / 从头看）由 [forgetProgress] 单独负责 ——
+     * 让「写」和「删」共用一个入口，就会出现「自动连播写下了下一集，几毫秒后
+     * 一个迟到的『已看完』把它删掉」这种时序事故。少一个分支，少一种竞态。
+     */
+    fun persistProgress(
+        line: Int = lineIndex,
+        episode: Int = episodeIndex,
+        position: Long = positionMs,
+        duration: Long = durationMs,
+    ) {
+        val current = detail ?: return
+        // 太短不记：遥控器误触进来十秒就退，不该在首页留下一条记录
+        if (!VodProgressRules.shouldKeep(position, duration)) return
+        container.applicationScope.launch {
+            container.vodProgressRepository.save(
+                VodProgress(
+                    sourceId = sourceId,
+                    sourceKey = sourceKey,
+                    lineIndex = line,
+                    episodeIndex = episode,
+                    positionMs = position,
+                    durationMs = duration,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+                title = current.summary.name,
+                poster = current.summary.pic,
+            )
+        }
+    }
+
+    /** 忘掉这部片的进度：全剧看完、或看到 95% 以上退出来时用 */
+    fun forgetProgress() {
+        container.applicationScope.launch {
+            container.vodProgressRepository.delete(sourceId, sourceKey)
+        }
+    }
+
+    /**
+     * 记下「刚开始看第 N 集」。
+     *
+     * 自动连播跨集时用：上一集刚播完、下一集才 0 秒，按 [persistProgress] 的规则
+     * 会被「太短不记」挡掉，可此刻退出的话，继续观看应该指向这一集 ——
+     * 而不是上一集（它已经看完了）。
+     */
+    fun markEpisodeStarted(
+        line: Int,
+        episode: Int,
+    ) {
+        val current = detail ?: return
+        container.applicationScope.launch {
+            container.vodProgressRepository.save(
+                VodProgress(
+                    sourceId = sourceId,
+                    sourceKey = sourceKey,
+                    lineIndex = line,
+                    episodeIndex = episode,
+                    positionMs = 0L,
+                    durationMs = 0L,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+                title = current.summary.name,
+                poster = current.summary.pic,
+            )
+        }
+    }
+
     /** 起播某一集。地址为空时不给内核喂空串 —— 那会得到一个「解析失败」的错误码，说不清是哪一步坏 */
     fun playEpisodeAt(
         line: Int,
         episode: Int,
+        startAt: Long = 0L,
+        recordPrevious: Boolean = true,
     ) {
         val current = detail ?: return
         val urls = current.episodeUrls(line, episode)
@@ -670,6 +799,11 @@ private fun VodPlayRoute(
             note = "这一集没有播放地址，换一条线路试试"
             return
         }
+        // 换集前把上一集的位置落一次：周期写最多滞后 10 秒，不补这一下，
+        // 「看完第 3 集手动点第 4 集」会让第 3 集的进度停在十几秒前。
+        // 自动连播那条路不走这里（recordPrevious = false）：上一集是**播完**的，
+        // 写它没有意义，而且会和紧接着的 markEpisodeStarted 抢同一个主键
+        if (recordPrevious && (line != lineIndex || episode != episodeIndex)) persistProgress()
         lineIndex = line
         episodeIndex = episode
         finished = false
@@ -677,6 +811,7 @@ private fun VodPlayRoute(
         note = null
         positionMs = 0L
         durationMs = 0L
+        lastSavedMs = 0L
         container.player.play(
             PlaybackRequest(
                 item = PlaybackItem.Episode(sourceId = sourceId, sourceKey = sourceKey, index = episode),
@@ -685,6 +820,7 @@ private fun VodPlayRoute(
                 headers = headers,
                 lines = urls,
                 kind = PlaybackKind.VOD,
+                startPositionMs = startAt,
             ),
         )
     }
@@ -695,7 +831,8 @@ private fun VodPlayRoute(
             is VodDetailResult.Loaded -> {
                 detail = result.detail
                 headers = result.headers
-                playEpisodeAt(initialLine, initialEpisode)
+                // 续播点只在第一次起播时生效：之后换集都是从头（用户点的是「下一集」）
+                playEpisodeAt(initialLine, initialEpisode, initialPositionMs)
             }
 
             VodDetailResult.Gone -> {
@@ -715,6 +852,19 @@ private fun VodPlayRoute(
         }
     }
 
+    // 离开页面补记一次。放在 onDispose 是因为返回键、导航被替换都会走到它 ——
+    // 只挂在返回键上的话，另一条路就会丢进度。
+    // 看到片尾再退出不必记：删掉更干净（否则「继续观看」里会挂着只剩字幕的片子）
+    DisposableEffect(sourceId, sourceKey) {
+        onDispose {
+            if (VodProgressRules.isFinished(positionMs, durationMs)) {
+                forgetProgress()
+            } else {
+                persistProgress()
+            }
+        }
+    }
+
     // 自动连播：内核说「播完了」就接下一集。
     // 依赖整个 playback 而不只是 Ended：起播后状态变成 Preparing，这个 effect 会重跑，
     // 于是同一集的 Ended 不会被处理两次
@@ -724,8 +874,13 @@ private fun VodPlayRoute(
         val next = current.nextEpisode(lineIndex, episodeIndex)
         if (next == null) {
             finished = true
+            // 全剧看完：继续观看里不该再留着它
+            container.vodProgressRepository.delete(sourceId, sourceKey)
         } else {
-            playEpisodeAt(next.lineIndex, next.episodeIndex)
+            // recordPrevious = false：上一集是**播完**的，写它没有意义，
+            // 还会和紧接着的 markEpisodeStarted 抢同一个主键（谁后到谁赢）
+            playEpisodeAt(next.lineIndex, next.episodeIndex, recordPrevious = false)
+            markEpisodeStarted(next.lineIndex, next.episodeIndex)
         }
     }
 
@@ -736,6 +891,12 @@ private fun VodPlayRoute(
         while (true) {
             positionMs = container.player.positionMs()
             durationMs = container.player.durationMs()
+            // 10 秒落一次库。用户要的是「接着上次看」，10 秒的偏差在长视频里
+            // 连一句台词都不到；再密就是拿闪存寿命换看不见的精度
+            if (positionMs - lastSavedMs >= PROGRESS_SAVE_INTERVAL_MS) {
+                lastSavedMs = positionMs
+                persistProgress()
+            }
             delay(POSITION_POLL_MS)
         }
     }
@@ -820,6 +981,8 @@ private suspend fun loadVodHomeState(
         selectedArea = area,
         items = media.byType(type, year, area),
         recent = media.recent(),
+        // 继续观看跨类型，不受当前选中的类型 / 筛选影响（VOD-06）
+        continueWatching = container.vodProgressRepository.recent(CONTINUE_LIMIT),
         sourceRows = rows,
         hasSource = vodSources.isNotEmpty(),
     )
@@ -834,6 +997,7 @@ private const val ARG_SOURCE_ID = "sourceId"
 private const val ARG_SOURCE_KEY = "sourceKey"
 private const val ARG_LINE_INDEX = "lineIndex"
 private const val ARG_EPISODE_INDEX = "episodeIndex"
+private const val ARG_START_MS = "startMs"
 
 /**
  * 节目单对表间隔。
@@ -845,6 +1009,18 @@ private const val EPG_REFRESH_MS = 60_000L
 
 /** 影视进度轮询间隔：肉眼看着在走就够了，再密只是烧 CPU */
 private const val POSITION_POLL_MS = 500L
+
+/**
+ * 进度落库间隔（VOD-06）。
+ *
+ * 10 秒：用户要的是「接着上次看」，10 秒的偏差在长视频里连一句台词都不到。
+ * 更密除了多写闪存没有任何收益；更疏（比如 60 秒）则会在「看完一集就退出」时
+ * 少记最后一分钟。
+ */
+private const val PROGRESS_SAVE_INTERVAL_MS = 10_000L
+
+/** 首页「继续观看」取多少条：一行放得下 5～6 张，多取一倍够往回翻 */
+private const val CONTINUE_LIMIT = 12
 
 private val playerArguments =
     listOf(
@@ -879,6 +1055,10 @@ private val vodPlayArguments =
             navArgument(ARG_EPISODE_INDEX) {
                 type = NavType.IntType
                 defaultValue = 0
+            },
+            navArgument(ARG_START_MS) {
+                type = NavType.LongType
+                defaultValue = 0L
             },
         )
 

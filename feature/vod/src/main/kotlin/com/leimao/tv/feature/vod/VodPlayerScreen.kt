@@ -195,7 +195,7 @@ fun VodPlayerScreen(
             CenterHint(
                 text = failed.reason,
                 primary = "重试" to actions.onRetry,
-                secondary = "返回详情" to actions.onBack,
+                secondary = "返回" to actions.onBack,
             )
         }
 
@@ -203,7 +203,7 @@ fun VodPlayerScreen(
             CenterHint(
                 text = "已经播到最后一集了",
                 primary = "选集" to { panelOpen = true },
-                secondary = "返回详情" to actions.onBack,
+                secondary = "返回" to actions.onBack,
             )
         }
 
@@ -392,7 +392,7 @@ private fun ControlButtons(
         ControlButton(text = "上一集", enabled = state.hasPrevious, onClick = actions.onPrevious)
         ControlButton(text = "下一集", enabled = state.hasNext, onClick = actions.onNext)
         ControlButton(text = "选集", enabled = state.episodeCount > 0, onClick = onOpenPanel)
-        ControlButton(text = "返回详情", enabled = true, onClick = actions.onBack)
+        ControlButton(text = "返回", enabled = true, onClick = actions.onBack)
     }
 }
 

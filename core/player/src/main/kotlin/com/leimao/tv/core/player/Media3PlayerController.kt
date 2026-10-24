@@ -49,6 +49,16 @@ class Media3PlayerController(
     private var lineIndex = 0
     private var retriesLeft = retryLimit
 
+    /**
+     * 本轮起播的续播点。
+     *
+     * 只在 `play()` 之后第一次建流时用：那时内核里还没有任何位置信息。
+     * 之后（重连、换线）改问 `currentPosition` —— 播到一半断了应该接着断点播，
+     * 而不是退回用户点进来时那个位置，让人重看一集。
+     */
+    private var resumeFromMs = 0L
+    private var firstStart = true
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watchdog: Job? = null
 
@@ -112,6 +122,8 @@ class Media3PlayerController(
         this.request = request
         lineIndex = 0
         retriesLeft = retryLimit
+        resumeFromMs = request.startPositionMs
+        firstStart = true
         startCurrentLine()
     }
 
@@ -189,7 +201,11 @@ class Media3PlayerController(
                 ),
             )
 
-        videoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)))
+        // 续播点只在本轮第一次建流时用；之后接着断点播（见 resumeFromMs 的注释）
+        val startAt = (if (firstStart) resumeFromMs else videoPlayer.currentPosition).coerceAtLeast(0L)
+        firstStart = false
+
+        videoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)), startAt)
         videoPlayer.prepare()
         videoPlayer.playWhenReady = true
 

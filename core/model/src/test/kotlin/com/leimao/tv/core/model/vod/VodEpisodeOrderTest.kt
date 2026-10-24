@@ -124,4 +124,42 @@ class VodEpisodeOrderTest {
 
         assertEquals(listOf("https://e.com/甲2"), d.episodeUrls(0, 1))
     }
+
+    @Test
+    fun `进度指向还在的集就是有效的`() {
+        val d = detail("甲" to 5)
+
+        assertEquals(true, d.acceptsProgress(progress(line = 0, episode = 4)))
+    }
+
+    @Test
+    fun `源里集数变少后旧进度作废`() {
+        // 上周 40 集、这周只剩 30 集：拿指向第 40 集的进度去起播，
+        // 用户只会得到一句「这一集没有播放地址」，还不知道为什么
+        val shrunk = detail("甲" to 30)
+        val stale = progress(line = 0, episode = 39)
+
+        assertEquals(false, shrunk.acceptsProgress(stale))
+    }
+
+    @Test
+    fun `线路没了同样作废`() {
+        // 源少了一条线：旧进度记在第二条线上，现在只有一条
+        val d = detail("甲" to 5)
+
+        assertEquals(false, d.acceptsProgress(progress(line = 1, episode = 0)))
+    }
+
+    private fun progress(
+        line: Int,
+        episode: Int,
+    ) = VodProgress(
+        sourceId = 1,
+        sourceKey = "1",
+        lineIndex = line,
+        episodeIndex = episode,
+        positionMs = 60_000,
+        durationMs = 45 * 60_000,
+        updatedAt = 0,
+    )
 }

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.4.0"
+    const val CURRENT_VERSION: String = "0.2.5.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.5.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "看片进度自动记住：退出时看到第几分钟，下次就接着播",
+                        "影视首页加了「继续观看」，一行卡片带进度条，点进去直接续播",
+                        "详情页有进度时，第一眼看到的是「继续观看 第 N 集 · 12:34」",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.4.0",
                 date = "2026-10-24",

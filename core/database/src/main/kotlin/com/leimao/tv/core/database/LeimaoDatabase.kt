@@ -14,6 +14,7 @@ import com.leimao.tv.core.database.dao.FavoriteDao
 import com.leimao.tv.core.database.dao.HistoryDao
 import com.leimao.tv.core.database.dao.MediaDao
 import com.leimao.tv.core.database.dao.SourceDao
+import com.leimao.tv.core.database.dao.VodProgressDao
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.entity.ChannelLineEntity
 import com.leimao.tv.core.database.entity.EpgChannelEntity
@@ -23,6 +24,7 @@ import com.leimao.tv.core.database.entity.FavoriteEntity
 import com.leimao.tv.core.database.entity.HistoryEntity
 import com.leimao.tv.core.database.entity.MediaEntity
 import com.leimao.tv.core.database.entity.SourceEntity
+import com.leimao.tv.core.database.entity.VodProgressEntity
 
 /**
  * 版本 2 补齐了 M1 真正要用到的表：
@@ -46,8 +48,9 @@ import com.leimao.tv.core.database.entity.SourceEntity
         EpgProgrammeEntity::class,
         EpgSourceEntity::class,
         MediaEntity::class,
+        VodProgressEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -66,6 +69,8 @@ abstract class LeimaoDatabase : RoomDatabase() {
     abstract fun epgSourceDao(): EpgSourceDao
 
     abstract fun mediaDao(): MediaDao
+
+    abstract fun vodProgressDao(): VodProgressDao
 
     companion object {
         private const val DB_NAME = "leimao-tv.db"
@@ -263,9 +268,46 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 6 → 7：加看片进度表（VOD-06）。
+         *
+         * 纯加法。**没有外键指向 `media`**：`media` 每次刷新都整类删了重插，
+         * 外键 CASCADE 会让升级后的第一次刷新把用户所有进度清空 —— 见
+         * `VodProgressEntity` 的注释。
+         */
+        val MIGRATION_6_7: Migration =
+            object : Migration(6, 7) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `vod_progress` (" +
+                            "`sourceId` INTEGER NOT NULL, " +
+                            "`sourceKey` TEXT NOT NULL, " +
+                            "`lineIndex` INTEGER NOT NULL, " +
+                            "`episodeIndex` INTEGER NOT NULL, " +
+                            "`positionMs` INTEGER NOT NULL, " +
+                            "`durationMs` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, " +
+                            "`title` TEXT NOT NULL, " +
+                            "`poster` TEXT, " +
+                            "PRIMARY KEY(`sourceId`, `sourceKey`))",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_vod_progress_updatedAt` " +
+                            "ON `vod_progress` (`updatedAt`)",
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                )
                 .build()
     }
 }

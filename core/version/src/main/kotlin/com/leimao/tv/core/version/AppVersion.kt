@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.8.0"
+    const val CURRENT_VERSION: String = "0.2.9.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "片子里有多条音轨时，控制条多一个「音轨」，可以切国语 / 粤语 / 原声",
+                        "带内嵌字幕的片子多一个「字幕」，能选字幕也能关掉；关着时按钮上会写「字幕·关」",
+                        "老片拷来的外挂字幕（SRT / ASS）也在同一条菜单里，不用另外设置",
+                        "直播频道同样支持：多语解说的体育赛事可以切音轨",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.8.0",
                 date = "2026-10-24",

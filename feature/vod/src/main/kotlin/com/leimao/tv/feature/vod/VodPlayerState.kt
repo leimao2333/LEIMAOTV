@@ -1,6 +1,8 @@
 package com.leimao.tv.feature.vod
 
 import com.leimao.tv.core.player.PlaybackState
+import com.leimao.tv.core.player.PlaybackTrack
+import com.leimao.tv.core.player.TrackKind
 
 /**
  * 播放页线路列表里的一条（VOD-10）。
@@ -49,6 +51,12 @@ data class VodPlayerUiState(
     val note: String? = null,
     /** 收藏了没有（VOD-07）：控制条上的「收藏 / 已收藏」据此切换 */
     val favorited: Boolean = false,
+    /**
+     * 当前流里的可选轨道（PLAY-07）。内嵌字幕与多音轨都从这里来。
+     *
+     * 直播频道几乎总是空表 —— 空表时界面不显示这两个按钮（见 [canPickAudio] / [hasTextTracks]）。
+     */
+    val tracks: List<PlaybackTrack> = emptyList(),
 ) {
     /** 有进度才能画进度条。直播或时长未知时为 false */
     val seekable: Boolean get() = durationMs > 0L
@@ -67,4 +75,30 @@ data class VodPlayerUiState(
      * 一个永远点不动的按钮只会让人以为坏了。
      */
     val canSwitchLine: Boolean get() = lines.size > 1
+
+    val audioTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.AUDIO }
+
+    val textTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.TEXT }
+
+    /**
+     * 只有一条音轨时不显示「音轨」按钮。
+     *
+     * 与 [canSwitchLine] 同一个理由：一个点进去只有一行的菜单，比没有这个按钮更让人
+     * 怀疑是不是坏了。绝大多数片子就一条音轨，这个分支是常态而不是例外。
+     */
+    val canPickAudio: Boolean get() = audioTracks.size > 1
+
+    val hasTextTracks: Boolean get() = textTracks.isNotEmpty()
+
+    /** 有字幕轨但一条都没选中 = 用户关掉了字幕（面板里「关闭字幕」的选中态靠它） */
+    val textDisabled: Boolean get() = textTracks.isNotEmpty() && textTracks.none { it.selected }
+
+    /** 顶部副标题用：字幕开着就报个名字，关着就写「字幕关」 */
+    val textStatus: String?
+        get() =
+            when {
+                !hasTextTracks -> null
+                textDisabled -> "字幕关"
+                else -> textTracks.firstOrNull { it.selected }?.label
+            }
 }

@@ -19,6 +19,19 @@ class StubPlayerController : PlayerController {
     private var current: PlaybackRequest? = null
     private var lineIndex = 0
 
+    /**
+     * 占位内核不解码，所以永远没有可选轨道。
+     *
+     * 空表在界面上的含义正好是「不显示音轨 / 字幕按钮」—— 契约测试因此也能钉住
+     * 「没有轨道时不该冒出两个点进去空空的菜单」这件事。
+     */
+    private val _tracks = MutableStateFlow<List<PlaybackTrack>>(emptyList())
+    override val tracks: StateFlow<List<PlaybackTrack>> = _tracks.asStateFlow()
+
+    override fun selectTrack(trackId: String) = Unit
+
+    override fun disableTracks(kind: TrackKind) = Unit
+
     override fun play(request: PlaybackRequest) {
         current = request
         lineIndex = 0

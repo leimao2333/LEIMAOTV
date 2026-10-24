@@ -55,6 +55,7 @@ import com.leimao.tv.core.player.PlaybackKind
 import com.leimao.tv.core.player.PlaybackRequest
 import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.core.player.PlaybackState
+import com.leimao.tv.core.player.TrackKind
 import com.leimao.tv.core.player.VideoSurfaceHost
 import com.leimao.tv.feature.iptv.PlayerScreen
 import com.leimao.tv.feature.iptv.PlayerUiState
@@ -501,6 +502,9 @@ private fun PlayerRoute(
         if (target != null) startChannel(target)
     }
 
+    // 音轨 / 字幕（PLAY-07）：内核在起播与换台后自己刷这张表，界面只需要跟着读
+    val tracks by container.player.tracks.collectAsStateWithLifecycle()
+
     // 节目单对表：跨过整点要换成下一档，不刷新就会一直挂着上一档的名字。
     // 跟着 current 一起重算 —— 换台必须立刻换成新台的节目，不能等这一分钟走完。
     // 一次查询同时喂两处：顶部的「正在播 / 下一档」与节目单网格（LIVE-22），
@@ -541,6 +545,7 @@ private fun PlayerRoute(
                 programme = programme,
                 recentChannels = recentChannels,
                 epgProgrammes = epgProgrammes,
+                tracks = tracks,
             ),
         videoPlayer = (container.player as? VideoSurfaceHost)?.videoPlayer,
         onSwitchChannel = { delta ->
@@ -549,6 +554,8 @@ private fun PlayerRoute(
         },
         onSelectChannel = { id -> scope.launch { startChannel(id) } },
         onSwitchLine = { delta -> container.player.switchLine(delta) },
+        onSelectTrack = { id -> container.player.selectTrack(id) },
+        onDisableTracks = { kind -> container.player.disableTracks(kind) },
         onToggleFavorite = {
             val id = current?.id ?: return@PlayerScreen
             scope.launch {
@@ -773,6 +780,7 @@ private fun VodPlayRoute(
     onBack: () -> Unit,
 ) {
     val playback by container.player.state.collectAsStateWithLifecycle()
+    val tracks by container.player.tracks.collectAsStateWithLifecycle()
     val settings by
         container.settings.playbackSettings.collectAsStateWithLifecycle(
             initialValue = PlaybackSettings.DEFAULT,
@@ -1097,6 +1105,7 @@ private fun VodPlayRoute(
                 preparing = preparing,
                 note = note,
                 favorited = favorited,
+                tracks = tracks,
             ),
         actions =
             VodPlayerActions(
@@ -1121,6 +1130,8 @@ private fun VodPlayRoute(
                 onSelectEpisode = { index -> playEpisodeAt(lineIndex, index) },
                 onSelectLine = { target -> switchLine(target) },
                 onToggleFavorite = { toggleFavorite() },
+                onSelectTrack = { id -> container.player.selectTrack(id) },
+                onDisableText = { container.player.disableTracks(TrackKind.TEXT) },
                 onRetry = { playEpisodeAt(lineIndex, episodeIndex) },
                 onBack = {
                     // 离开就停：影视是长视频，挂在后台继续拉流既费流量又会让回直播时打架

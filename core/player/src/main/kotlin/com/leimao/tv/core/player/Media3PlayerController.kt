@@ -1,9 +1,13 @@
 package com.leimao.tv.core.player
 
 import android.content.Context
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -42,6 +46,23 @@ class Media3PlayerController(
     VideoSurfaceHost {
     private val _state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
+
+    private val _tracks = MutableStateFlow<List<PlaybackTrack>>(emptyList())
+    override val tracks: StateFlow<List<PlaybackTrack>> = _tracks.asStateFlow()
+
+    /**
+     * 轨道 id → (track group, 组内第几条)。
+     *
+     * UI 只认 [PlaybackTrack.id]，真正的定位靠这张表 —— 见 `PlaybackTrack` 的注释。
+     * 每次 `onTracksChanged` 重建，因为换集 / 换线路之后 group 对象全变了。
+     */
+    private val trackIndex = HashMap<String, TrackRef>()
+
+    private data class TrackRef(
+        val group: TrackGroup,
+        val index: Int,
+        val kind: TrackKind,
+    )
 
     override val videoPlayer: ExoPlayer = buildPlayer()
 
@@ -114,6 +135,12 @@ class Media3PlayerController(
                 override fun onPlayerError(error: PlaybackException) {
                     handleFailure(reason = describe(error))
                 }
+
+                // 换集 / 换线路 / 起播后轨道都会变。INFO 没有内容，不刷（每次都重建列表
+                // 会让「音轨」面板在播放中被无意义地重绘）
+                override fun onTracksChanged(tracks: Tracks) {
+                    refreshTracks()
+                }
             },
         )
     }
@@ -151,6 +178,7 @@ class Media3PlayerController(
     override fun stop() {
         stopWatchdog()
         videoPlayer.stop()
+        clearTracks()
         _state.value = PlaybackState.Idle
     }
 
@@ -174,8 +202,93 @@ class Media3PlayerController(
     override fun release() {
         stopWatchdog()
         request = null
+        clearTracks()
         videoPlayer.release()
         _state.value = PlaybackState.Idle
+    }
+
+    // --------------------------------------------------------------------- //
+    // 轨道（PLAY-07）
+    // --------------------------------------------------------------------- //
+
+    override fun selectTrack(trackId: String) {
+        val ref = trackIndex[trackId] ?: return
+        val type = if (ref.kind == TrackKind.AUDIO) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT
+        videoPlayer.trackSelectionParameters =
+            videoPlayer.trackSelectionParameters
+                .buildUpon()
+                // 先解除整类禁用再指定：上一轮「关闭字幕」禁的是整个类型，
+                // 只设 override 而类型仍是禁用的，选了也不生效
+                .setTrackTypeDisabled(type, false)
+                .setOverrideForType(TrackSelectionOverride(ref.group, listOf(ref.index)))
+                .build()
+        refreshTracks()
+    }
+
+    override fun disableTracks(kind: TrackKind) {
+        val type = if (kind == TrackKind.AUDIO) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT
+        videoPlayer.trackSelectionParameters =
+            videoPlayer.trackSelectionParameters
+                .buildUpon()
+                // 关掉整类时把 override 一起清掉：留着它，下次打开这条流会「自动」选中
+                // 上一次那条字幕，用户会以为关闭没生效
+                .clearOverridesOfType(type)
+                .setTrackTypeDisabled(type, true)
+                .build()
+        refreshTracks()
+    }
+
+    /**
+     * 把 Media3 的轨道表翻译成内核无关的形式。
+     *
+     * 只收音频与字幕：视频轨的「切换」在盒子上没有实际意义（见 `TrackKind`）。
+     * [Tracks.Group.isTrackSupported] 为 false 的也收 —— 它在菜单里应该显示成
+     * 「选不了」而不是干脆消失：用户明明看到片子里有中文字幕，菜单里却没有，只会以为坏了。
+     */
+    private fun refreshTracks() {
+        val tracks = videoPlayer.currentTracks
+        val refs = HashMap<String, TrackRef>()
+        val out = ArrayList<PlaybackTrack>()
+
+        for (group in tracks.groups) {
+            val kind =
+                when (group.type) {
+                    C.TRACK_TYPE_AUDIO -> TrackKind.AUDIO
+                    C.TRACK_TYPE_TEXT -> TrackKind.TEXT
+                    else -> continue
+                }
+            // 每类各自从 1 开始编号：菜单里说的是「音轨 2」「字幕 1」，不混着数
+            val ordinal = out.count { it.kind == kind }
+            for (i in 0 until group.length) {
+                val id = "${kind.name}:${group.mediaTrackGroup.id}:$i"
+                if (refs.containsKey(id)) continue
+                val format = group.getTrackFormat(i)
+                refs[id] = TrackRef(group.mediaTrackGroup, i, kind)
+                out +=
+                    PlaybackTrack(
+                        id = id,
+                        kind = kind,
+                        label =
+                            composeTrackLabel(
+                                kind = kind,
+                                ordinal = ordinal + i + 1,
+                                label = format.label,
+                                language = format.language,
+                                mime = format.sampleMimeType,
+                            ),
+                        selected = group.isTrackSelected(i),
+                    )
+            }
+        }
+
+        trackIndex.clear()
+        trackIndex.putAll(refs)
+        _tracks.value = out.sortedBy { it.kind }
+    }
+
+    private fun clearTracks() {
+        trackIndex.clear()
+        _tracks.value = emptyList()
     }
 
     private fun startCurrentLine() {
@@ -306,6 +419,87 @@ class Media3PlayerController(
 
         private const val REASON_STREAM_ENDED = "直播流已结束"
         private const val REASON_TIMEOUT = "这条线路一直没出画面"
+
+        /**
+         * 轨道菜单上那一行字（PLAY-07）。
+         *
+         * 只吃三个纯字符串（label / language / mime）而不是 Media3 的 `Format`：
+         * 这样这段「把 en 说成英语、把 audio/mp4a-latm 说成 AAC」的映射能单测，
+         * 不必为一个字符串函数去跑模拟器。
+         *
+         * 顺序是「名字 · 编码」：名字优先取容器里自带的 label（「国语」「Director's
+         * Commentary」这类信息 language 里没有），没有才退到语言代码，再没有就是
+         * 「音轨 2」。编码只作为补充 —— 用户挑中文音轨时，AAC 还是 AC3 是次要信息，
+         * 但两条都叫「中文」时它就是唯一区别。
+         */
+        fun composeTrackLabel(
+            kind: TrackKind,
+            ordinal: Int,
+            label: String?,
+            language: String?,
+            mime: String?,
+        ): String {
+            val fallback = if (kind == TrackKind.AUDIO) "音轨 $ordinal" else "字幕 $ordinal"
+            val name =
+                label?.takeIf { it.isNotBlank() }
+                    ?: language?.let { languageName(it) }
+                    ?: fallback
+            val codec = mime?.let { TRACK_CODEC_NAMES[it] }
+            return listOfNotNull(name, codec).joinToString(" · ")
+        }
+
+        /** ISO 639-1 / 639-2 都认：不同封装里同一种语言可能写 `zh`、`chi` 或 `cmn` */
+        fun languageName(code: String): String? {
+            val key = code.trim().lowercase().substringBefore('-')
+            if (key.isBlank()) return null
+            return TRACK_LANGUAGE_NAMES[key]
+        }
+
+        private val TRACK_LANGUAGE_NAMES: Map<String, String> =
+            mapOf(
+                "zh" to "中文",
+                "chi" to "中文",
+                "zho" to "中文",
+                "cmn" to "国语",
+                "yue" to "粤语",
+                "en" to "英语",
+                "eng" to "英语",
+                "ja" to "日语",
+                "jpn" to "日语",
+                "ko" to "韩语",
+                "kor" to "韩语",
+                "fr" to "法语",
+                "fra" to "法语",
+                "fre" to "法语",
+                "de" to "德语",
+                "deu" to "德语",
+                "ger" to "德语",
+                "es" to "西班牙语",
+                "spa" to "西班牙语",
+                "ru" to "俄语",
+                "rus" to "俄语",
+                "th" to "泰语",
+                "tha" to "泰语",
+            )
+
+        /** 只收会在菜单里出现的几种：其余原样不显示，比显示 `audio/x-unknown` 有用 */
+        private val TRACK_CODEC_NAMES: Map<String, String> =
+            mapOf(
+                "audio/mp4a-latm" to "AAC",
+                "audio/aac" to "AAC",
+                "audio/ac3" to "AC3",
+                "audio/eac3" to "EAC3",
+                "audio/opus" to "Opus",
+                "audio/vorbis" to "Vorbis",
+                "audio/mpeg" to "MP3",
+                "audio/flac" to "FLAC",
+                "application/x-subrip" to "SRT",
+                "text/vtt" to "WebVTT",
+                "text/x-ssa" to "ASS",
+                "application/ttml+xml" to "TTML",
+                "application/cea-608" to "CC608",
+                "application/cea-708" to "CC708",
+            )
 
         /**
          * 单条线路的时间预算。

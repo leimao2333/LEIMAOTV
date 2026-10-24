@@ -60,6 +60,35 @@ data class PlaybackRequest(
     val normalizedLines: List<String> get() = if (lines.isEmpty()) listOf(url) else lines
 }
 
+/**
+ * 可切换的轨道类别（PLAY-07）。
+ *
+ * 只有音轨与字幕两类：视频轨在电视盒子上「切换」没有实际意义（同一路流里几乎不会有
+ * 两条码率/分辨率不同的视频轨），做出来就是一个永远只有一个选项的菜单。
+ */
+enum class TrackKind {
+    AUDIO,
+    TEXT,
+}
+
+/**
+ * 当前流里的一条可选轨道（PLAY-07）。
+ *
+ * 内核无关：Media3 的 `Tracks.Group` / `Format` 不出现在这里，换内核（D-02 的 VLC）
+ * 时只要能把自家轨道映射成这三个字段，界面一行都不用改。
+ *
+ * [id] 由内核生成、只在本轮播放内有效 —— UI 拿它**原样回传**选择，不要自己解析。
+ * 这么设计是因为选择轨道要能定位到「第几个 track group 的第几条」，而这个映射
+ * 只有内核有；让 UI 去猜，等于把 Media3 的内部编号泄漏到界面层。
+ */
+data class PlaybackTrack(
+    val id: String,
+    val kind: TrackKind,
+    /** 直接显示给用户的一行字，如「中文 · AAC」「English」 */
+    val label: String,
+    val selected: Boolean,
+)
+
 /** 播放状态机。UI 只读它，不直接碰内核（架构设计 §6）。 */
 sealed interface PlaybackState {
     /**
@@ -128,6 +157,25 @@ sealed interface PlaybackState {
  */
 interface PlayerController {
     val state: StateFlow<PlaybackState>
+
+    /**
+     * 当前流里的音轨 / 字幕轨（PLAY-07）。
+     *
+     * 空表有两种意思：这条流没有可选轨道（直播大多数如此），或者还没解析到 manifest。
+     * UI 不该在空表时显示「音轨」按钮 —— 一个点进去空空的菜单比没有按钮更糟。
+     */
+    val tracks: StateFlow<List<PlaybackTrack>>
+
+    /** 选中某一条轨道。[trackId] 来自 [tracks]，原样回传即可 */
+    fun selectTrack(trackId: String)
+
+    /**
+     * 关掉某一类轨道（目前只用于字幕）。
+     *
+     * 与「选另一条字幕」分开：关字幕是**没有目标的动作**，走 [selectTrack] 就得
+     * 造一个假的「空轨道」，而那个假 id 一旦进了 [tracks] 就会出现在菜单里。
+     */
+    fun disableTracks(kind: TrackKind)
 
     fun play(request: PlaybackRequest)
 

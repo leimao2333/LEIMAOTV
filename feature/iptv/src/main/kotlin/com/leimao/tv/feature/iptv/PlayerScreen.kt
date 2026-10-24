@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +56,8 @@ import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.buildEpgTimeline
 import com.leimao.tv.core.player.PlaybackState
+import com.leimao.tv.core.player.PlaybackTrack
+import com.leimao.tv.core.player.TrackKind
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -114,7 +117,26 @@ data class PlayerUiState(
      * 打开时不再查一次库 —— 顶部「正在播 / 下一档」用的也是它，两处同一个数据源就不会打架。
      */
     val epgProgrammes: List<EpgProgramme> = emptyList(),
-)
+    /**
+     * 当前流的可选轨道（PLAY-07）。
+     *
+     * 直播里大多数台没有可选轨道，所以两个按钮都是「有才显示」。
+     * 真正有的是这些：体育赛事的多语解说（粤语 / 英语）、部分亚洲台的
+     * 双语伴音、以及少数带内嵌字幕的源。
+     */
+    val tracks: List<PlaybackTrack> = emptyList(),
+) {
+    val audioTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.AUDIO }
+
+    val textTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.TEXT }
+
+    /** 只有一条音轨时不显示按钮 —— 与「换线路」同一个口径 */
+    val canPickAudio: Boolean get() = audioTracks.size > 1
+
+    val hasTextTracks: Boolean get() = textTracks.isNotEmpty()
+
+    val textDisabled: Boolean get() = textTracks.isNotEmpty() && textTracks.none { it.selected }
+}
 
 /**
  * 直播播放页（M1）。
@@ -142,6 +164,8 @@ fun PlayerScreen(
     onSelectChannel: (Long) -> Unit,
     onSwitchLine: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
+    onSelectTrack: (String) -> Unit,
+    onDisableTracks: (TrackKind) -> Unit,
     onRetry: () -> Unit,
     onOpenSourceManager: () -> Unit,
     onBack: () -> Unit,
@@ -150,6 +174,9 @@ fun PlayerScreen(
     var controlsVisible by remember { mutableStateOf(false) }
     var drawerOpen by remember { mutableStateOf(false) }
     var epgOpen by remember { mutableStateOf(false) }
+
+    /** 打开着的轨道面板（PLAY-07）：null = 没开 */
+    var trackPanel by remember { mutableStateOf<TrackKind?>(null) }
     var numberBuffer by remember { mutableStateOf("") }
     var interactionTick by remember { mutableIntStateOf(0) }
 
@@ -218,6 +245,7 @@ fun PlayerScreen(
     // 实测返回键会直接跳过网格/抽屉回主页。
     BackHandler {
         when {
+            trackPanel != null -> trackPanel = null
             epgOpen -> epgOpen = false
             drawerOpen -> drawerOpen = false
             controlsVisible -> controlsVisible = false
@@ -253,6 +281,15 @@ fun PlayerScreen(
                     // —— 第一版就是这么写的，实测确实一动不动。
                     // 放行也不会误触发放映页的动作：下面的 handleKey 不再调用，换台与切线路都不会发生；
                     // 焦点走到最后一个块之后事件自然没人处理，什么也不做才是对的。
+                    // 轨道面板与节目单同理：面板里上下选轨道靠焦点系统，方向键必须放行
+                    if (trackPanel != null) {
+                        if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                            trackPanel = null
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+
                     if (epgOpen) {
                         // BACK 键不会自动进 OnBackPressedDispatcher（焦点在网格卡片上时，
                         // 实测系统返回被 Compose 的按键链吃掉，BackHandler 收不到）——
@@ -361,6 +398,8 @@ fun PlayerScreen(
                         },
                         onSwitchLine = onSwitchLine,
                         onToggleFavorite = onToggleFavorite,
+                        onOpenAudio = { trackPanel = TrackKind.AUDIO },
+                        onOpenText = { trackPanel = TrackKind.TEXT },
                         onOpenSourceManager = onOpenSourceManager,
                     )
                 } else if (hudVisible && !isFailed && !state.loadingChannels && !drawerOpen) {
@@ -384,6 +423,22 @@ fun PlayerScreen(
                     drawerOpen = false
                     onSelectChannel(channel.id)
                 },
+            )
+        }
+
+        trackPanel?.let { kind ->
+            TrackOverlay(
+                kind = kind,
+                state = state,
+                onSelect = { id ->
+                    trackPanel = null
+                    onSelectTrack(id)
+                },
+                onDisable = {
+                    trackPanel = null
+                    onDisableTracks(kind)
+                },
+                onDismiss = { trackPanel = null },
             )
         }
 
@@ -501,6 +556,8 @@ private fun ControlBar(
     onOpenEpg: () -> Unit,
     onSwitchLine: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
+    onOpenAudio: () -> Unit,
+    onOpenText: () -> Unit,
     onOpenSourceManager: () -> Unit,
 ) {
     val isFavorite = state.channel?.let { state.favoriteIds.contains(it.id) } == true
@@ -525,6 +582,20 @@ private fun ControlBar(
         }
         FocusableCard(onClick = { onSwitchLine(1) }) {
             Text(text = "换线路", style = TvText.current.label)
+        }
+        // 音轨 / 字幕：没有就不显示。一个点进去空空的菜单比没有按钮更让人怀疑坏了
+        if (state.canPickAudio) {
+            FocusableCard(onClick = onOpenAudio) {
+                Text(text = "音轨", style = TvText.current.label)
+            }
+        }
+        if (state.hasTextTracks) {
+            FocusableCard(onClick = onOpenText) {
+                Text(
+                    text = if (state.textDisabled) "字幕·关" else "字幕",
+                    style = TvText.current.label,
+                )
+            }
         }
         FocusableCard(onClick = onOpenSourceManager) {
             Text(text = "源管理", style = TvText.current.label)
@@ -579,6 +650,104 @@ private fun FailurePanel(
             }
             FocusableCard(onClick = onOpenSourceManager) {
                 Text(text = "去源管理", style = TvText.current.label)
+            }
+        }
+    }
+}
+
+/**
+ * 音轨 / 字幕面板（PLAY-07）。
+ *
+ * 做成右下的浮层而不是整屏：直播是「正在看的东西」，切个音轨不该让画面整个消失 ——
+ * 而选集那种整屏面板在点播里是对的（选完就不看了）。这里保持画面可见，
+ * 用户能一边听一边换。
+ */
+@Composable
+private fun TrackOverlay(
+    kind: TrackKind,
+    state: PlayerUiState,
+    onSelect: (String) -> Unit,
+    onDisable: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val tracks = if (kind == TrackKind.AUDIO) state.audioTracks else state.textTracks
+    val firstFocus = remember { FocusRequester() }
+
+    // 初始焦点落在当前选中那条：打开面板十次有九次是「看看现在用的是哪条」
+    val focusId = tracks.firstOrNull { it.selected }?.id ?: tracks.firstOrNull()?.id
+    LaunchedEffect(kind, tracks.size) {
+        withFrameNanos { }
+        runCatching { firstFocus.requestFocus() }
+    }
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 64.dp, vertical = 48.dp),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .width(360.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xF2101418))
+                    .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (kind == TrackKind.AUDIO) "音轨" else "字幕",
+                    style = TvText.current.title,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                FocusableCard(onClick = onDismiss) {
+                    Text(text = "关闭", style = TvText.current.hint)
+                }
+            }
+            if (kind == TrackKind.TEXT) {
+                FocusableCard(onClick = onDisable) {
+                    Text(
+                        text = "关闭字幕",
+                        style = TvText.current.body,
+                        color =
+                            if (state.textDisabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                    )
+                }
+            }
+            tracks.forEach { track ->
+                FocusableCard(
+                    onClick = { onSelect(track.id) },
+                    focusRequester = if (track.id == focusId) firstFocus else null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = track.label,
+                            style = TvText.current.body,
+                            color =
+                                if (track.selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (track.selected) {
+                            Text(
+                                text = "正在用",
+                                style = TvText.current.hint,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

@@ -57,6 +57,7 @@ import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.player.PlaybackState
+import com.leimao.tv.core.player.PlaybackTrack
 import kotlinx.coroutines.delay
 
 /** 播放页的全部动作。抽成一个类而不是七个回调参数：调用点清爽，加动作也不改签名。 */
@@ -70,6 +71,10 @@ data class VodPlayerActions(
     val onSelectLine: (Int) -> Unit,
     /** 收藏 / 取消收藏（VOD-07） */
     val onToggleFavorite: () -> Unit,
+    /** 选中某条音轨 / 字幕轨（PLAY-07）。trackId 原样来自 state.tracks */
+    val onSelectTrack: (String) -> Unit,
+    /** 关掉字幕（PLAY-07） */
+    val onDisableText: () -> Unit,
     val onRetry: () -> Unit,
     val onBack: () -> Unit,
 )
@@ -80,7 +85,7 @@ data class VodPlayerActions(
  * 用一个枚举而不是两个布尔：两个布尔能出现「选集和线路同时打开」这种画不出来的状态，
  * 而返回键的优先级也得跟着分成四支。
  */
-private enum class VodPanel { None, Episodes, Lines }
+private enum class VodPanel { None, Episodes, Lines, Audio, Text }
 
 /**
  * 影视播放页（VOD-05）。
@@ -268,6 +273,8 @@ fun VodPlayerScreen(
                     actions = actions,
                     onOpenPanel = { panel = VodPanel.Episodes },
                     onOpenLines = { panel = VodPanel.Lines },
+                    onOpenAudio = { panel = VodPanel.Audio },
+                    onOpenText = { panel = VodPanel.Text },
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -298,6 +305,42 @@ fun VodPlayerScreen(
                     onSelect = { index ->
                         panel = VodPanel.None
                         actions.onSelectLine(index)
+                    },
+                    onDismiss = { panel = VodPanel.None },
+                )
+
+            VodPanel.Audio ->
+                TrackPanel(
+                    title = "音轨",
+                    hint = "选了立刻生效，不用重新起播",
+                    tracks = state.audioTracks,
+                    // 音轨没有「关闭」这一项：关掉音轨只剩画面，不是一个有人会要的选项
+                    offLabel = null,
+                    offSelected = false,
+                    firstFocus = panelFocus,
+                    onSelect = { id ->
+                        panel = VodPanel.None
+                        actions.onSelectTrack(id)
+                    },
+                    onOff = null,
+                    onDismiss = { panel = VodPanel.None },
+                )
+
+            VodPanel.Text ->
+                TrackPanel(
+                    title = "字幕",
+                    hint = "内嵌字幕，来自片源本身",
+                    tracks = state.textTracks,
+                    offLabel = "关闭字幕",
+                    offSelected = state.textDisabled,
+                    firstFocus = panelFocus,
+                    onSelect = { id ->
+                        panel = VodPanel.None
+                        actions.onSelectTrack(id)
+                    },
+                    onOff = {
+                        panel = VodPanel.None
+                        actions.onDisableText()
                     },
                     onDismiss = { panel = VodPanel.None },
                 )
@@ -438,6 +481,8 @@ private fun ControlButtons(
     actions: VodPlayerActions,
     onOpenPanel: () -> Unit,
     onOpenLines: () -> Unit,
+    onOpenAudio: () -> Unit,
+    onOpenText: () -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         ControlButton(text = "上一集", enabled = state.hasPrevious, onClick = actions.onPrevious)
@@ -447,6 +492,18 @@ private fun ControlButtons(
         // 一个永远点不动的按钮会被当成 bug
         if (state.canSwitchLine) {
             ControlButton(text = "线路", enabled = true, onClick = onOpenLines)
+        }
+        // 音轨 / 字幕同样「没有就不显示」：绝大多数直播流与不少片子根本没有这两样，
+        // 常驻两个点进去空空的菜单等于教用户别信控制条
+        if (state.canPickAudio) {
+            ControlButton(text = "音轨", enabled = true, onClick = onOpenAudio)
+        }
+        if (state.hasTextTracks) {
+            ControlButton(
+                text = if (state.textDisabled) "字幕·关" else "字幕",
+                enabled = true,
+                onClick = onOpenText,
+            )
         }
         ControlButton(
             text = if (state.favorited) "已收藏" else "收藏",
@@ -651,6 +708,126 @@ private fun LinePanel(
     }
 }
 
+/**
+ * 音轨 / 字幕面板（PLAY-07）。
+ *
+ * 与选集、线路共用同一个覆盖层外壳，但内容是「平铺一列」而不是网格：轨道最多五六条，
+ * 用网格反而要横着找。字幕多一项「关闭字幕」——它不是一条轨道（见
+ * `PlayerController.disableTracks`），所以单独作为列表首项。
+ *
+ * 初始焦点落在**当前选中**的那一条上，而不是第一行：用户打开面板十次有九次是
+ * 「看看现在用的是哪条」，落点在哪，说明就在哪。
+ */
+@Composable
+private fun TrackPanel(
+    title: String,
+    hint: String,
+    tracks: List<PlaybackTrack>,
+    offLabel: String?,
+    offSelected: Boolean,
+    firstFocus: FocusRequester,
+    onSelect: (String) -> Unit,
+    onOff: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    // 焦点落点：选中项优先，都没有就第一条。落在「关闭字幕」上只有一种情况 ——
+    // 字幕本来就是关的
+    val focusOff = offLabel != null && offSelected
+    val focusTrackId = tracks.firstOrNull { it.selected }?.id ?: tracks.firstOrNull()?.id
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xF20B0F12))
+                .padding(horizontal = 48.dp, vertical = 32.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = TvText.current.title,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = hint,
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                FocusableCard(onClick = onDismiss) {
+                    Text(
+                        text = "关闭",
+                        style = TvText.current.body,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (offLabel != null && onOff != null) {
+                    item(key = "track-off") {
+                        TrackRow(
+                            label = offLabel,
+                            selected = offSelected,
+                            onClick = onOff,
+                            focusRequester = if (focusOff) firstFocus else null,
+                        )
+                    }
+                }
+                items(items = tracks, key = { it.id }) { track ->
+                    TrackRow(
+                        label = track.label,
+                        selected = track.selected,
+                        onClick = { onSelect(track.id) },
+                        focusRequester =
+                            if (!focusOff && track.id == focusTrackId) firstFocus else null,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester?,
+) {
+    FocusableCard(
+        onClick = onClick,
+        focusRequester = focusRequester,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                style = TvText.current.body,
+                color =
+                    if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (selected) {
+                Text(
+                    text = "正在用",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
 /** 居中的一句话 + 若干出口。给不给按钮由调用方决定，不留假按钮 */
 @Composable
 private fun CenterHint(
@@ -697,6 +874,9 @@ private fun subtitleOf(state: VodPlayerUiState): String =
         if (state.episodeCount > 1) add("第 ${state.episodeIndex + 1}/${state.episodeCount} 集")
         if (state.lineCount > 1 && state.lineName.isNotBlank()) add("线路 ${state.lineName}")
         if (state.playback is PlaybackState.Preparing) add("缓冲中…")
+        // 字幕状态（PLAY-07）：切过字幕之后顶部得能看出「现在用的是哪条」。
+        // 关掉字幕是用户主动干的，也要写出来 —— 否则下一次他会以为字幕自己没了
+        state.textStatus?.let { add(it) }
         // 换线时集号被钳制（甲 40 集 → 乙 39 集）这类事必须说出来：
         // 用户只看到数字变了，会以为自己按错了集
         state.note?.takeIf { it.isNotBlank() }?.let { add(it) }

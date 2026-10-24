@@ -49,6 +49,7 @@ import com.leimao.tv.feature.iptv.ChannelLogo
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.settings.SettingsScreen
+import com.leimao.tv.feature.vod.HeroItem
 import com.leimao.tv.feature.vod.VodHomeScreen
 import com.leimao.tv.feature.vod.VodHomeState
 
@@ -135,6 +136,8 @@ fun HomeScreen(
     recentChannels: List<Channel>,
     vodState: VodHomeState,
     vodActions: VodHomeActions,
+    hero: List<HeroItem>,
+    onHeroOpen: (HeroItem) -> Unit,
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
@@ -212,6 +215,8 @@ fun HomeScreen(
                         recentChannels = recentChannels,
                         vodState = vodState,
                         vodActions = vodActions,
+                        hero = hero,
+                        onHeroOpen = onHeroOpen,
                         onOpenChannel = onOpenChannel,
                         onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
@@ -243,6 +248,8 @@ private fun ContentArea(
     recentChannels: List<Channel>,
     vodState: VodHomeState,
     vodActions: VodHomeActions,
+    hero: List<HeroItem>,
+    onHeroOpen: (HeroItem) -> Unit,
     onOpenChannel: (Long) -> Unit,
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
@@ -268,6 +275,8 @@ private fun ContentArea(
                 channels = channels,
                 favoriteIds = favoriteIds,
                 recentChannels = recentChannels,
+                liveNow = hero.firstLive(),
+                onOpenHero = onHeroOpen,
                 onOpenPlayer = onOpenPlayer,
                 onOpenChannel = onOpenChannel,
             )
@@ -293,6 +302,8 @@ private fun ContentArea(
         else ->
             VodHomeScreen(
                 state = vodState,
+                hero = hero,
+                onHeroOpen = onHeroOpen,
                 onSelectType = vodActions.onSelectType,
                 onSelectYear = vodActions.onSelectYear,
                 onSelectArea = vodActions.onSelectArea,
@@ -321,6 +332,8 @@ private fun LiveSectionContent(
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
+    liveNow: HeroItem.Live?,
+    onOpenHero: (HeroItem) -> Unit,
     onOpenPlayer: () -> Unit,
     onOpenChannel: (Long) -> Unit,
 ) {
@@ -349,11 +362,18 @@ private fun LiveSectionContent(
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        FocusableCard(onClick = onOpenPlayer) {
-            Text(
-                text = if (mode == AppMode.LIVE) "回到播放页（接着播上次那个台）" else "去直播播放页",
-                style = TvText.current.label,
-            )
+        // 直播分区放的是「正在直播」那一条（HOME-04），而不是一句「回到播放页」：
+        // 同一块地方，告诉用户「哪个台、在播什么」比告诉他「按这里能回去」有用得多。
+        // 没有台可播时才退回原来那句 —— 空着比说错话好。
+        if (liveNow != null) {
+            LiveNowStrip(item = liveNow, onOpen = { onOpenHero(liveNow) })
+        } else {
+            FocusableCard(onClick = onOpenPlayer) {
+                Text(
+                    text = if (mode == AppMode.LIVE) "回到播放页（接着播上次那个台）" else "去直播播放页",
+                    style = TvText.current.label,
+                )
+            }
         }
 
         if (channels.isNotEmpty()) {
@@ -409,6 +429,62 @@ private fun LiveSectionContent(
         }
     }
 }
+
+/**
+ * 直播分区的「正在直播」条（HOME-04）。
+ *
+ * 做成一条**不轮播**的窄条，而不是把影视首页那块 168dp 的大图搬过来：
+ * 直播分区下面还有五万条频道的浏览器，大图会把列表挤到只剩两行。
+ * 窄条同样回答「哪个台、在播什么、按下去会怎样」，代价只有一行的高度。
+ */
+@Composable
+private fun LiveNowStrip(
+    item: HeroItem.Live,
+    onOpen: () -> Unit,
+) {
+    FocusableCard(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ChannelLogo(logoUrl = item.channel.logoUrl)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.kicker,
+                        style = TvText.current.hint,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = item.title,
+                        style = TvText.current.label,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (item.meta.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = item.meta,
+                        style = TvText.current.hint,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "按 OK ${item.actionLabel}",
+                style = TvText.current.label,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/** Hero 序列里的「正在直播」那一条。直播分区只取它，不参与轮播（这里没有轮播位）。 */
+private fun List<HeroItem>.firstLive(): HeroItem.Live? = filterIsInstance<HeroItem.Live>().firstOrNull()
 
 /**
  * 一个快捷区块：标题 + 横向一行卡片。内容为空时用一句提示顶替，而不是空白 ——

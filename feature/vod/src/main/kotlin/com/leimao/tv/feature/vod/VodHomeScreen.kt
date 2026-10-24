@@ -47,7 +47,8 @@ import com.leimao.tv.core.model.vod.VodSummary
  * 三层信息结构，从上到下由「宽」到「窄」：
  * 1. **类型**：我要看什么（电影 / 剧集 / 动漫…）；
  * 2. **筛选**：这一栏里更细的范围（哪一年 / 哪个地区）；
- * 3. **内容**：继续观看（VOD-06，跨类型）+ 最近更新（全库）+ 当前类型 + 每源一行。
+ * 3. **内容**：Hero 轮播（HOME-04）+ 继续观看（VOD-06，跨类型）+ 最近更新（全库）
+ *    + 当前类型 + 每源一行。
  *
  * 关于「筛选为下拉还是横排」：电视上没有「点击展开、方向键选择」的舒适区，
  * 一个弹出的下拉层反而要多两次按键。这里改成**横排 chip**，左右键走到就选中，
@@ -59,6 +60,8 @@ import com.leimao.tv.core.model.vod.VodSummary
 @Composable
 fun VodHomeScreen(
     state: VodHomeState,
+    hero: List<HeroItem>,
+    onHeroOpen: (HeroItem) -> Unit,
     onSelectType: (ContentType) -> Unit,
     onSelectYear: (Int?) -> Unit,
     onSelectArea: (String?) -> Unit,
@@ -160,6 +163,9 @@ fun VodHomeScreen(
                     )
 
                 else -> {
+                    // Hero 放最前面（HOME-04）：它是「现在最该看的那一个」，
+                    // 而下面几行是「还有哪些」。没有可轮播的内容时它自己不渲染，不留空档
+                    HomeHero(items = hero, onOpen = onHeroOpen)
                     // 继续观看放在最上面，且**不受筛选影响**：切年份/地区是想找新片，
                     // 与「我昨天看到第 12 集」无关（见 VodHomeState.continueWatching 的注释）
                     if (state.continueWatching.isNotEmpty()) {

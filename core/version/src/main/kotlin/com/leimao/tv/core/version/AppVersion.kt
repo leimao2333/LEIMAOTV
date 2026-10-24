@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.5.0"
+    const val CURRENT_VERSION: String = "0.2.6.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.6.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "首页顶部加了 Hero 大图：接着看上次的片、正在播的台、今日推荐，停着不动每 3 秒自动换一张",
+                        "焦点停在 Hero 上时不再自动切换，按 OK 就是你正在看的那一张",
+                        "直播分区顶部会显示正在播的台和节目名，一眼知道现在在放什么",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.5.0",
                 date = "2026-10-24",

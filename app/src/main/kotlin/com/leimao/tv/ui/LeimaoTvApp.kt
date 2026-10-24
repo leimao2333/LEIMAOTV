@@ -35,9 +35,11 @@ import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.startup.StartDestination
+import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodDetail
 import com.leimao.tv.core.model.vod.VodProgress
 import com.leimao.tv.core.model.vod.VodProgressRules
+import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.core.model.vod.acceptsProgress
 import com.leimao.tv.core.model.vod.episodeName
 import com.leimao.tv.core.model.vod.episodeUrls
@@ -64,6 +66,7 @@ import com.leimao.tv.feature.settings.PlaybackSettingsScreen
 import com.leimao.tv.feature.settings.RefreshSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
 import com.leimao.tv.feature.settings.SourceManagerScreen
+import com.leimao.tv.feature.vod.HeroItem
 import com.leimao.tv.feature.vod.VodDetailScreen
 import com.leimao.tv.feature.vod.VodDetailState
 import com.leimao.tv.feature.vod.VodDetailStatus
@@ -72,6 +75,7 @@ import com.leimao.tv.feature.vod.VodPlayerActions
 import com.leimao.tv.feature.vod.VodPlayerScreen
 import com.leimao.tv.feature.vod.VodPlayerUiState
 import com.leimao.tv.feature.vod.VodSourceRow
+import com.leimao.tv.feature.vod.buildHeroItems
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -324,6 +328,48 @@ private fun HomeRoute(
         vodState = loadVodHomeState(container, vodType, vodYear, vodArea)
     }
 
+    // ---- 首页 Hero 区（HOME-04）----
+    // 「正在直播」只从「最近看过的台 + 收藏的台」里挑：Hero 想回答的是「你可能正在看的那个台」，
+    // 而不是频道表里的第一个 —— 那一个用户大概率没兴趣
+    val liveCandidates =
+        remember(channels, favoriteIds, recentChannels) {
+            (recentChannels + channels.filter { it.id in favoriteIds })
+                .distinctBy { it.id }
+                .take(HeroItem.LIVE_LIMIT)
+        }
+
+    // 节目单是加分项，不是前提：查不到就只显示台名与分组，首页不会因为没导 EPG 就少一块
+    var nowPlaying by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+    LaunchedEffect(liveCandidates) {
+        nowPlaying = loadNowPlaying(container, liveCandidates)
+    }
+
+    val hero =
+        remember(vodState.continueWatching, vodState.recent, liveCandidates, nowPlaying) {
+            buildHeroItems(
+                continueWatching = vodState.continueWatching,
+                liveChannels = liveCandidates,
+                nowPlaying = nowPlaying,
+                recommendations = vodState.recent,
+            )
+        }
+
+    // 三个跳转出口：Hero 与首页各行用的是同一套动作，不各写一份
+    val resumeVod: (VodContinueItem) -> Unit = { item ->
+        navController.navigate(
+            TvRoute.vodPlay(
+                sourceId = item.progress.sourceId,
+                sourceKey = item.progress.sourceKey,
+                lineIndex = item.progress.lineIndex,
+                episodeIndex = item.progress.episodeIndex,
+                startPositionMs = item.progress.positionMs,
+            ),
+        )
+    }
+    val openVod: (VodSummary) -> Unit = { summary ->
+        navController.navigate(TvRoute.vodDetail(summary.sourceId, summary.sourceKey))
+    }
+
     HomeScreen(
         mode = mode,
         section = section,
@@ -358,23 +404,19 @@ private fun HomeRoute(
                 },
                 onSelectYear = { vodYear = it },
                 onSelectArea = { vodArea = it },
-                onSelectMedia = { summary ->
-                    navController.navigate(TvRoute.vodDetail(summary.sourceId, summary.sourceKey))
-                },
+                onSelectMedia = openVod,
                 // 直接进播放页而不是先回详情页：用户点的就是「接着看」，
                 // 中间插一页详情等于让他再确认一次自己刚做过的决定
-                onResume = { item ->
-                    navController.navigate(
-                        TvRoute.vodPlay(
-                            sourceId = item.progress.sourceId,
-                            sourceKey = item.progress.sourceKey,
-                            lineIndex = item.progress.lineIndex,
-                            episodeIndex = item.progress.episodeIndex,
-                            startPositionMs = item.progress.positionMs,
-                        ),
-                    )
-                },
+                onResume = resumeVod,
             ),
+        hero = hero,
+        onHeroOpen = { item ->
+            when (item) {
+                is HeroItem.Continue -> resumeVod(item.item)
+                is HeroItem.Live -> navController.navigate(TvRoute.player(item.channel.id))
+                is HeroItem.Recommend -> openVod(item.item)
+            }
+        },
         onOpenChannel = { channelId -> navController.navigate(TvRoute.player(channelId)) },
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
@@ -990,6 +1032,27 @@ private suspend fun loadVodHomeState(
 
 /** 影视首页缓存有效期：半小时内直接读库，不为「切个板块」打一轮请求 */
 private const val VOD_CACHE_TTL_MS = 30 * 60 * 1000L
+
+/**
+ * 给 Hero 上的直播条目找「现在在播什么」（HOME-04）。
+ *
+ * 只查候选的那两三个台，不查全量：节目单是按频道名归一后查的，一次一次走 Room，
+ * 频道表有五千条时全量查完够用户看完一集。查不到就当没有 —— 节目单是加分项，不是前提。
+ */
+private suspend fun loadNowPlaying(
+    container: AppContainer,
+    channels: List<Channel>,
+): Map<Long, String> {
+    if (channels.isEmpty()) return emptyMap()
+    val now = System.currentTimeMillis()
+    return channels
+        .mapNotNull { channel ->
+            val title =
+                runCatching { container.epgRepository.nowNext(channel.name, now).current?.title }
+                    .getOrNull()
+            title?.takeIf { it.isNotBlank() }?.let { channel.id to it }
+        }.toMap()
+}
 
 private const val ARG_CHANNEL_ID = "channelId"
 private const val ARG_LOADING = "loading"

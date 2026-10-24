@@ -120,6 +120,32 @@ interface MediaDao {
     @Query("DELETE FROM media WHERE sourceId = :sourceId")
     suspend fun clearSource(sourceId: Long)
 
+    /**
+     * 按片名搜索本地快照（SEARCH-01）。
+     *
+     * 为什么本地也要搜一遍：远端每源最多等 8 秒，而库里已经有上一轮刷新的几百条，
+     * 本地命中能在一帧内出来（架构设计 §3 的「本地先出，远端逐源补入」）。
+     * 关联 `source` 而不是只查 `media`：已停用源的条目点进去必然拉不到详情，
+     * 与其让用户点一次死链，不如一开始就不给。
+     *
+     * 空格处理与 [ChannelDao.searchByName] 一致：先去空格再比，否则「流浪地球2」
+     * 搜不到「流浪地球 2」。
+     */
+    @Query(
+        """
+        SELECT m.* FROM media m
+        INNER JOIN source s ON s.id = m.sourceId
+        WHERE s.enabled = 1
+          AND REPLACE(REPLACE(m.title, ' ', ''), char(12288), '') LIKE '%' || :keyword || '%' ESCAPE '\'
+        ORDER BY m.updatedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun searchByTitle(
+        keyword: String,
+        limit: Int,
+    ): List<MediaEntity>
+
     @Query("SELECT COUNT(*) FROM media")
     suspend fun count(): Int
 }

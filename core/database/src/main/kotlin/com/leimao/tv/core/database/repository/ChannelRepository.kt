@@ -38,7 +38,23 @@ interface ChannelRepository {
     /** 起播配置：线路 + 源级请求头。换台时调用，全是主键查询 */
     suspend fun playbackConfig(channelId: Long): PlaybackConfig?
 
+    /**
+     * 按名称搜索频道（SEARCH-01），只搜启用的源。
+     *
+     * [keyword] 必须**已经归一化**（`normalizeSearchQuery`），这里的 SQL 只去空格、不处理全角半角 ——
+     * 「怎么算同一个词」这件事只有一份实现，放在 core:model 里。
+     */
+    suspend fun search(
+        keyword: String,
+        limit: Int = SEARCH_LIMIT,
+    ): List<ChannelWithSource>
+
     suspend fun firstChannelId(): Long?
+
+    companion object {
+        /** 单次搜索最多返回多少条频道：再多用户也不会翻，只是把焦点顺序拖长 */
+        const val SEARCH_LIMIT = 40
+    }
 }
 
 class RoomChannelRepository(
@@ -72,6 +88,11 @@ class RoomChannelRepository(
     }
 
     override suspend fun firstChannelId(): Long? = channelDao.firstChannelId()
+
+    override suspend fun search(
+        keyword: String,
+        limit: Int,
+    ): List<ChannelWithSource> = channelDao.searchByName(keyword.escapeLike(), limit)
 }
 
 internal fun ChannelEntity.toModel(): Channel =

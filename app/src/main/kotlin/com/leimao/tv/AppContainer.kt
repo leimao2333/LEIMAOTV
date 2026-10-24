@@ -2,6 +2,7 @@ package com.leimao.tv
 
 import android.content.Context
 import com.leimao.tv.core.data.EpgImporter
+import com.leimao.tv.core.data.SearchRepository
 import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.VodCatalogRefresher
 import com.leimao.tv.core.data.VodDetailLoader
@@ -97,6 +98,20 @@ class AppContainer(context: Context) {
     /** 单片详情（VOD-04）：`(sourceId, sourceKey)` → 源 → 适配器 → 详情。不落库 */
     val vodDetailLoader: VodDetailLoader =
         VodDetailLoader(
+            sources = sourceRepository,
+            http = httpClient,
+        )
+
+    /**
+     * 跨库搜索（SEARCH-01）：本地频道与影视快照先出，远端逐源补入。
+     *
+     * 白名单（SEARCH-02）在它的出口过滤，UI 层不再存第二份判断 —— 这里没有可配项，
+     * 也没有「要不要过滤」的开关：一个能被关掉的合规开关，迟早会被关掉。
+     */
+    val searchRepository: SearchRepository =
+        SearchRepository(
+            channels = channelRepository,
+            media = mediaRepository,
             sources = sourceRepository,
             http = httpClient,
         )

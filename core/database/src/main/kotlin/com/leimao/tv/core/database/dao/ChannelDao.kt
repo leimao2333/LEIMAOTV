@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.leimao.tv.core.database.entity.ChannelEntity
+import com.leimao.tv.core.database.repository.ChannelWithSource
 
 @Dao
 interface ChannelDao {
@@ -55,6 +56,33 @@ interface ChannelDao {
         """,
     )
     suspend fun listGroups(): List<String>
+
+    /**
+     * 按名称搜索频道（SEARCH-01），只搜**启用的源**。
+     *
+     * 三处刻意的写法：
+     * 1. `REPLACE(...)` 去掉半角与全角空格再比：源里的频道名「CCTV-1」「CCTV 1」「CCTV1」
+     *    三种写法都有，用户不可能记得自己搜的是哪一种（归一化口径见 `normalizeSearchQuery`）；
+     * 2. 关联 `source` 取源名：同名频道跨源都存在，副标题不带源名用户分不清点的是哪个；
+     * 3. 不做分页：频道总数几千条、命中集通常几十条，`LIMIT` 一档就够，翻页只会让焦点更难落。
+     */
+    @Query(
+        """
+        SELECT c.id AS id, c.name AS name, c.groupName AS groupName, c.logo AS logoUrl,
+               c.url AS streamUrl, c.number AS number, c.sourceId AS sourceId,
+               s.name AS sourceName
+        FROM channel c
+        INNER JOIN source s ON s.id = c.sourceId
+        WHERE s.enabled = 1
+          AND REPLACE(REPLACE(c.name, ' ', ''), char(12288), '') LIKE '%' || :keyword || '%' ESCAPE '\'
+        ORDER BY c.number ASC, c.id ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun searchByName(
+        keyword: String,
+        limit: Int,
+    ): List<ChannelWithSource>
 
     @Query("SELECT * FROM channel WHERE sourceId = :sourceId ORDER BY number ASC, id ASC")
     suspend fun listBySource(sourceId: Long): List<ChannelEntity>

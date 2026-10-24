@@ -65,7 +65,21 @@ interface MediaRepository {
 
     suspend fun isEmpty(): Boolean
 
+    /**
+     * 按片名搜索本地快照（SEARCH-01）。[keyword] 必须已归一化。
+     *
+     * 返回 [VodSummary] 而不是别的模型：搜索结果与首页卡片是同一种展示形态，
+     * 换成「搜索专用模型」只会多一层转换，而两者字段迟早要对齐。
+     */
+    suspend fun search(
+        keyword: String,
+        limit: Int = SEARCH_LIMIT,
+    ): List<VodSummary>
+
     companion object {
+        /** 本地快照命中上限：本地只负责「先出点东西」，找全归远端 */
+        const val SEARCH_LIMIT = 30
+
         /** 每行给多少张卡。1080p 一行放 5～6 张，30 条够往下翻好几屏，也不至于一屏拉太多图 */
         const val DEFAULT_LIMIT = 30
 
@@ -139,6 +153,11 @@ class RoomMediaRepository(
     override suspend fun clearSource(sourceId: Long) = dao.clearSource(sourceId)
 
     override suspend fun isEmpty(): Boolean = dao.count() == 0
+
+    override suspend fun search(
+        keyword: String,
+        limit: Int,
+    ): List<VodSummary> = dao.searchByTitle(keyword.escapeLike(), limit).toSummaries()
 }
 
 /**

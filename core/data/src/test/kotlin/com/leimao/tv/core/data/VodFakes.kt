@@ -71,6 +71,9 @@ internal class FakeMediaRepository : MediaRepository {
     /** 详情页进场时读的本地快照，按 `(sourceId, sourceKey)` 摆好 */
     val stored = mutableMapOf<Pair<Long, String>, VodSummary>()
 
+    /** 本地搜索命中（SEARCH-01）：键是归一化后的关键词 */
+    val searchable = mutableMapOf<String, List<VodSummary>>()
+
     override suspend fun replace(
         sourceId: Long,
         pages: Map<ContentType, List<VodSummary>>,
@@ -110,4 +113,9 @@ internal class FakeMediaRepository : MediaRepository {
     override suspend fun clearSource(sourceId: Long) = Unit
 
     override suspend fun isEmpty(): Boolean = true
+
+    override suspend fun search(
+        keyword: String,
+        limit: Int,
+    ): List<VodSummary> = searchable[keyword].orEmpty()
 }

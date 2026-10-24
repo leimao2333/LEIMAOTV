@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.1"
+    const val CURRENT_VERSION: String = "0.2.9.2"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.2",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "搜索的后台打通了：一次能同时搜直播频道和影视（界面在下一个版本接上）",
+                        "直播板块搜不到短剧、纪录片、资讯、预告片，影视板块全都能搜到",
+                        "慢源不会拖住整个搜索：单条源最多等 8 秒，先搜到的先显示",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.1",
                 date = "2026-10-24",

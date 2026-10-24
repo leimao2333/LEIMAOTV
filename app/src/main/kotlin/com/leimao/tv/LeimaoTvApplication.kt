@@ -6,6 +6,7 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.leimao.tv.core.data.RefreshInterval
+import com.leimao.tv.data.CacheManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -63,7 +64,7 @@ class LeimaoTvApplication :
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(cacheDir.resolve("logo_cache"))
+                    .directory(cacheDir.resolve(CacheManager.IMAGE_CACHE_DIR))
                     // 32MB 上限：超出后按 LRU 淘汰，不会无限增长
                     .maxSizeBytes(32L * 1024 * 1024)
                     .build()

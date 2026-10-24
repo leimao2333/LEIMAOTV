@@ -38,6 +38,7 @@ fun SettingsScreen(
     onOpenRefreshSettings: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenSourceManager: () -> Unit,
+    onOpenCache: () -> Unit,
     onOpenLicense: () -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
@@ -87,6 +88,12 @@ fun SettingsScreen(
             title = "网络",
             subtitle = "超时 / 并发 / 代理 —— M4 落地（SET-04）",
             onClick = { },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingRow(
+            title = "存储与缓存",
+            subtitle = "看看台标占了多少地方，占多了可以一键清空（SET-05）",
+            onClick = onOpenCache,
         )
 
         Spacer(modifier = Modifier.height(28.dp))

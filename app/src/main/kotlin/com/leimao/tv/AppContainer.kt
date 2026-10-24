@@ -33,6 +33,7 @@ import com.leimao.tv.core.network.OkHttpHttpClient
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
+import com.leimao.tv.data.CacheManager
 import com.leimao.tv.data.DataStoreSettingsStore
 import com.leimao.tv.data.SettingsStore
 import com.leimao.tv.startup.StartupResolver
@@ -59,6 +60,9 @@ class AppContainer(context: Context) {
     val database: LeimaoDatabase = LeimaoDatabase.build(appContext)
 
     val settings: SettingsStore = DataStoreSettingsStore(appContext)
+
+    /** 缓存统计与清理（SET-05）：只读 `cacheDir`，没有别的依赖 */
+    val cacheManager: CacheManager = CacheManager.create(appContext)
 
     /**
      * 全应用共用一个 OkHttp 实例：连接池复用是它性能的大头，

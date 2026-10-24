@@ -30,6 +30,7 @@ import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.TvRoute
+import com.leimao.tv.core.model.cache.CacheUsage
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
@@ -61,6 +62,7 @@ import com.leimao.tv.feature.iptv.PlayerUiState
 import com.leimao.tv.feature.iptv.ProgrammeLine
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.iptv.neighborOf
+import com.leimao.tv.feature.settings.CacheScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.LicenseScreen
 import com.leimao.tv.feature.settings.PlaybackSettingsScreen
@@ -184,6 +186,7 @@ fun LeimaoTvApp(
                     onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
                     onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
                     onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
+                    onOpenCache = { navController.navigate(TvRoute.CACHE) },
                     onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
                 )
             }
@@ -216,6 +219,11 @@ fun LeimaoTvApp(
                 BackHandler { navController.popBackStack() }
                 RefreshSettingsRoute(container = container)
             }
+
+            composable(TvRoute.CACHE) {
+                BackHandler { navController.popBackStack() }
+                CacheRoute(container = container)
+            }
         }
 
         GlobalMenuOverlay(
@@ -244,6 +252,43 @@ private fun RefreshSettingsRoute(container: AppContainer) {
                 container.settings.setRefreshInterval(next)
                 // 改周期要立刻反映到 WorkManager：注册新周期或取消（关闭时）
                 SourceRefreshWorker.schedule(container.appContext, next)
+            }
+        },
+    )
+}
+
+/**
+ * 存储与缓存（SET-05）的接线。
+ *
+ * 统计与清理都是磁盘 IO，所以都丢进协程：进页面先算一次（可能要扫几百个文件），
+ * 清理期间 `clearing` 挡住重复点击 —— 连按两次会让 Coil 的 DiskCache 在清空中途被再清一次。
+ */
+@Composable
+private fun CacheRoute(container: AppContainer) {
+    var usage by remember { mutableStateOf<CacheUsage?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    var clearedBytes by remember { mutableStateOf<Long?>(null) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) { usage = container.cacheManager.usage() }
+
+    CacheScreen(
+        usage = usage,
+        clearing = clearing,
+        clearedBytes = clearedBytes,
+        onClear = {
+            if (!clearing) {
+                clearing = true
+                scope.launch {
+                    // 清理前的数字优先用屏幕上那个（用户看到的那一版），没有再算一次
+                    val before = usage?.totalBytes ?: container.cacheManager.usage().totalBytes
+                    val after = container.cacheManager.clear()
+                    usage = after
+                    // 报「释放了多少」而不是「现在是 0」：Coil 会立刻开始重下当前页的台标，
+                    // 清理后的大小往往不是 0，说成「已清空」是骗人
+                    clearedBytes = (before - after.totalBytes).coerceAtLeast(0L)
+                    clearing = false
+                }
             }
         },
     )
@@ -439,6 +484,7 @@ private fun HomeRoute(
         onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
         onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
         onOpenLicense = { navController.navigate(TvRoute.LICENSE) },
+        onOpenCache = { navController.navigate(TvRoute.CACHE) },
         onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
         onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
         onExit = onExitApp,

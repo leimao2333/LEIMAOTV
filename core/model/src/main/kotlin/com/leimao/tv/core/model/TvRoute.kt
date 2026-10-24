@@ -18,6 +18,9 @@ object TvRoute {
     const val PLAYBACK_SETTINGS = "playback_settings"
     const val REFRESH_SETTINGS = "refresh_settings"
 
+    /** 存储与缓存（SET-05）：看占了多少、一键清空 */
+    const val CACHE = "cache"
+
     /** 播放页带两个查询参数：频道 id（-1 = 尚未确定）与是否仍在载入频道。 */
     const val PLAYER = "player?channelId={channelId}&loading={loading}"
 

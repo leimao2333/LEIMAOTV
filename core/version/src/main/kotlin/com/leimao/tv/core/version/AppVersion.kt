@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.3"
+    const val CURRENT_VERSION: String = "0.2.9.4"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,15 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.4",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "设置里能看到缓存占了多大地方了：图片缓存和其他临时文件分开算",
+                        "多了一个「清理缓存」按钮，清完会告诉你释放了多少空间",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.3",
                 date = "2026-10-24",

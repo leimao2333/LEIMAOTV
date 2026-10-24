@@ -144,6 +144,7 @@ fun HomeScreen(
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenLicense: () -> Unit,
+    onOpenCache: () -> Unit,
     onOpenPlaybackSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     onExit: () -> Unit,
@@ -225,6 +226,7 @@ fun HomeScreen(
                         onOpenSourceManager = onOpenSourceManager,
                         onOpenChangelog = onOpenChangelog,
                         onOpenLicense = onOpenLicense,
+                        onOpenCache = onOpenCache,
                         onOpenPlaybackSettings = onOpenPlaybackSettings,
                         onOpenRefreshSettings = onOpenRefreshSettings,
                         searchContent = searchContent,
@@ -259,6 +261,7 @@ private fun ContentArea(
     onOpenSourceManager: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenLicense: () -> Unit,
+    onOpenCache: () -> Unit,
     onOpenPlaybackSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     /**
@@ -300,6 +303,7 @@ private fun ContentArea(
                 onOpenChangelog = onOpenChangelog,
                 onOpenSourceManager = onOpenSourceManager,
                 onOpenLicense = onOpenLicense,
+                onOpenCache = onOpenCache,
                 autoFocus = false,
             )
         // 影视板块的五个栏目（电影/电视剧/动漫/综艺/体育）共用同一个首页，

@@ -34,4 +34,12 @@ data class VodProgressEntity(
     val updatedAt: Long,
     val title: String,
     val poster: String? = null,
+    /**
+     * 看完了没有（VOD-07）。
+     *
+     * 看完的**不删**：这一行同时是「继续观看」（`finished = 0`）与「看过的」
+     * （`finished = 1`）两个列表的数据源。VOD-06 当初用删除表达「看完了」，
+     * 代价是「我看过这部片」这件事在应用里彻底消失。
+     */
+    val finished: Boolean = false,
 )

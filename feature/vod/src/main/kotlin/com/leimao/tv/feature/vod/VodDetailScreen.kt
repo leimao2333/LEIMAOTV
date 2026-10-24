@@ -63,6 +63,7 @@ fun VodDetailScreen(
     onToggleReverse: () -> Unit,
     onSelectEpisode: (Int) -> Unit,
     onResume: (VodProgress) -> Unit,
+    onToggleFavorite: () -> Unit,
     onOpenSourceManager: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -87,7 +88,7 @@ fun VodDetailScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            DetailHeader(state = state)
+            DetailHeader(state = state, onToggleFavorite = onToggleFavorite)
         }
 
         when (state.status) {
@@ -202,9 +203,12 @@ fun VodDetailScreen(
 // 组件
 // --------------------------------------------------------------------------- //
 
-/** 头部：海报 + 标题 / 副信息 / 演职员 / 简介 */
+/** 头部：海报 + 标题 / 副信息 / 演职员 / 简介 + 收藏 */
 @Composable
-private fun DetailHeader(state: VodDetailState) {
+private fun DetailHeader(
+    state: VodDetailState,
+    onToggleFavorite: () -> Unit,
+) {
     Row(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         Poster(state = state)
         Spacer(modifier = Modifier.width(26.dp))
@@ -239,6 +243,9 @@ private fun DetailHeader(state: VodDetailState) {
                 )
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+            FavoriteButton(favorited = state.favorited, onToggle = onToggleFavorite)
+
             state.detail?.director?.takeIf { it.isNotBlank() }?.let { director ->
                 Spacer(modifier = Modifier.height(10.dp))
                 PeopleLine(label = "导演", value = director)
@@ -253,6 +260,31 @@ private fun DetailHeader(state: VodDetailState) {
                 DescriptionBlock(content = content)
             }
         }
+    }
+}
+
+/**
+ * 收藏（VOD-07）。
+ *
+ * 视觉上是个 chip 而不是星形图标：电视上没有「图标按钮」的通用语义，用户看不出
+ * 一个星星是「已收藏」还是「点一下收藏」。写成「收藏 / 已收藏」两个字，
+ * 按下去的变化是**词本身**变了，比任何图标都直白。
+ */
+@Composable
+private fun FavoriteButton(
+    favorited: Boolean,
+    onToggle: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    FocusableCard(
+        onClick = onToggle,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 9.dp),
+    ) {
+        Text(
+            text = if (favorited) "已收藏" else "收藏",
+            style = TvText.current.body,
+            color = if (favorited) accent else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

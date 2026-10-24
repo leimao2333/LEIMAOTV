@@ -18,8 +18,10 @@ import com.leimao.tv.core.database.repository.RoomFavoriteRepository
 import com.leimao.tv.core.database.repository.RoomHistoryRepository
 import com.leimao.tv.core.database.repository.RoomMediaRepository
 import com.leimao.tv.core.database.repository.RoomSourceRepository
+import com.leimao.tv.core.database.repository.RoomVodFavoriteRepository
 import com.leimao.tv.core.database.repository.RoomVodProgressRepository
 import com.leimao.tv.core.database.repository.SourceRepository
+import com.leimao.tv.core.database.repository.VodFavoriteRepository
 import com.leimao.tv.core.database.repository.VodProgressRepository
 import com.leimao.tv.core.database.startup.RoomStartupFactsReader
 import com.leimao.tv.core.database.startup.StartupFactsReader
@@ -101,6 +103,9 @@ class AppContainer(context: Context) {
 
     /** 看片进度（VOD-06）：播放页写、首页与详情页读 */
     val vodProgressRepository: VodProgressRepository = RoomVodProgressRepository(database)
+
+    /** 影视收藏（VOD-07）：详情页与播放页都能收，首页读它画一行 */
+    val vodFavoriteRepository: VodFavoriteRepository = RoomVodFavoriteRepository(database)
 
     val startupFacts: StartupFactsReader = RoomStartupFactsReader(database)
 

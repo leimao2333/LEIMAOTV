@@ -47,6 +47,8 @@ data class VodPlayerUiState(
     val preparing: Boolean = false,
     /** 需要直接告诉用户的一句话（详情拉不到、地址为空等） */
     val note: String? = null,
+    /** 收藏了没有（VOD-07）：控制条上的「收藏 / 已收藏」据此切换 */
+    val favorited: Boolean = false,
 ) {
     /** 有进度才能画进度条。直播或时长未知时为 false */
     val seekable: Boolean get() = durationMs > 0L

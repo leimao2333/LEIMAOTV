@@ -14,6 +14,7 @@ import com.leimao.tv.core.database.dao.FavoriteDao
 import com.leimao.tv.core.database.dao.HistoryDao
 import com.leimao.tv.core.database.dao.MediaDao
 import com.leimao.tv.core.database.dao.SourceDao
+import com.leimao.tv.core.database.dao.VodFavoriteDao
 import com.leimao.tv.core.database.dao.VodProgressDao
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.entity.ChannelLineEntity
@@ -24,6 +25,7 @@ import com.leimao.tv.core.database.entity.FavoriteEntity
 import com.leimao.tv.core.database.entity.HistoryEntity
 import com.leimao.tv.core.database.entity.MediaEntity
 import com.leimao.tv.core.database.entity.SourceEntity
+import com.leimao.tv.core.database.entity.VodFavoriteEntity
 import com.leimao.tv.core.database.entity.VodProgressEntity
 
 /**
@@ -49,8 +51,9 @@ import com.leimao.tv.core.database.entity.VodProgressEntity
         EpgSourceEntity::class,
         MediaEntity::class,
         VodProgressEntity::class,
+        VodFavoriteEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -71,6 +74,8 @@ abstract class LeimaoDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
 
     abstract fun vodProgressDao(): VodProgressDao
+
+    abstract fun vodFavoriteDao(): VodFavoriteDao
 
     companion object {
         private const val DB_NAME = "leimao-tv.db"
@@ -298,6 +303,41 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 7 → 8：加影视收藏表 + 进度表加「看完」标记（VOD-07）。
+         *
+         * 两处都刻意是加法：
+         * - `vod_favorite` 是新表，存量数据一行不动；
+         * - `vod_progress` 加一列 `finished`，默认 0 = 没看完 —— 升级后所有既有进度
+         *   照旧出现在「继续观看」，不会因为多了个字段就集体变成「看过」。
+         *
+         * 「看完」从**删行**改成**置标记**，是因为 VOD-07 要把看完的片子当「看过的」
+         * 历史用。删掉之后，用户想找上周看完那部片只能凭记忆搜片名。
+         */
+        val MIGRATION_7_8: Migration =
+            object : Migration(7, 8) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE `vod_progress` ADD COLUMN `finished` INTEGER NOT NULL DEFAULT 0")
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `vod_favorite` (" +
+                            "`sourceId` INTEGER NOT NULL, " +
+                            "`sourceKey` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, " +
+                            "`poster` TEXT, " +
+                            "`type` TEXT NOT NULL, " +
+                            "`year` INTEGER, " +
+                            "`area` TEXT, " +
+                            "`remarks` TEXT, " +
+                            "`addedAt` INTEGER NOT NULL, " +
+                            "PRIMARY KEY(`sourceId`, `sourceKey`))",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_vod_favorite_addedAt` " +
+                            "ON `vod_favorite` (`addedAt`)",
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
                 .addMigrations(
@@ -307,6 +347,7 @@ abstract class LeimaoDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
+                    MIGRATION_7_8,
                 )
                 .build()
     }

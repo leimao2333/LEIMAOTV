@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.7.0"
+    const val CURRENT_VERSION: String = "0.2.8.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.8.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "影视详情页与播放页都能收藏了，首页多一行「我的收藏」",
+                        "看完的片子不再从记录里消失：首页多一行「看过的」，想重温直接点",
+                        "删掉影视源时，它的收藏也会一起清掉，不会留下点不进去的残影",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.7.0",
                 date = "2026-10-24",

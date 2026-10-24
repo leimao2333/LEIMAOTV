@@ -12,7 +12,12 @@ import com.leimao.tv.core.model.vod.VodProgress
  * `VodProgressRules` 里 —— 那是纯函数，能单测；这里只管落库。
  */
 interface VodProgressRepository {
-    /** 记一次进度。[title] / [poster] 是快照，见 `VodProgressEntity` 的注释 */
+    /**
+     * 记一次进度。[title] / [poster] 是快照，见 `VodProgressEntity` 的注释。
+     *
+     * [progress] 里的 `finished` 决定这条记录进「继续观看」还是「看过的」——
+     * 两个列表共用这张表（VOD-07）。
+     */
     suspend fun save(
         progress: VodProgress,
         title: String,
@@ -24,8 +29,11 @@ interface VodProgressRepository {
         sourceKey: String,
     ): VodProgress?
 
-    /** 继续观看（最近看过的在前） */
+    /** 继续观看（没看完的，最近看过的在前） */
     suspend fun recent(limit: Int = DEFAULT_LIMIT): List<VodContinueItem>
+
+    /** 看过的（看完的，最近看过的在前）—— 与 [recent] 互补，同表同排序 */
+    suspend fun history(limit: Int = DEFAULT_LIMIT): List<VodContinueItem>
 
     suspend fun delete(
         sourceId: Long,
@@ -66,6 +74,7 @@ class RoomVodProgressRepository(
                 updatedAt = progress.updatedAt,
                 title = title,
                 poster = poster,
+                finished = progress.finished,
             ),
         )
         // 每次写顺手裁一次：50 条的表上做一次排序删除，代价远小于「无限增长后才发现」
@@ -79,6 +88,12 @@ class RoomVodProgressRepository(
 
     override suspend fun recent(limit: Int): List<VodContinueItem> =
         dao.recent(limit).mapNotNull { entity ->
+            val progress = entity.toProgress() ?: return@mapNotNull null
+            VodContinueItem(progress = progress, title = entity.title, poster = entity.poster)
+        }
+
+    override suspend fun history(limit: Int): List<VodContinueItem> =
+        dao.history(limit).mapNotNull { entity ->
             val progress = entity.toProgress() ?: return@mapNotNull null
             VodContinueItem(progress = progress, title = entity.title, poster = entity.poster)
         }
@@ -102,5 +117,6 @@ private fun VodProgressEntity.toProgress(): VodProgress? {
         positionMs = positionMs,
         durationMs = durationMs,
         updatedAt = updatedAt,
+        finished = finished,
     )
 }

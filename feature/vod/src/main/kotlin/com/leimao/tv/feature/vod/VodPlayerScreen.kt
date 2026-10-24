@@ -68,6 +68,8 @@ data class VodPlayerActions(
     val onSelectEpisode: (Int) -> Unit,
     /** 换到第 N 条线路，按集号对齐、保留当前位置（VOD-10） */
     val onSelectLine: (Int) -> Unit,
+    /** 收藏 / 取消收藏（VOD-07） */
+    val onToggleFavorite: () -> Unit,
     val onRetry: () -> Unit,
     val onBack: () -> Unit,
 )
@@ -446,6 +448,11 @@ private fun ControlButtons(
         if (state.canSwitchLine) {
             ControlButton(text = "线路", enabled = true, onClick = onOpenLines)
         }
+        ControlButton(
+            text = if (state.favorited) "已收藏" else "收藏",
+            enabled = true,
+            onClick = actions.onToggleFavorite,
+        )
         ControlButton(text = "返回", enabled = true, onClick = actions.onBack)
     }
 }

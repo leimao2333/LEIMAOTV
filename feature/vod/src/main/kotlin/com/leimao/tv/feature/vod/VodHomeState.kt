@@ -2,6 +2,7 @@ package com.leimao.tv.feature.vod
 
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.vod.VodContinueItem
+import com.leimao.tv.core.model.vod.VodFavorite
 import com.leimao.tv.core.model.vod.VodSummary
 
 /**
@@ -52,6 +53,16 @@ data class VodHomeState(
      * 但「我昨天看到第 12 集」这件事跟筛选条件无关 —— 藏起来只会让他以为进度丢了。
      */
     val continueWatching: List<VodContinueItem> = emptyList(),
+    /**
+     * 看过的（VOD-07）：与 [continueWatching] **互补**，没有交集。
+     *
+     * 一部片要么「还没看完」进去继续看，要么「看完了」进去是想再看一遍 ——
+     * 两个动作不同，所以是两行而不是一行带标签。全集只有一份数据（`vod_progress`），
+     * 靠 `finished` 分流。
+     */
+    val history: List<VodContinueItem> = emptyList(),
+    /** 收藏的片子（VOD-07），最近收藏的在前 */
+    val favorites: List<VodFavorite> = emptyList(),
     /** 每源一行 */
     val sourceRows: List<VodSourceRow> = emptyList(),
     val loading: Boolean = false,
@@ -62,7 +73,13 @@ data class VodHomeState(
 ) {
     val filtering: Boolean get() = selectedYear != null || selectedArea != null
 
-    /** 三块内容全空 —— 此时渲染空态，而不是一堆空行 */
+    /** 所有内容块都空 —— 此时渲染空态，而不是一堆空行 */
     val blank: Boolean
-        get() = items.isEmpty() && recent.isEmpty() && sourceRows.isEmpty() && continueWatching.isEmpty()
+        get() =
+            items.isEmpty() &&
+                recent.isEmpty() &&
+                sourceRows.isEmpty() &&
+                continueWatching.isEmpty() &&
+                history.isEmpty() &&
+                favorites.isEmpty()
 }

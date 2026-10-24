@@ -79,6 +79,9 @@ class RoomSourceRepository(
         // 进度没有外键（见 VodProgressEntity 的注释），源没了就得显式清：
         // 否则「继续观看」里会留一条点进去必然失败的记录
         database.vodProgressDao().clearSource(id)
+        // 收藏同理（VOD-07）：源没了，收藏的那个条目也就点不进去了。
+        // 这里与「删源不动直播收藏」不一样 —— 直播收藏靠外键级联，语义一致
+        database.vodFavoriteDao().clearSource(id)
     }
 
     override suspend fun setEnabled(id: Long, enabled: Boolean) = dao.setEnabled(id, enabled)

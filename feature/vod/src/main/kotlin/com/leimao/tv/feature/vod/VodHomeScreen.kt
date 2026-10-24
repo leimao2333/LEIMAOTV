@@ -67,6 +67,7 @@ fun VodHomeScreen(
     onSelectArea: (String?) -> Unit,
     onSelectMedia: (VodSummary) -> Unit,
     onResume: (VodContinueItem) -> Unit,
+    onOpenHistory: (VodContinueItem) -> Unit,
     onOpenSourceManager: () -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
@@ -169,7 +170,29 @@ fun VodHomeScreen(
                     // 继续观看放在最上面，且**不受筛选影响**：切年份/地区是想找新片，
                     // 与「我昨天看到第 12 集」无关（见 VodHomeState.continueWatching 的注释）
                     if (state.continueWatching.isNotEmpty()) {
-                        ContinueRow(items = state.continueWatching, onResume = onResume)
+                        WatchedRow(
+                            title = "继续观看",
+                            items = state.continueWatching,
+                            finished = false,
+                            onOpen = onResume,
+                        )
+                    }
+                    // 收藏与看过的也放在筛选之上：它们是「我的东西」，
+                    // 与「我这次想看哪个年份的片」是两件事（同 continueWatching 的理由）
+                    if (state.favorites.isNotEmpty()) {
+                        MediaRow(
+                            title = "我的收藏",
+                            items = state.favorites.map { it.toSummary() },
+                            onSelect = onSelectMedia,
+                        )
+                    }
+                    if (state.history.isNotEmpty()) {
+                        WatchedRow(
+                            title = "看过的",
+                            items = state.history,
+                            finished = true,
+                            onOpen = onOpenHistory,
+                        )
                     }
                     if (!state.filtering) {
                         MediaRow(title = "最近更新", items = state.recent, onSelect = onSelectMedia)
@@ -289,7 +312,10 @@ private fun MediaRow(
 }
 
 /**
- * 继续观看一行（VOD-06）。
+ * 「继续观看」/「看过的」一行（VOD-06 / VOD-07）。
+ *
+ * 两个列表用同一个组件：卡片长得一样（16:9 + 集号 + 标题），差别只在「点进去干什么」
+ * 和右下角那句说明。给看完的内容再写一套卡片，只会让两行的圆角与字号慢慢长歪。
  *
  * 卡片用横向 16:9 而不是海报的 2:3：这一行的主角是「看到哪儿了」，进度条要有足够长度
  * 才读得出来；而且横版卡片下面的标题区更宽，长片名不至于全被省略号吃掉。
@@ -298,28 +324,31 @@ private fun MediaRow(
  * 需要的是一眼认出「哦是这部」，而不是在海报上端详构图。
  */
 @Composable
-private fun ContinueRow(
+private fun WatchedRow(
+    title: String,
     items: List<VodContinueItem>,
-    onResume: (VodContinueItem) -> Unit,
+    finished: Boolean,
+    onOpen: (VodContinueItem) -> Unit,
 ) {
     Column {
         Text(
-            text = "继续观看",
+            text = title,
             style = TvText.current.title,
             color = MaterialTheme.colorScheme.onBackground,
         )
         Spacer(modifier = Modifier.height(10.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             items(items, key = { "${it.progress.sourceId}-${it.progress.sourceKey}" }) { item ->
-                ContinueCard(item = item, onClick = { onResume(item) })
+                WatchedCard(item = item, finished = finished, onClick = { onOpen(item) })
             }
         }
     }
 }
 
 @Composable
-private fun ContinueCard(
+private fun WatchedCard(
     item: VodContinueItem,
+    finished: Boolean,
     onClick: () -> Unit,
 ) {
     FocusableCard(
@@ -353,7 +382,8 @@ private fun ContinueCard(
                     )
                 }
 
-                // 集号压在左上角：用户扫这一行时先确认「是不是我看到那一集的地方」
+                // 集号压在左上角：用户扫这一行时先确认「是不是我看到那一集的地方」。
+                // 看完的片子写「已看完」而不是集号 —— 集号只对「接着看」有意义
                 Box(
                     modifier =
                         Modifier
@@ -364,29 +394,32 @@ private fun ContinueCard(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        text = item.episodeLabel,
+                        text = if (finished) "已看完" else item.episodeLabel,
                         style = TvText.current.hint,
                         color = Color.White,
                         maxLines = 1,
                     )
                 }
 
-                // 进度条贴底：不占额外高度，也不与集号抢位置
-                Box(
-                    modifier =
-                        Modifier
-                            .align(Alignment.BottomStart)
-                            .fillMaxWidth()
-                            .height(4.dp)
-                            .background(Color(0x66FFFFFF)),
-                ) {
+                // 进度条贴底：不占额外高度，也不与集号抢位置。
+                // 看完的不画：一条永远满格的进度条只会让人以为「还能接着看」
+                if (!finished) {
                     Box(
                         modifier =
                             Modifier
-                                .fillMaxWidth(item.fraction)
-                                .fillMaxHeight()
-                                .background(MaterialTheme.colorScheme.primary),
-                    )
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .background(Color(0x66FFFFFF)),
+                    ) {
+                        Box(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth(item.fraction)
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.primary),
+                        )
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
@@ -399,7 +432,12 @@ private fun ContinueCard(
             )
             // 已看到 12:34 比「已看 27%」有用：前者能对上进度条，后者还得自己算
             Text(
-                text = "${item.episodeLabel} · 已看到 ${formatTime(item.progress.positionMs)}",
+                text =
+                    if (finished) {
+                        "已看完 · ${item.episodeLabel}"
+                    } else {
+                        "${item.episodeLabel} · 已看到 ${formatTime(item.progress.positionMs)}"
+                    },
                 style = TvText.current.hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

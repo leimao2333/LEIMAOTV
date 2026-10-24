@@ -20,6 +20,14 @@ data class VodProgress(
     val positionMs: Long,
     val durationMs: Long,
     val updatedAt: Long,
+    /**
+     * 看完了没有（VOD-07）。
+     *
+     * 看完的**不删行**，只是不再进「继续观看」—— 它还要当「看过的」历史用。
+     * VOD-06 一开始的做法是删掉，结果是「我看过这部片」这件事在应用里彻底消失：
+     * 想找上周看完的那部电影，只能凭记忆去搜片名。
+     */
+    val finished: Boolean = false,
 ) {
     val fraction: Float
         get() = if (durationMs <= 0L) 0f else (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)

@@ -51,6 +51,8 @@ data class VodDetailState(
      * 这个是「上次真的播到哪」，点「继续观看」时用它，翻选集不该把它改掉。
      */
     val progress: VodProgress? = null,
+    /** 收藏了没有（VOD-07）。详情页顶部的「收藏」按钮据此显示 收藏 / 已收藏 */
+    val favorited: Boolean = false,
 ) {
     /** 标题 / 海报优先取回源结果：详情里的字段比首页快照新 */
     val title: String get() = detail?.summary?.name ?: summary?.name.orEmpty()

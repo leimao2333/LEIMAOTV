@@ -37,6 +37,7 @@ import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodDetail
+import com.leimao.tv.core.model.vod.VodFavorite
 import com.leimao.tv.core.model.vod.VodProgress
 import com.leimao.tv.core.model.vod.VodProgressRules
 import com.leimao.tv.core.model.vod.VodSummary
@@ -410,6 +411,13 @@ private fun HomeRoute(
                 // 直接进播放页而不是先回详情页：用户点的就是「接着看」，
                 // 中间插一页详情等于让他再确认一次自己刚做过的决定
                 onResume = resumeVod,
+                // 看过的（VOD-07）点进去是**详情页**而不是直接起播：
+                // 那一集已经看完了，用户点它多半是「再看一遍」，从哪一集开始由他决定
+                onOpenHistory = { item ->
+                    navController.navigate(
+                        TvRoute.vodDetail(item.progress.sourceId, item.progress.sourceKey),
+                    )
+                },
             ),
         hero = hero,
         onHeroOpen = { item ->
@@ -615,14 +623,21 @@ private fun VodDetailRoute(
     var reloadTag by remember { mutableStateOf(0) }
 
     LaunchedEffect(sourceId, sourceKey, reloadTag) {
-        // 进度只在本地库，进页面顺手读一次，不和回源串行
-        val saved = container.vodProgressRepository.find(sourceId, sourceKey)
+        // 进度只在本地库，进页面顺手读一次，不和回源串行。
+        // 已看完的记录**不当进度用**（VOD-07）：那部片重新点进来是要从头看的，
+        // 首页「继续观看」里也不会再出现它
+        val saved = container.vodProgressRepository.find(sourceId, sourceKey)?.takeIf { !it.finished }
+        // 收藏态同理，一次读库两件事，不必各开一个 effect
+        val favorited =
+            runCatching { container.vodFavoriteRepository.isFavorite(sourceId, sourceKey) }
+                .getOrDefault(false)
         state =
             state.copy(
                 summary = container.mediaRepository.find(sourceId, sourceKey) ?: state.summary,
                 status = VodDetailStatus.LOADING,
                 note = null,
                 progress = saved,
+                favorited = favorited,
             )
 
         when (val result = container.vodDetailLoader.load(sourceId, sourceKey)) {
@@ -686,6 +701,34 @@ private fun VodDetailRoute(
             )
         },
         onOpenSourceManager = onOpenSourceManager,
+        onToggleFavorite = {
+            // 详情还没回来时用首页快照兜底：收藏只需要标题/海报/类型，
+            // 这些在快照里都有，不该因为回源失败就收藏不了
+            val summary = state.detail?.summary ?: state.summary
+            if (summary != null) {
+                val next = !state.favorited
+                state = state.copy(favorited = next)
+                container.applicationScope.launch {
+                    if (next) {
+                        container.vodFavoriteRepository.add(
+                            VodFavorite(
+                                sourceId = summary.sourceId,
+                                sourceKey = summary.sourceKey,
+                                title = summary.name,
+                                poster = summary.pic,
+                                type = summary.type,
+                                year = summary.year,
+                                area = summary.area,
+                                remarks = summary.remarks,
+                                addedAt = System.currentTimeMillis(),
+                            ),
+                        )
+                    } else {
+                        container.vodFavoriteRepository.remove(summary.sourceId, summary.sourceKey)
+                    }
+                }
+            }
+        },
     )
 }
 
@@ -745,6 +788,15 @@ private fun VodPlayRoute(
     var finished by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
 
+    /** 收藏态（VOD-07）：播放页里也能收，不必退回详情页 */
+    var favorited by remember { mutableStateOf(false) }
+
+    LaunchedEffect(sourceId, sourceKey) {
+        favorited =
+            runCatching { container.vodFavoriteRepository.isFavorite(sourceId, sourceKey) }
+                .getOrDefault(false)
+    }
+
     /**
      * 上次落库时的位置，用来算「离上次写够不够 10 秒」。
      *
@@ -763,9 +815,10 @@ private fun VodPlayRoute(
      * 参数可以显式传：换集时要写的是「上一集的位置」，而那一刻
      * `episodeIndex` 已经被改成新集了。
      *
-     * 这里**不删**任何东西。删除（看完 / 从头看）由 [forgetProgress] 单独负责 ——
-     * 让「写」和「删」共用一个入口，就会出现「自动连播写下了下一集，几毫秒后
-     * 一个迟到的『已看完』把它删掉」这种时序事故。少一个分支，少一种竞态。
+     * 这里**不删**任何东西，也不写「看完了」。收尾（看完 / 从头看）由 [markFinished]
+     * 单独负责 —— 让「写」和「收尾」共用一个入口，就会出现「自动连播写下了下一集，
+     * 几毫秒后一个迟到的『已看完』把它盖成 finished」这种时序事故。
+     * 少一个分支，少一种竞态。
      */
     fun persistProgress(
         line: Int = lineIndex,
@@ -793,10 +846,64 @@ private fun VodPlayRoute(
         }
     }
 
-    /** 忘掉这部片的进度：全剧看完、或看到 95% 以上退出来时用 */
-    fun forgetProgress() {
+    /**
+     * 标记「这部片看完了」（VOD-07）。
+     *
+     * 不走 [persistProgress]：那边的 `shouldKeep` 会把「看到 95% 以上」判成不该记，
+     * 而这里要写的恰恰就是那种记录 —— 只是它的目的是「看过的」，不是「继续观看」。
+     *
+     * 也不删行：删掉之后用户再也找不到自己看过什么。`vod_progress` 一张表两个用途，
+     * 靠 `finished` 分流（见 `VodProgressDao` 的注释）。
+     */
+    fun markFinished() {
+        val current = detail
         container.applicationScope.launch {
-            container.vodProgressRepository.delete(sourceId, sourceKey)
+            if (current == null) {
+                // 连详情都没拉到就退出了：这时候没有可写的标题快照，留给「继续观看」反而是条废记录
+                container.vodProgressRepository.delete(sourceId, sourceKey)
+                return@launch
+            }
+            container.vodProgressRepository.save(
+                VodProgress(
+                    sourceId = sourceId,
+                    sourceKey = sourceKey,
+                    lineIndex = lineIndex,
+                    episodeIndex = episodeIndex,
+                    // 位置写满：历史卡上不画进度条，但「看到片尾」这件事要如实留下
+                    positionMs = maxOf(positionMs, durationMs),
+                    durationMs = durationMs,
+                    updatedAt = System.currentTimeMillis(),
+                    finished = true,
+                ),
+                title = current.summary.name,
+                poster = current.summary.pic,
+            )
+        }
+    }
+
+    /** 收藏 / 取消收藏（VOD-07）：先改界面再落库，遥控器上不能等一次写盘 */
+    fun toggleFavorite() {
+        val current = detail ?: return
+        val next = !favorited
+        favorited = next
+        container.applicationScope.launch {
+            if (next) {
+                container.vodFavoriteRepository.add(
+                    VodFavorite(
+                        sourceId = sourceId,
+                        sourceKey = sourceKey,
+                        title = current.summary.name,
+                        poster = current.summary.pic,
+                        type = current.summary.type,
+                        year = current.summary.year,
+                        area = current.summary.area,
+                        remarks = current.summary.remarks,
+                        addedAt = System.currentTimeMillis(),
+                    ),
+                )
+            } else {
+                container.vodFavoriteRepository.remove(sourceId, sourceKey)
+            }
         }
     }
 
@@ -920,11 +1027,11 @@ private fun VodPlayRoute(
 
     // 离开页面补记一次。放在 onDispose 是因为返回键、导航被替换都会走到它 ——
     // 只挂在返回键上的话，另一条路就会丢进度。
-    // 看到片尾再退出不必记：删掉更干净（否则「继续观看」里会挂着只剩字幕的片子）
+    // 看到片尾再退出标成「看完了」，而不是删掉：它还要当「看过的」历史用（VOD-07）
     DisposableEffect(sourceId, sourceKey) {
         onDispose {
             if (VodProgressRules.isFinished(positionMs, durationMs)) {
-                forgetProgress()
+                markFinished()
             } else {
                 persistProgress()
             }
@@ -940,8 +1047,8 @@ private fun VodPlayRoute(
         val next = current.nextEpisode(lineIndex, episodeIndex)
         if (next == null) {
             finished = true
-            // 全剧看完：继续观看里不该再留着它
-            container.vodProgressRepository.delete(sourceId, sourceKey)
+            // 全剧看完（VOD-07）：置标记而不是删行 —— 它会变成「看过的」里的一条
+            markFinished()
         } else {
             // recordPrevious = false：上一集是**播完**的，写它没有意义，
             // 还会和紧接着的 markEpisodeStarted 抢同一个主键（谁后到谁赢）
@@ -989,6 +1096,7 @@ private fun VodPlayRoute(
                 finished = finished,
                 preparing = preparing,
                 note = note,
+                favorited = favorited,
             ),
         actions =
             VodPlayerActions(
@@ -1012,6 +1120,7 @@ private fun VodPlayRoute(
                 },
                 onSelectEpisode = { index -> playEpisodeAt(lineIndex, index) },
                 onSelectLine = { target -> switchLine(target) },
+                onToggleFavorite = { toggleFavorite() },
                 onRetry = { playEpisodeAt(lineIndex, episodeIndex) },
                 onBack = {
                     // 离开就停：影视是长视频，挂在后台继续拉流既费流量又会让回直播时打架
@@ -1054,6 +1163,9 @@ private suspend fun loadVodHomeState(
         recent = media.recent(),
         // 继续观看跨类型，不受当前选中的类型 / 筛选影响（VOD-06）
         continueWatching = container.vodProgressRepository.recent(CONTINUE_LIMIT),
+        // 看过的与继续观看同源互补（VOD-07）：一部片只会出现在其中一个列表里
+        history = container.vodProgressRepository.history(CONTINUE_LIMIT),
+        favorites = container.vodFavoriteRepository.list(FAVORITE_LIMIT),
         sourceRows = rows,
         hasSource = vodSources.isNotEmpty(),
     )
@@ -1113,6 +1225,9 @@ private const val PROGRESS_SAVE_INTERVAL_MS = 10_000L
 
 /** 首页「继续观看」取多少条：一行放得下 5～6 张，多取一倍够往回翻 */
 private const val CONTINUE_LIMIT = 12
+
+/** 首页「我的收藏」取多少条：收藏页是这几行里最可能往后翻的，多给一些 */
+private const val FAVORITE_LIMIT = 24
 
 private val playerArguments =
     listOf(

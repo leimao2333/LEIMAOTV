@@ -115,6 +115,8 @@ data class VodHomeActions(
     val onSelectArea: (String?) -> Unit,
     val onSelectMedia: (VodSummary) -> Unit,
     val onResume: (VodContinueItem) -> Unit,
+    /** 点「看过的」里的一张（VOD-07）：进详情页，而不是从上次的位置接着播 */
+    val onOpenHistory: (VodContinueItem) -> Unit,
 )
 
 /**
@@ -309,6 +311,7 @@ private fun ContentArea(
                 onSelectArea = vodActions.onSelectArea,
                 onSelectMedia = vodActions.onSelectMedia,
                 onResume = vodActions.onResume,
+                onOpenHistory = vodActions.onOpenHistory,
                 onOpenSourceManager = onOpenSourceManager,
                 autoFocus = false,
             )

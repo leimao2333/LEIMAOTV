@@ -27,12 +27,29 @@ interface VodProgressDao {
         """
         SELECT p.* FROM vod_progress p
         INNER JOIN source s ON s.id = p.sourceId
-        WHERE s.enabled = 1
+        WHERE s.enabled = 1 AND p.finished = 0
         ORDER BY p.updatedAt DESC
         LIMIT :limit
         """,
     )
     suspend fun recent(limit: Int): List<VodProgressEntity>
+
+    /**
+     * 看过的（VOD-07）：与「继续观看」正好互补，同一个 `updatedAt` 排序。
+     *
+     * 两边的筛选条件必须**加起来是全集**，否则一部片会在两个列表里同时出现，
+     * 或者两边都不出现（看完后从首页凭空消失）。
+     */
+    @Query(
+        """
+        SELECT p.* FROM vod_progress p
+        INNER JOIN source s ON s.id = p.sourceId
+        WHERE s.enabled = 1 AND p.finished = 1
+        ORDER BY p.updatedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun history(limit: Int): List<VodProgressEntity>
 
     @Query("DELETE FROM vod_progress WHERE sourceId = :sourceId AND sourceKey = :sourceKey")
     suspend fun delete(

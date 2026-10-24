@@ -23,11 +23,12 @@ interface MediaRepository {
     /** 全库最近更新 */
     suspend fun recent(limit: Int = DEFAULT_LIMIT): List<VodSummary>
 
-    /** 按类型查，年份 / 地区为 null 表示不限 */
+    /** 按类型查，年份 / 地区 / 标签为 null 表示不限 */
     suspend fun byType(
         type: ContentType,
         year: Int? = null,
         area: String? = null,
+        tag: String? = null,
         limit: Int = DEFAULT_LIMIT,
     ): List<VodSummary>
 
@@ -41,6 +42,15 @@ interface MediaRepository {
     suspend fun yearsOf(type: ContentType): List<Int>
 
     suspend fun areasOf(type: ContentType): List<String>
+
+    /**
+     * 该类型下出现过的标签（VOD-08），按「出现次数多 → 少」排。
+     *
+     * 排序用频次而不是字母序：用户要的是「这个栏目里大家常说的那几种」，
+     * 而频次天然把「动作」「喜剧」这种真题材排到前面，把「HD」「国语」
+     * 这类偶尔被写进 `vod_class` 的属性挤到后面（[MAX_TAGS] 之外就看不到）。
+     */
+    suspend fun tagsOf(type: ContentType): List<String>
 
     /** 上次入库时间，用于「缓存多久没刷了」的判断 */
     suspend fun lastFetchedAt(): Long?
@@ -58,6 +68,14 @@ interface MediaRepository {
     companion object {
         /** 每行给多少张卡。1080p 一行放 5～6 张，30 条够往下翻好几屏，也不至于一屏拉太多图 */
         const val DEFAULT_LIMIT = 30
+
+        /**
+         * 标签行最多给几个。
+         *
+         * 15 + 「不限」正好是两行 × 8 个，一屏内能看全。再多就得做成独立页面，
+         * 而「翻到第三屏才找到想要的标签」还不如直接在下面那排海报里翻。
+         */
+        const val MAX_TAGS = 15
     }
 }
 
@@ -83,8 +101,9 @@ class RoomMediaRepository(
         type: ContentType,
         year: Int?,
         area: String?,
+        tag: String?,
         limit: Int,
-    ): List<VodSummary> = dao.filtered(type.name, year, area, limit).toSummaries()
+    ): List<VodSummary> = dao.filtered(type.name, year, area, tag, limit).toSummaries()
 
     override suspend fun bySource(
         sourceId: Long,
@@ -94,6 +113,21 @@ class RoomMediaRepository(
     override suspend fun yearsOf(type: ContentType): List<Int> = dao.yearsOf(type.name)
 
     override suspend fun areasOf(type: ContentType): List<String> = dao.areasOf(type.name)
+
+    override suspend fun tagsOf(type: ContentType): List<String> =
+        dao.tagColumnOf(type.name)
+            .asSequence()
+            .flatMap { it.split(',').asSequence() }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            // 次数相同时按名字排：否则同一个库两次查询可能给出不同顺序，焦点会乱跳
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(MediaRepository.MAX_TAGS)
+            .map { it.key }
+            .toList()
 
     override suspend fun lastFetchedAt(): Long? = dao.lastFetchedAt()
 
@@ -128,6 +162,9 @@ private fun VodSummary.toEntity(
         remarks = remarks,
         updatedAt = updatedAt ?: now,
         fetchedAt = now,
+        // 标签落库前先归一并钉死分隔符：库里只认半角逗号，
+        // 查询那边的 LIKE 才能直接按 ',tag,' 匹配（见 MediaDao.filtered）
+        tags = tags.takeIf { it.isNotEmpty() }?.joinToString(","),
     )
 
 private fun List<MediaEntity>.toSummaries(): List<VodSummary> = mapNotNull { it.toSummary() }
@@ -145,5 +182,6 @@ private fun MediaEntity.toSummary(): VodSummary? {
         year = year,
         area = area,
         updatedAt = updatedAt,
+        tags = tags?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty(),
     )
 }

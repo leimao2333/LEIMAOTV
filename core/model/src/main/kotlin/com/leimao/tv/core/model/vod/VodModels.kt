@@ -32,6 +32,14 @@ data class VodSummary(
     val year: Int? = null,
     val area: String? = null,
     /**
+     * 题材 / 属性标签（VOD-08），来自 `vod_class`（如「动作,科幻,冒险」）。
+     *
+     * 与 [type] 是两层：`type` 是九类里的一类（决定分栏），标签是这一类里更细的口味。
+     * 源给的标签质量参差（有「HD」「国语」这类其实是属性、也有整段是分类名的），
+     * 所以只当**筛选项**用，不做内容分类的依据。
+     */
+    val tags: List<String> = emptyList(),
+    /**
      * 源侧更新时间（毫秒），来自 `vod_time`。
      *
      * 首页「最近更新」按它排序；源没给或格式认不出时为 null，

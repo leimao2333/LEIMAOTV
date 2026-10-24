@@ -85,6 +85,7 @@ internal class FakeMediaRepository : MediaRepository {
         type: ContentType,
         year: Int?,
         area: String?,
+        tag: String?,
         limit: Int,
     ): List<VodSummary> = emptyList()
 
@@ -96,6 +97,8 @@ internal class FakeMediaRepository : MediaRepository {
     override suspend fun yearsOf(type: ContentType): List<Int> = emptyList()
 
     override suspend fun areasOf(type: ContentType): List<String> = emptyList()
+
+    override suspend fun tagsOf(type: ContentType): List<String> = emptyList()
 
     override suspend fun lastFetchedAt(): Long? = null
 

@@ -51,6 +51,7 @@ interface MediaDao {
         WHERE type = :type
           AND (:year IS NULL OR year = :year)
           AND (:area IS NULL OR area = :area)
+          AND (:tag IS NULL OR (',' || IFNULL(tags, '') || ',') LIKE '%,' || :tag || ',%')
         ORDER BY updatedAt DESC
         LIMIT :limit
         """,
@@ -59,8 +60,19 @@ interface MediaDao {
         type: String,
         year: Int?,
         area: String?,
+        tag: String?,
         limit: Int,
     ): List<MediaEntity>
+
+    /**
+     * 某类型下所有条目的标签列（VOD-08）。
+     *
+     * 返回的是**原始拼接串**，聚合（拆开、计数、排序）在仓库层用 Kotlin 做：
+     * SQLite 没有 `split`，硬用递归 CTE 拆串既难读也难测，而几千行短字符串的
+     * 一次聚合远不到一毫秒。
+     */
+    @Query("SELECT tags FROM media WHERE type = :type AND tags IS NOT NULL AND tags != ''")
+    suspend fun tagColumnOf(type: String): List<String>
 
     /** 「每源一行」 */
     @Query("SELECT * FROM media WHERE sourceId = :sourceId ORDER BY updatedAt DESC LIMIT :limit")

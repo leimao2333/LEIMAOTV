@@ -300,6 +300,7 @@ private fun HomeRoute(
     var vodTypeName by rememberSaveable { mutableStateOf(ContentType.MOVIE.name) }
     var vodYear by rememberSaveable { mutableStateOf<Int?>(null) }
     var vodArea by rememberSaveable { mutableStateOf<String?>(null) }
+    var vodTag by rememberSaveable { mutableStateOf<String?>(null) }
     // 后台刷新完成一次就 +1，用来驱动下面的重新读库
     var vodRevision by remember { mutableStateOf(0) }
     val vodType = ContentType.entries.firstOrNull { it.name == vodTypeName } ?: ContentType.MOVIE
@@ -311,6 +312,7 @@ private fun HomeRoute(
             vodTypeName = mapped.name
             vodYear = null
             vodArea = null
+            vodTag = null
         }
     }
 
@@ -327,9 +329,9 @@ private fun HomeRoute(
     }
 
     // 读库组装：类型 / 筛选 / 刷新完成，任一变化都重算。首页只读本地快照，不等网络
-    LaunchedEffect(mode, vodTypeName, vodYear, vodArea, vodRevision) {
+    LaunchedEffect(mode, vodTypeName, vodYear, vodArea, vodTag, vodRevision) {
         if (mode != AppMode.VOD) return@LaunchedEffect
-        vodState = loadVodHomeState(container, vodType, vodYear, vodArea)
+        vodState = loadVodHomeState(container, vodType, vodYear, vodArea, vodTag)
     }
 
     // ---- 首页 Hero 区（HOME-04）----
@@ -400,6 +402,9 @@ private fun HomeRoute(
                     vodTypeName = type.name
                     vodYear = null
                     vodArea = null
+                    // 标签是按类型统计的：换类型后旧标签可能根本不存在于新类型里，
+                    // 留着它会让「这个栏目暂时没有内容」凭空出现
+                    vodTag = null
                     // 有导航项的类型顺带同步导航高亮；短剧 / 纪录片没有导航项，保持当前项不动
                     type.toHomeSection()?.let { mapped ->
                         pickedSectionName = mapped.name
@@ -408,6 +413,7 @@ private fun HomeRoute(
                 },
                 onSelectYear = { vodYear = it },
                 onSelectArea = { vodArea = it },
+                onSelectTag = { vodTag = it },
                 onSelectMedia = openVod,
                 // 直接进播放页而不是先回详情页：用户点的就是「接着看」，
                 // 中间插一页详情等于让他再确认一次自己刚做过的决定
@@ -1155,6 +1161,7 @@ private suspend fun loadVodHomeState(
     type: ContentType,
     year: Int?,
     area: String?,
+    tag: String?,
 ): VodHomeState {
     val media = container.mediaRepository
     val vodSources = container.sourceRepository.list().filter { it.type == SourceType.VOD && it.enabled }
@@ -1170,7 +1177,11 @@ private suspend fun loadVodHomeState(
         areas = media.areasOf(type),
         selectedYear = year,
         selectedArea = area,
-        items = media.byType(type, year, area),
+        // 标签池只跟类型走，不随年份/地区缩小：切年份之后标签行不该突然少一半，
+        // 那会让人以为「2024 年没有科幻片」
+        tags = media.tagsOf(type),
+        selectedTag = tag,
+        items = media.byType(type, year, area, tag),
         recent = media.recent(),
         // 继续观看跨类型，不受当前选中的类型 / 筛选影响（VOD-06）
         continueWatching = container.vodProgressRepository.recent(CONTINUE_LIMIT),

@@ -53,7 +53,7 @@ import com.leimao.tv.core.database.entity.VodProgressEntity
         VodProgressEntity::class,
         VodFavoriteEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -338,6 +338,20 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 8 → 9：`media` 加标签列（VOD-08）。
+         *
+         * 纯加法。老行 `tags = NULL`，界面上的标签行自动为空 —— 等下一轮刷新把
+         * `vod_class` 抓回来就填上了，不需要在迁移里做回填（回填也无从谈起：
+         * 标签来自网络，库里原本没有这份数据）。
+         */
+        val MIGRATION_8_9: Migration =
+            object : Migration(8, 9) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE `media` ADD COLUMN `tags` TEXT")
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
                 .addMigrations(
@@ -348,6 +362,7 @@ abstract class LeimaoDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
                 )
                 .build()
     }

@@ -42,6 +42,9 @@ data class VodHomeState(
     val areas: List<String> = emptyList(),
     val selectedYear: Int? = null,
     val selectedArea: String? = null,
+    /** 当前类型下出现过的题材标签（VOD-08），按出现频次排 */
+    val tags: List<String> = emptyList(),
+    val selectedTag: String? = null,
     /** 当前类型 + 当前筛选的结果 */
     val items: List<VodSummary> = emptyList(),
     /** 全库最近更新 */
@@ -71,7 +74,8 @@ data class VodHomeState(
     /** 需要直接告诉用户的一句话（抓取失败的原因等） */
     val note: String? = null,
 ) {
-    val filtering: Boolean get() = selectedYear != null || selectedArea != null
+    val filtering: Boolean
+        get() = selectedYear != null || selectedArea != null || selectedTag != null
 
     /** 所有内容块都空 —— 此时渲染空态，而不是一堆空行 */
     val blank: Boolean

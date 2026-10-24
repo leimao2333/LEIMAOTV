@@ -65,6 +65,7 @@ fun VodHomeScreen(
     onSelectType: (ContentType) -> Unit,
     onSelectYear: (Int?) -> Unit,
     onSelectArea: (String?) -> Unit,
+    onSelectTag: (String?) -> Unit,
     onSelectMedia: (VodSummary) -> Unit,
     onResume: (VodContinueItem) -> Unit,
     onOpenHistory: (VodContinueItem) -> Unit,
@@ -127,6 +128,18 @@ fun VodHomeScreen(
                     onSelect = onSelectArea,
                 )
             }
+        }
+
+        // 标签（VOD-08）：源里 `vod_class` 的词库，按出现频次排。两行 chip 就是
+        // 电视端的「宫格」—— 一块能一眼扫完的区域，而不是要滚动的长列表；
+        // 首项「不限」与年份/地区两行保持同一套语义
+        if (state.tags.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            TagBlock(
+                tags = state.tags,
+                selected = state.selectedTag,
+                onSelect = onSelectTag,
+            )
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -251,6 +264,47 @@ private fun SelectableChip(
                         .height(2.dp)
                         .background(if (selected) accent else Color.Transparent),
             )
+        }
+    }
+}
+
+/**
+ * 标签区（VOD-08）：两行 chip，每行最多 [TAG_COLUMNS] 个。
+ *
+ * 为什么不做成一行横向滚动的 `LazyRow`：年份 / 地区那两行是「顺序可能有意义」的维度
+ * （2024 比 2023 新），而标签之间没有顺序，用户是**扫一眼挑一个**。摊成两行能在
+ * 不滚动的情况下看全，这比「能放下更多」重要得多。
+ *
+ * 标签池本身就在仓库层截到「两行放得下」的数量（`MediaRepository.MAX_TAGS`），
+ * 这里不再截断：界面按 8 个一行分块，多出来的自然会排到第三行，而那说明上限被改过。
+ */
+@Composable
+private fun TagBlock(
+    tags: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val rows = (listOf<String?>(null) + tags).chunked(TAG_COLUMNS)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        rows.forEachIndexed { index, row ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    // 标签名只在第一行写：两行都写「标签」会让第二行看起来是另一个维度
+                    text = if (index == 0) "标签" else "",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(44.dp),
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(row, key = { "tag-${it ?: "all"}" }) { tag ->
+                        SelectableChip(
+                            text = tag ?: "不限",
+                            selected = if (tag == null) selected == null else selected == tag,
+                            onClick = { onSelect(tag) },
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -563,6 +617,9 @@ private fun HintBlock(
         }
     }
 }
+
+/** 标签每行放几个：1080p 下每个 chip 约 100dp，8 个正好铺满安全区 */
+private const val TAG_COLUMNS = 8
 
 private val POSTER_WIDTH = 168.dp
 

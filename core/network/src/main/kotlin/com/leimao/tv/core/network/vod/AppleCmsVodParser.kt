@@ -31,6 +31,12 @@ object AppleCmsVodParser {
     private const val EPISODE_SEPARATOR = "#"
     private const val EPISODE_NAME_URL = '$'
 
+    /** 一条标签最多多少字：超过这个长度多半是整句简介被错当成标签 */
+    private const val MAX_TAG_LENGTH = 12
+
+    /** 每部片最多收几条标签：首页标签行只用来筛，不需要把源的整个词库搬进来 */
+    private const val MAX_TAGS = 8
+
     /** 有些源的简介里有大量 <br/>，压成一格的规则见 [cleanHtml] */
     private val HTML_TAG = Regex("<[^>]*>")
     private val WHITESPACE_RUN = Regex("\\s+")
@@ -201,7 +207,26 @@ object AppleCmsVodParser {
             // 源侧更新时间：「最近更新」的排序依据。解析不出就留着 null，
             // 由落库方回落到入库时间（VOD-03）
             updatedAt = VodTime.parse(obj.text("vod_time")),
+            tags = parseTags(obj.text("vod_class")),
         )
+    }
+
+    /**
+     * 题材标签（VOD-08）：`vod_class` 是逗号分隔的一串，但分隔符五花八门 ——
+     * 半角逗号、全角逗号、顿号、斜杠、竖线都见过。
+     *
+     * 做四件事：按这些分隔符拆开、去空白、去重、丢掉过长或过短的。
+     * 去重是必须的：不少源写「动作,动作片,动作」，三份重复会让标签行看起来像坏了。
+     * 长度上限 12 是因为源里混过整句简介当标签的情况，那种东西进「标签行」会把一行撑爆。
+     */
+    internal fun parseTags(raw: String?): List<String> {
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return emptyList()
+        return text.split(',', '，', '、', '/', '|', ';', '；')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it.length <= MAX_TAG_LENGTH }
+            .distinct()
+            .take(MAX_TAGS)
     }
 
     /** 年份：源里可能给 `2023`、`2023-01-01`、`2023年`；只接受 1900~2100 之间的四位数 */

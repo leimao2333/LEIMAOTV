@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.0"
+    const val CURRENT_VERSION: String = "0.2.9.1"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.1",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "影视首页多了「标签」：动作、科幻、悬疑这些题材一键筛，和年份地区一起用",
+                        "标签按片库里出现得最多的排，常看的题材排在最前面",
+                        "标签只在当前栏目里生效；换栏目自动回到「不限」",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.0",
                 date = "2026-10-24",

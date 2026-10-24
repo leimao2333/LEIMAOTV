@@ -204,6 +204,38 @@ class AppleCmsVodParserTest {
         assertEquals("张三 / 李四", AppleCmsVodParser.cleanPeople("张三 / 李四"))
     }
 
+    @Test
+    fun `标签解析 各种分隔符都认`() {
+        // vod_class 的分隔符在真实源里五花八门，全角逗号与顿号最常见
+        assertEquals(listOf("动作", "科幻"), AppleCmsVodParser.parseTags("动作,科幻"))
+        assertEquals(listOf("动作", "科幻"), AppleCmsVodParser.parseTags("动作，科幻"))
+        assertEquals(listOf("动作", "科幻"), AppleCmsVodParser.parseTags("动作、科幻"))
+        assertEquals(listOf("动作", "科幻"), AppleCmsVodParser.parseTags(" 动作 | 科幻 "))
+    }
+
+    @Test
+    fun `标签解析 去重且保序`() {
+        // 不少源写「动作,动作片,动作」：重复会让人以为标签行坏了
+        assertEquals(
+            listOf("动作", "动作片"),
+            AppleCmsVodParser.parseTags("动作,动作片,动作"),
+        )
+    }
+
+    @Test
+    fun `标签解析 丢掉空串与过长项`() {
+        assertTrue(AppleCmsVodParser.parseTags(" , ，、 ").isEmpty())
+        assertTrue(AppleCmsVodParser.parseTags(null).isEmpty())
+        // 源里混过整句简介当标签的情况，进标签行会把一行撑爆
+        assertTrue(AppleCmsVodParser.parseTags("这是一段被错当成标签的完整剧情简介文字").isEmpty())
+    }
+
+    @Test
+    fun `标签解析 有条数上限`() {
+        val many = (1..20).joinToString(",") { "标签$it" }
+        assertEquals(8, AppleCmsVodParser.parseTags(many).size)
+    }
+
     private fun errorMessage(block: () -> Unit): String =
         try {
             block()

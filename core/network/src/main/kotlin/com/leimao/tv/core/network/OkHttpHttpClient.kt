@@ -71,10 +71,14 @@ class OkHttpHttpClient(
 }
 
 /**
- * 全应用共用的 OkHttp 实例。
+ * 全应用共用的 OkHttp **基线**实例。
  *
- * 抓取播放列表与播放视频流走同一个连接池：很多源对同一域名的连接数有限制，
+ * 抓取播放列表与播放视频流走同一个连接池：很多源对同一域名连接数有限制，
  * 两套连接池等于自己跟自己抢配额。放在这里而不是各模块 new，也是为了只有一个地方能调参。
+ *
+ * SET-04 起它只是「基线」：真正交给各处的 client 由 `buildNetworkClient()` 从它派生，
+ * 好让用户配的超时与代理生效。派生会共用这里的连接池与 Dispatcher，
+ * 所以「一个实例」的前提没变。
  */
 object AppHttp {
     val client: OkHttpClient by lazy { OkHttpHttpClient.defaultClient() }

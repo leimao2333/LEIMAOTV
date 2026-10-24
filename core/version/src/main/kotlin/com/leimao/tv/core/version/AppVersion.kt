@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.5"
+    const val CURRENT_VERSION: String = "0.2.9.6"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.2.9.6",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "设置里多了「网络」：超时、并发、代理都能调了",
+                        "超时和并发给的是档位，不用自己算秒数：老是超时就往宽松调",
+                        "能给源配 HTTP 代理了（留空就是直连），对境外源有用",
+                        "这三项改完要重启 App 才生效，页面上写着",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.5",
                 date = "2026-10-24",

@@ -12,6 +12,11 @@ import com.leimao.tv.core.data.RefreshInterval
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.appearance.FontScale
 import com.leimao.tv.core.model.appearance.ThemeMode
+import com.leimao.tv.core.model.network.ConcurrencyProfile
+import com.leimao.tv.core.model.network.NetworkSettings
+import com.leimao.tv.core.model.network.ProxyConfig
+import com.leimao.tv.core.model.network.TimeoutProfile
+import com.leimao.tv.core.model.network.proxyFromStorage
 import com.leimao.tv.core.model.search.decodeSearchHistory
 import com.leimao.tv.core.model.search.encodeSearchHistory
 import com.leimao.tv.core.model.search.pushSearchHistory
@@ -52,6 +57,9 @@ interface SettingsStore {
     /** 全局字号缩放（SET-02）。四档，只影响排版不影响布局 */
     val fontScale: Flow<FontScale>
 
+    /** 网络设置（SET-04）。整包读写；改动**下次启动生效**，见 [NetworkSettings] 的说明 */
+    val networkSettings: Flow<NetworkSettings>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
@@ -71,6 +79,13 @@ interface SettingsStore {
     suspend fun setThemeMode(mode: ThemeMode)
 
     suspend fun setFontScale(scale: FontScale)
+
+    suspend fun setTimeoutProfile(profile: TimeoutProfile)
+
+    suspend fun setConcurrencyProfile(profile: ConcurrencyProfile)
+
+    /** `null` = 直连。地址的合法性由调用方先用 `parseProxyAddress` 校过 */
+    suspend fun setProxy(proxy: ProxyConfig?)
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -109,6 +124,15 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
 
     override val fontScale: Flow<FontScale> =
         context.tvSettings.data.map { FontScale.fromStorage(it[KEY_FONT_SCALE]) }
+
+    override val networkSettings: Flow<NetworkSettings> =
+        context.tvSettings.data.map { prefs ->
+            NetworkSettings(
+                timeout = TimeoutProfile.fromStorage(prefs[KEY_TIMEOUT_PROFILE]),
+                concurrency = ConcurrencyProfile.fromStorage(prefs[KEY_CONCURRENCY_PROFILE]),
+                proxy = proxyFromStorage(prefs[KEY_PROXY]),
+            )
+        }
 
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
@@ -162,6 +186,21 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         context.tvSettings.edit { it[KEY_FONT_SCALE] = scale.name }
     }
 
+    override suspend fun setTimeoutProfile(profile: TimeoutProfile) {
+        context.tvSettings.edit { it[KEY_TIMEOUT_PROFILE] = profile.name }
+    }
+
+    override suspend fun setConcurrencyProfile(profile: ConcurrencyProfile) {
+        context.tvSettings.edit { it[KEY_CONCURRENCY_PROFILE] = profile.name }
+    }
+
+    override suspend fun setProxy(proxy: ProxyConfig?) {
+        // 直连就把键删掉：留一个空串在存档里，「没设过」和「设成空了」就分不清了
+        context.tvSettings.edit { prefs ->
+            if (proxy == null) prefs.remove(KEY_PROXY) else prefs[KEY_PROXY] = proxy.address
+        }
+    }
+
     private companion object {
         val KEY_COMPLIANCE_AGREED = booleanPreferencesKey("compliance_agreed")
         val KEY_MODE = stringPreferencesKey("app_mode")
@@ -172,5 +211,8 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+        val KEY_TIMEOUT_PROFILE = stringPreferencesKey("timeout_profile")
+        val KEY_CONCURRENCY_PROFILE = stringPreferencesKey("concurrency_profile")
+        val KEY_PROXY = stringPreferencesKey("proxy")
     }
 }

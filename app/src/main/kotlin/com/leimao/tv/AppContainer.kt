@@ -26,10 +26,12 @@ import com.leimao.tv.core.database.repository.VodFavoriteRepository
 import com.leimao.tv.core.database.repository.VodProgressRepository
 import com.leimao.tv.core.database.startup.RoomStartupFactsReader
 import com.leimao.tv.core.database.startup.StartupFactsReader
+import com.leimao.tv.core.model.network.NetworkSettings
 import com.leimao.tv.core.model.playlist.MergedChannel
 import com.leimao.tv.core.network.AppHttp
 import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
+import com.leimao.tv.core.network.buildNetworkClient
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
@@ -42,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
 
 /**
  * 手写依赖容器。
@@ -65,10 +68,24 @@ class AppContainer(context: Context) {
     val cacheManager: CacheManager = CacheManager.create(appContext)
 
     /**
-     * 全应用共用一个 OkHttp 实例：连接池复用是它性能的大头，
-     * 播放内核（Media3 的 data source）以后也拿同一个实例。
+     * 网络设置（SET-04）：超时、并发、代理。
+     *
+     * 在容器构造时读一次，之后**不再跟随设置变化** —— 三项都是 OkHttpClient 的构造参数，
+     * 而那个实例被播放内核与各仓储在构造期就抓走了，中途换要重建整条链并打断正在播的画面。
+     * 故与缓冲档位同口径：改了下次启动生效，设置页会明说。
      */
-    val httpClient: HttpClient = OkHttpHttpClient(AppHttp.client)
+    private val networkSettings: NetworkSettings = currentNetworkSettings(settings)
+
+    /**
+     * 全应用共用一个 OkHttp 实例：连接池复用是它性能的大头，
+     * 播放内核（Media3 的 data source）也拿同一个实例。
+     *
+     * 从 [AppHttp] 的基线 client 派生出带用户超时/代理的那份：`newBuilder()` 共用连接池与
+     * Dispatcher，不会因为「多一层配置」就丢掉连接复用。
+     */
+    private val okHttpClient: OkHttpClient = buildNetworkClient(AppHttp.client, networkSettings)
+
+    val httpClient: HttpClient = OkHttpHttpClient(okHttpClient)
 
     val sourceRepository: SourceRepository = RoomSourceRepository(database)
 
@@ -97,6 +114,7 @@ class AppContainer(context: Context) {
             sources = sourceRepository,
             media = mediaRepository,
             http = httpClient,
+            maxConcurrency = networkSettings.concurrency.refreshPermits,
         )
 
     /** 单片详情（VOD-04）：`(sourceId, sourceKey)` → 源 → 适配器 → 详情。不落库 */
@@ -118,6 +136,8 @@ class AppContainer(context: Context) {
             media = mediaRepository,
             sources = sourceRepository,
             http = httpClient,
+            perSourceTimeoutMs = networkSettings.timeout.searchTimeoutMs,
+            maxConcurrency = networkSettings.concurrency.permits,
         )
 
     /** 看片进度（VOD-06）：播放页写、首页与详情页读 */
@@ -160,10 +180,13 @@ class AppContainer(context: Context) {
     val player: PlayerController =
         Media3PlayerController(
             context = appContext,
-            okHttpClient = AppHttp.client,
+            okHttpClient = okHttpClient,
             bufferProfile = currentBufferProfile(settings),
         )
 
     private fun currentBufferProfile(settings: SettingsStore): BufferProfile =
         runBlocking { settings.playbackSettings.first().bufferProfile }
+
+    private fun currentNetworkSettings(settings: SettingsStore): NetworkSettings =
+        runBlocking { settings.networkSettings.first() }
 }

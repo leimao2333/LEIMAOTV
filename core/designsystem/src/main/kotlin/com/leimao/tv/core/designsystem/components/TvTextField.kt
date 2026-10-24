@@ -38,6 +38,7 @@ fun TvTextField(
     onValueChange: (String) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    placeholder: String = "点此输入",
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
@@ -76,7 +77,7 @@ fun TvTextField(
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
                         Text(
-                            text = "点此输入",
+                            text = placeholder,
                             style = TvText.current.body,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

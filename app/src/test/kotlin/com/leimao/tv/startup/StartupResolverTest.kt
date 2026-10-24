@@ -6,6 +6,10 @@ import com.leimao.tv.core.database.startup.StartupFactsReader
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.appearance.FontScale
 import com.leimao.tv.core.model.appearance.ThemeMode
+import com.leimao.tv.core.model.network.ConcurrencyProfile
+import com.leimao.tv.core.model.network.NetworkSettings
+import com.leimao.tv.core.model.network.ProxyConfig
+import com.leimao.tv.core.model.network.TimeoutProfile
 import com.leimao.tv.core.model.search.pushSearchHistory
 import com.leimao.tv.core.model.search.removeSearchHistory
 import com.leimao.tv.core.model.startup.StartDestination
@@ -121,6 +125,7 @@ class StartupResolverTest {
         private val searchHistoryFlow = MutableStateFlow<List<String>>(emptyList())
         private val themeModeFlow = MutableStateFlow(ThemeMode.DEFAULT)
         private val fontScaleFlow = MutableStateFlow(FontScale.DEFAULT)
+        private val networkSettingsFlow = MutableStateFlow(NetworkSettings())
 
         override val complianceAgreed: Flow<Boolean> = agreedFlow
         override val mode: Flow<AppMode> = modeFlow
@@ -130,6 +135,7 @@ class StartupResolverTest {
         override val searchHistory: Flow<List<String>> = searchHistoryFlow
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val fontScale: Flow<FontScale> = fontScaleFlow
+        override val networkSettings: Flow<NetworkSettings> = networkSettingsFlow
 
         override suspend fun setComplianceAgreed(agreed: Boolean) {
             agreedFlow.value = agreed
@@ -169,6 +175,18 @@ class StartupResolverTest {
 
         override suspend fun setFontScale(scale: FontScale) {
             fontScaleFlow.value = scale
+        }
+
+        override suspend fun setTimeoutProfile(profile: TimeoutProfile) {
+            networkSettingsFlow.value = networkSettingsFlow.value.copy(timeout = profile)
+        }
+
+        override suspend fun setConcurrencyProfile(profile: ConcurrencyProfile) {
+            networkSettingsFlow.value = networkSettingsFlow.value.copy(concurrency = profile)
+        }
+
+        override suspend fun setProxy(proxy: ProxyConfig?) {
+            networkSettingsFlow.value = networkSettingsFlow.value.copy(proxy = proxy)
         }
     }
 }

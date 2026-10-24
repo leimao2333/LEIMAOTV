@@ -1,5 +1,7 @@
 package com.leimao.tv.core.network
 
+import com.leimao.tv.core.model.network.TimeoutProfile
+
 /**
  * 每源可配的请求头（LIVE-06）。
  *
@@ -75,11 +77,19 @@ interface HttpClient {
  * 超时与并发一律提成常量并写清依据（RULES §8.4：禁止魔法数）。
  */
 object NetworkTimeouts {
+    /*
+     * 连接与读取的默认值直接取自设置页「标准」档（SET-04）。
+     *
+     * 不在这里再写一遍 10 / 15：同一个数出现在两处，改一处就会静默漂移，
+     * 表现为「设置里选的是标准，实际用的却是别的」这种查半天的问题。
+     * 非 const 是有意的 —— 枚举属性不是编译期常量，而这两个数只在建 client 时读一次。
+     */
+
     /** 连不上就该尽快告诉用户，别让人对着转圈等半分钟 */
-    const val CONNECT_SECONDS = 10L
+    val CONNECT_SECONDS = TimeoutProfile.STANDARD.connectSeconds.toLong()
 
     /** 直播源列表动辄几 MB，读超时要比连接宽松 */
-    const val READ_SECONDS = 15L
+    val READ_SECONDS = TimeoutProfile.STANDARD.readSeconds.toLong()
 
     /** SEARCH-09：单源 8s 超时，慢源不许拖住已经出结果的那部分 */
     const val SEARCH_PER_SOURCE_SECONDS = 8L

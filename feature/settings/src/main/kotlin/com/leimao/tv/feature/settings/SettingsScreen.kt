@@ -36,6 +36,7 @@ import com.leimao.tv.feature.settings.changelog.renderBoldMarkdown
 fun SettingsScreen(
     onOpenPlaybackSettings: () -> Unit,
     onOpenAppearanceSettings: () -> Unit,
+    onOpenNetworkSettings: () -> Unit,
     onOpenRefreshSettings: () -> Unit,
     onOpenChangelog: () -> Unit,
     onOpenSourceManager: () -> Unit,
@@ -87,8 +88,8 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(12.dp))
         SettingRow(
             title = "网络",
-            subtitle = "超时 / 并发 / 代理 —— M4 落地（SET-04）",
-            onClick = { },
+            subtitle = "超时档位 / 并发档位 / 代理（SET-04）",
+            onClick = onOpenNetworkSettings,
         )
         Spacer(modifier = Modifier.height(12.dp))
         SettingRow(

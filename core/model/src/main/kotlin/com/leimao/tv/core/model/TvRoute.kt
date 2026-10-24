@@ -19,6 +19,9 @@ object TvRoute {
 
     /** 界面设置（SET-02）：主题与字号，改了立即生效 */
     const val APPEARANCE_SETTINGS = "appearance_settings"
+
+    /** 网络设置（SET-04）：超时 / 并发 / 代理，改了下次启动生效 */
+    const val NETWORK_SETTINGS = "network_settings"
     const val REFRESH_SETTINGS = "refresh_settings"
 
     /** 存储与缓存（SET-05）：看占了多少、一键清空 */

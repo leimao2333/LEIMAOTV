@@ -36,6 +36,7 @@ import com.leimao.tv.core.model.cache.CacheUsage
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
+import com.leimao.tv.core.model.network.NetworkSettings
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodDetail
@@ -68,6 +69,7 @@ import com.leimao.tv.feature.settings.AppearanceSettingsScreen
 import com.leimao.tv.feature.settings.CacheScreen
 import com.leimao.tv.feature.settings.ChangelogScreen
 import com.leimao.tv.feature.settings.LicenseScreen
+import com.leimao.tv.feature.settings.NetworkSettingsScreen
 import com.leimao.tv.feature.settings.PlaybackSettingsScreen
 import com.leimao.tv.feature.settings.RefreshSettingsScreen
 import com.leimao.tv.feature.settings.SettingsScreen
@@ -189,6 +191,7 @@ fun LeimaoTvApp(
                     onOpenAppearanceSettings = {
                         navController.navigate(TvRoute.APPEARANCE_SETTINGS)
                     },
+                    onOpenNetworkSettings = { navController.navigate(TvRoute.NETWORK_SETTINGS) },
                     onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
                     onOpenChangelog = { navController.navigate(TvRoute.CHANGELOG) },
                     onOpenSourceManager = { navController.navigate(TvRoute.SOURCE_MANAGER) },
@@ -200,6 +203,11 @@ fun LeimaoTvApp(
             composable(TvRoute.APPEARANCE_SETTINGS) {
                 BackHandler { navController.popBackStack() }
                 AppearanceSettingsRoute(container = container)
+            }
+
+            composable(TvRoute.NETWORK_SETTINGS) {
+                BackHandler { navController.popBackStack() }
+                NetworkSettingsRoute(container = container)
             }
 
             composable(TvRoute.SOURCE_MANAGER) {
@@ -325,6 +333,28 @@ private fun AppearanceSettingsRoute(container: AppContainer) {
         fontScale = fontScale,
         onThemeModeChange = { mode -> scope.launch { container.settings.setThemeMode(mode) } },
         onFontScaleChange = { scale -> scope.launch { container.settings.setFontScale(scale) } },
+    )
+}
+
+/**
+ * 网络设置（SET-04）的接线。
+ *
+ * 三项都只写 DataStore —— 真正生效在**下次启动**：容器构造时读一次，派生 OkHttpClient，
+ * 之后播放内核与各仓储都拿着那一份。所以这里没有「应用」动作，改完就落库。
+ */
+@Composable
+private fun NetworkSettingsRoute(container: AppContainer) {
+    val settings by
+        container.settings.networkSettings.collectAsStateWithLifecycle(initialValue = NetworkSettings())
+    val scope = rememberCoroutineScope()
+
+    NetworkSettingsScreen(
+        settings = settings,
+        onTimeoutChange = { profile -> scope.launch { container.settings.setTimeoutProfile(profile) } },
+        onConcurrencyChange = { profile ->
+            scope.launch { container.settings.setConcurrencyProfile(profile) }
+        },
+        onProxyChange = { proxy -> scope.launch { container.settings.setProxy(proxy) } },
     )
 }
 
@@ -521,6 +551,7 @@ private fun HomeRoute(
         onOpenCache = { navController.navigate(TvRoute.CACHE) },
         onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
         onOpenAppearanceSettings = { navController.navigate(TvRoute.APPEARANCE_SETTINGS) },
+        onOpenNetworkSettings = { navController.navigate(TvRoute.NETWORK_SETTINGS) },
         onOpenRefreshSettings = { navController.navigate(TvRoute.REFRESH_SETTINGS) },
         onExit = onExitApp,
         // 主页导航项「搜索」与菜单键进来的搜索页是**同一块内容**：两处各写一套必然走样

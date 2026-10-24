@@ -105,12 +105,3 @@ fun PlaybackSettingsScreen(
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = TvText.current.title,
-        color = MaterialTheme.colorScheme.onBackground,
-    )
-}

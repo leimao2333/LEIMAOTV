@@ -1,6 +1,15 @@
 # R8 keep 规则（RULES §4：每条都要写清为什么）
-#
-# M0 还没有需要反射的类，所以这里是空的 —— 但文件必须先存在，
-# 否则 release 构建的 proguardFiles 找不到文件会直接失败。
+
+# libVLC（PLAY-02 软解兜底）：JNI 侧按**类名 + 方法签名**反射调用 Java 对象
+# （`org.videolan.libvlc.LibVLC` / `MediaPlayer` / `IVLCVout$Callback` 等）。
+# 一旦被 R8 改名或剥离，`libvlcjni.so` 的 JNI_OnLoad 会返回 JNI_ERR，
+# libVLC 库自身随即 `System.exit(1)` —— 表现是**正式包启动即闪退**，
+# 而 debug 包（不混淆）完全正常，所以只会在发版之后才暴露。
+-keep class org.videolan.libvlc.** { *; }
+-keep class org.videolan.libvlc.interfaces.** { *; }
+-keep class org.videolan.libvlc.util.** { *; }
+
+# VLC 的可选依赖（OpenGL / 媒体数据库等）未参与构建，缺类告警不是问题
+-dontwarn org.videolan.**
 
 # 一旦接入 Room 的反射路径或序列化库，把 keep 规则写在这里并注明原因。

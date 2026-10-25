@@ -176,8 +176,12 @@ fun VodPlayerScreen(
                     // 面板开着时按键全交给面板的焦点系统（放行，不消费）
                     if (panel != VodPanel.None) return@onPreviewKeyEvent false
                     // 控制条收起时，任意键只负责「叫出来」，不执行动作 ——
-                    // 否则用户想看一眼进度，结果顺手切走了一集
+                    // 否则用户想看一眼进度，结果顺手切走了一集。
+                    // **BACK 必须放行**：它是「退出」语义而不是「操作」，吞掉它会让用户
+                    // 按返回键永远退不出播放页（收起态按 BACK 被这里吃掉 → 亮控制条 →
+                    // 再按 BACK 只是收起控制条 → 死循环，2026-10-25 遥控器实测抓到）
                     if (!controlsVisible) {
+                        if (event.key == Key.Back) return@onPreviewKeyEvent false
                         controlsVisible = true
                         tick++
                         return@onPreviewKeyEvent true

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.3.0.0"
+    const val CURRENT_VERSION: String = "0.3.0.1"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,15 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.3.0.1",
+                date = "2026-10-25",
+                changes =
+                    listOf(
+                        "修好正式包一启动就闪退的问题（播放内核的混淆规则漏了）",
+                        "影视播放页按返回键退不出去，现在按一下就回上一页",
+                    ),
+            ),
             VersionEntry(
                 version = "0.3.0.0",
                 date = "2026-10-24",

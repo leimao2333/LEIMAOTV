@@ -84,6 +84,26 @@ interface ChannelDao {
         limit: Int,
     ): List<ChannelWithSource>
 
+    /**
+     * 启用的源下的全部频道（带源名），供**拼音简写搜索**在内存里过一遍（SEARCH-06）。
+     *
+     * 为什么不在 SQL 里做：拼音不是频道的固有列，SQLite 也不会把汉字转拼音 ——
+     * 要么存一份拼音索引（要迁移 + 写入时维护），要么把候选集捞到内存里比对。
+     * 频道总量几千条、一次搜索只跑一遍，后者更简单也没有一致性风险。
+     */
+    @Query(
+        """
+        SELECT c.id AS id, c.name AS name, c.groupName AS groupName, c.logo AS logoUrl,
+               c.url AS streamUrl, c.number AS number, c.sourceId AS sourceId,
+               s.name AS sourceName
+        FROM channel c
+        INNER JOIN source s ON s.id = c.sourceId
+        WHERE s.enabled = 1
+        ORDER BY c.number ASC, c.id ASC
+        """,
+    )
+    suspend fun listEnabledWithSource(): List<ChannelWithSource>
+
     @Query("SELECT * FROM channel WHERE sourceId = :sourceId ORDER BY number ASC, id ASC")
     suspend fun listBySource(sourceId: Long): List<ChannelEntity>
 

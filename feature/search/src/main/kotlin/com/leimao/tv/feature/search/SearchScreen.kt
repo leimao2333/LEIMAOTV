@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -26,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -73,6 +76,7 @@ fun SearchScreen(
     onQueryChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onSelectHistory: (String) -> Unit,
+    onSelectCandidate: (String) -> Unit = {},
     onRemoveHistory: (String) -> Unit,
     onClearHistory: () -> Unit,
     onSelectHit: (SearchHit) -> Unit,
@@ -89,6 +93,10 @@ fun SearchScreen(
         runCatching { inputFocus.requestFocus() }
     }
 
+    // 自绘九宫格默认展开（SEARCH-06）：TV 上「能打字」是可用性的底线，
+    // 收起只是为了给结果腾地方，所以给一个显式开关而不是藏起来
+    var keypadVisible by rememberSaveable { mutableStateOf(true) }
+
     Column(modifier = modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -102,8 +110,20 @@ fun SearchScreen(
                 onQueryChange = onQueryChange,
                 onSubmit = onSubmit,
                 focusRequester = inputFocus,
+                showIme = !keypadVisible,
                 modifier = Modifier.weight(1f),
             )
+            Spacer(modifier = Modifier.width(12.dp))
+            FocusableCard(
+                onClick = { keypadVisible = !keypadVisible },
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = if (keypadVisible) "收起键盘" else "键盘",
+                    style = TvText.current.label,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -115,6 +135,16 @@ fun SearchScreen(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+
+        if (keypadVisible) {
+            Spacer(modifier = Modifier.height(10.dp))
+            TvKeypad(query = state.query, onQueryChange = onQueryChange)
+        }
+
+        if (state.candidates.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            CandidateRow(candidates = state.candidates, onSelect = onSelectCandidate)
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -154,6 +184,47 @@ fun SearchScreen(
 }
 
 /**
+ * 中文候选词（SEARCH-06）。
+ *
+ * 为什么必须有：九宫格打出来的是字母，用户看不到自己打了什么字 ——
+ * 打完 `hnws` 屏幕上一个中文都没有，那这个键盘就等于在盲打。
+ * 这里把命中的中文名横排出来，按 OK 直接换成中文词去搜。
+ */
+@Composable
+private fun CandidateRow(
+    candidates: List<String>,
+    onSelect: (String) -> Unit,
+) {
+    // LazyRow 而不是 Row：候选多了要能横向滚（Row 会一路挤出屏幕外，后面的点不到）
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        item(key = "candidate-label") {
+            Text(
+                text = "试试",
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        items(candidates, key = { it }) { candidate ->
+            FocusableCard(
+                onClick = { onSelect(candidate) },
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = candidate,
+                    style = TvText.current.body,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
  * 输入框。
  *
  * 用 [BasicTextField] 而不是自绘一个「显示关键词的卡片」：自绘的拿不到输入法，
@@ -166,6 +237,8 @@ private fun SearchField(
     onQueryChange: (String) -> Unit,
     onSubmit: () -> Unit,
     focusRequester: FocusRequester,
+    /** 自绘键盘展开时不弹系统输入法：两层键盘叠在一起，焦点会打架 */
+    showIme: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -190,7 +263,7 @@ private fun SearchField(
                 .focusRequester(focusRequester)
                 .onFocusChanged {
                     focused = it.isFocused
-                    if (it.isFocused) keyboard?.show()
+                    if (it.isFocused && showIme) keyboard?.show()
                 },
         decorationBox = { inner ->
             Box(

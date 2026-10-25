@@ -20,6 +20,8 @@ import kotlinx.coroutines.delay
 /** 本地频道搜索。命中表按**归一化后的关键词**配好，同时记下被搜过的词，便于断言「这个板块根本没查频道」 */
 internal class FakeChannelRepository(
     private val hits: Map<String, List<ChannelWithSource>> = emptyMap(),
+    /** 拼音简写搜索的候选集（模拟「启用源下的全部频道」） */
+    private val allChannels: List<ChannelWithSource> = emptyList(),
 ) : ChannelRepository {
     val searched = mutableListOf<String>()
 
@@ -40,6 +42,8 @@ internal class FakeChannelRepository(
         searched += keyword
         return hits[keyword].orEmpty().take(limit)
     }
+
+    override suspend fun enabledWithSource(): List<ChannelWithSource> = allChannels
 
     override suspend fun firstChannelId(): Long? = null
 }

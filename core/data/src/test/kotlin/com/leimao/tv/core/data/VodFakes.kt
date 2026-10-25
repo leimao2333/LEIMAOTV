@@ -118,4 +118,6 @@ internal class FakeMediaRepository : MediaRepository {
         keyword: String,
         limit: Int,
     ): List<VodSummary> = searchable[keyword].orEmpty()
+
+    override suspend fun titles(limit: Int): List<String> = searchable.values.flatten().map { it.name }
 }

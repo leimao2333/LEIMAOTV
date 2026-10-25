@@ -76,9 +76,15 @@ interface MediaRepository {
         limit: Int = SEARCH_LIMIT,
     ): List<VodSummary>
 
+    /** 启用源下的全部片名（拼音候选词用，只返回名字） */
+    suspend fun titles(limit: Int = TITLES_LIMIT): List<String>
+
     companion object {
         /** 本地快照命中上限：本地只负责「先出点东西」，找全归远端 */
         const val SEARCH_LIMIT = 30
+
+        /** 候选词要扫的片名上限：再多也只是「提示」，不是结果列表 */
+        const val TITLES_LIMIT = 4000
 
         /** 每行给多少张卡。1080p 一行放 5～6 张，30 条够往下翻好几屏，也不至于一屏拉太多图 */
         const val DEFAULT_LIMIT = 30
@@ -153,6 +159,8 @@ class RoomMediaRepository(
     override suspend fun clearSource(sourceId: Long) = dao.clearSource(sourceId)
 
     override suspend fun isEmpty(): Boolean = dao.count() == 0
+
+    override suspend fun titles(limit: Int): List<String> = dao.titlesFromEnabledSources(limit)
 
     override suspend fun search(
         keyword: String,

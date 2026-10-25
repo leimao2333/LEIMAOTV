@@ -3,6 +3,7 @@ package com.leimao.tv
 import android.content.Context
 import android.os.Build
 import com.leimao.tv.core.data.EpgImporter
+import com.leimao.tv.core.data.PinyinTable
 import com.leimao.tv.core.data.SearchRepository
 import com.leimao.tv.core.data.SourceHealthChecker
 import com.leimao.tv.core.data.SourceRefresher
@@ -161,7 +162,16 @@ class AppContainer(context: Context) {
      *
      * 白名单（SEARCH-02）在它的出口过滤，UI 层不再存第二份判断 —— 这里没有可配项，
      * 也没有「要不要过滤」的开关：一个能被关掉的合规开关，迟早会被关掉。
+     *
+     * 拼音表（SEARCH-06）：assets 里约 211KB，解析成四张数组后约 400KB 常驻；
+     * 读不到就退化成空表（只按名字搜），不让搜索因为缺一份词典整个不可用。
      */
+    private val pinyinTable: PinyinTable by lazy {
+        runCatching {
+            context.assets.open("pinyin_table.txt").bufferedReader().use { PinyinTable(it.readText()) }
+        }.getOrElse { PinyinTable.EMPTY }
+    }
+
     val searchRepository: SearchRepository =
         SearchRepository(
             channels = channelRepository,
@@ -170,6 +180,7 @@ class AppContainer(context: Context) {
             http = httpClient,
             perSourceTimeoutMs = networkSettings.timeout.searchTimeoutMs,
             maxConcurrency = networkSettings.concurrency.permits,
+            pinyin = pinyinTable,
         )
 
     /** 看片进度（VOD-06）：播放页写、首页与详情页读 */

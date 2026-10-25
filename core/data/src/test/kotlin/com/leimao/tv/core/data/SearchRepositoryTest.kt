@@ -239,12 +239,14 @@ class SearchRepositoryTest {
         adapters: Map<Long, VodSourceAdapter> = emptyMap(),
         query: String = "片",
         scope: SearchScope = SearchScope.IPTV,
+        pinyin: PinyinTable = PinyinTable.EMPTY,
     ) = SearchRepository(
         channels = channels,
         media = media,
         sources = FakeSourceRepository(sources),
         http = FakeHttp,
         adapterFactory = { ref -> adapters[ref.id] ?: FakeVodSearchAdapter() },
+        pinyin = pinyin,
     ).search(query, scope)
 
     /** 测试里只关心最后一帧；`toList()` 本身不表达「只要结果」，取最后一帧的意图得写在名字里 */
@@ -259,6 +261,80 @@ class SearchRepositoryTest {
         url = "https://$name.example.com/api.php/provide/vod",
         type = SourceType.VOD,
     )
+
+    // ---------- 拼音简写（SEARCH-06） ----------
+
+    @Test
+    fun `拼音简写能搜到名字里没有这些字母的频道`() =
+        runTest {
+            val channelRepo =
+                FakeChannelRepository(
+                    // 名字 LIKE 一个都命中不了（关键词是 hnws）
+                    hits = emptyMap(),
+                    allChannels = listOf(channelHit(21, "湖南卫视"), channelHit(22, "CCTV5 体育")),
+                )
+
+            val result =
+                search(
+                    channels = channelRepo,
+                    query = "hnws",
+                    pinyin = PinyinTable("湖hu\n南nan\n卫wei\n视shi\n体ti\n育yu"),
+                ).finalFrame()
+
+            assertEquals(1, result.hits.size)
+            assertEquals("湖南卫视", result.hits.single().title)
+        }
+
+    @Test
+    fun `名字已经命中的频道不会被拼音补一遍`() =
+        runTest {
+            val channelRepo =
+                FakeChannelRepository(
+                    hits = mapOf("hnws" to listOf(channelHit(21, "湖南卫视"))),
+                    allChannels = listOf(channelHit(21, "湖南卫视")),
+                )
+
+            val result =
+                search(
+                    channels = channelRepo,
+                    query = "hnws",
+                    pinyin = PinyinTable("湖hu\n南nan\n卫wei\n视shi"),
+                ).finalFrame()
+
+            assertEquals(1, result.hits.size)
+        }
+
+    @Test
+    fun `中文查询不跑拼音补，避免误命中`() =
+        runTest {
+            val channelRepo = FakeChannelRepository(allChannels = listOf(channelHit(21, "湖南卫视")))
+
+            val result =
+                search(
+                    channels = channelRepo,
+                    query = "湖南",
+                    pinyin = PinyinTable("湖hu\n南nan\n卫wei\n视shi"),
+                ).finalFrame()
+
+            // 名字 LIKE 没命中（假仓库返回空），拼音也不该兜底 —— 否则「搜湖南」会变成「搜 hn」
+            assertEquals(0, result.channels.size)
+        }
+
+    @Test
+    fun `影视板块不做拼音补`() =
+        runTest {
+            val channelRepo = FakeChannelRepository(allChannels = listOf(channelHit(21, "湖南卫视")))
+
+            val result =
+                search(
+                    channels = channelRepo,
+                    query = "hnws",
+                    scope = SearchScope.VOD,
+                    pinyin = PinyinTable("湖hu\n南nan\n卫wei\n视shi"),
+                ).finalFrame()
+
+            assertEquals(0, result.channels.size)
+        }
 
     private fun channelHit(
         id: Long,

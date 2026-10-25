@@ -19,6 +19,11 @@ data class SearchUiState(
     /** null = 还没搜（空关键词 / 防抖窗口内），与「搜完了但没结果」是两件事 */
     val outcome: SearchOutcome? = null,
     val history: List<String> = emptyList(),
+    /**
+     * 中文候选词（SEARCH-06）：九宫格只能打字母，这里回显「你打的可能是这些」，
+     * 按 OK 换成中文词再搜。为空就不占版面。
+     */
+    val candidates: List<String> = emptyList(),
 ) {
     /**
      * 只认「与当前关键词同一条」的结果。

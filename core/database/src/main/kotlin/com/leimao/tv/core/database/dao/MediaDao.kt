@@ -40,6 +40,23 @@ interface MediaDao {
     suspend fun recent(limit: Int): List<MediaEntity>
 
     /**
+     * 启用的影视源下的全部片名，供**拼音候选词**在内存里比对（SEARCH-06）。
+     *
+     * 只取片名不取整行：候选词只需要名字，把海报/简介一起捞出来纯属浪费 ——
+     * 一次输入要跑一遍全库，字段越少越稳。
+     */
+    @Query(
+        """
+        SELECT m.title FROM media m
+        INNER JOIN source s ON s.id = m.sourceId
+        WHERE s.enabled = 1
+        ORDER BY m.updatedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun titlesFromEnabledSources(limit: Int): List<String>
+
+    /**
      * 按类型查询，年份 / 地区为 null 表示不限。
      *
      * 用 `(:year IS NULL OR ...)` 而不是拼 SQL：三个筛选条件（不限 / 只要年份 / 年份+地区）

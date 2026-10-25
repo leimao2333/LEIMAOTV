@@ -43,8 +43,20 @@ internal fun SearchContent(
 
     var query by rememberSaveable { mutableStateOf("") }
     var outcome by remember { mutableStateOf<SearchOutcome?>(null) }
+    // 中文候选词（SEARCH-06）：九宫格只能打字母，得把命中的中文名回显出来让用户确认
+    var candidates by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // 打字防抖：遥控器输入法每敲一个字都会触发一次 onValueChange，不去抖等于「一个词打八个字发八轮请求」
+    // 候选词比搜索结果轻得多（只有名字），给的防抖也更短：打完两个字母就该看到提示
+    LaunchedEffect(query) {
+        if (query.isBlank()) {
+            candidates = emptyList()
+            return@LaunchedEffect
+        }
+        delay(CANDIDATE_DEBOUNCE_MS)
+        candidates = runCatching { container.searchRepository.suggest(query) }.getOrDefault(emptyList())
+    }
+
     LaunchedEffect(query, scope) {
         if (query.isBlank()) {
             outcome = null
@@ -61,11 +73,14 @@ internal fun SearchContent(
                 scope = scope,
                 outcome = outcome,
                 history = history,
+                candidates = candidates,
             ),
         onQueryChange = { query = it },
         // 输入法上按「搜索」：把词记进历史，但不改结果（结果早就在跟着输入走了）
         onSubmit = { scopeLauncher.launch { container.settings.rememberSearchQuery(query) } },
         onSelectHistory = { query = it },
+        // 点候选词 = 改成用这个中文词搜：既确认了输入，也让「最近搜索」里留下能看懂的中文
+        onSelectCandidate = { query = it },
         onRemoveHistory = { scopeLauncher.launch { container.settings.forgetSearchQuery(it) } },
         onClearHistory = { scopeLauncher.launch { container.settings.clearSearchHistory() } },
         onSelectHit = { hit ->
@@ -86,3 +101,6 @@ internal fun SearchContent(
 
 /** 防抖窗口：短到「松手就出结果」，长到能吞掉连续输入 */
 private const val SEARCH_DEBOUNCE_MS = 250L
+
+/** 候选词的防抖：它只查本地名字，可以比结果更灵敏一点 */
+private const val CANDIDATE_DEBOUNCE_MS = 150L

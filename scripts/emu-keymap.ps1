@@ -6,6 +6,7 @@
     映射（NumLock 要打开）：
         小键盘 4 / 8 / 2 / 6  →  左 / 上 / 下 / 右
         小键盘 5              →  OK（DPAD_CENTER）
+        小键盘 0              →  菜单（MENU，任意页面呼出全局菜单）
         Esc                   →  返回（BACK）
 
     只在模拟器窗口在前台时接管：否则 Esc 会被全局吃掉，别的程序里根本没法用。
@@ -181,6 +182,7 @@ $map = @{
     0x62 = 20   # 小键盘 2 → 下
     0x66 = 22   # 小键盘 6 → 右
     0x65 = 23   # 小键盘 5 → OK
+    0x60 = 82   # 小键盘 0 → 菜单（全局菜单，HOME-08）
     0x1B = 4    # Esc      → 返回
 }
 
@@ -220,7 +222,7 @@ $handler = [EmuKeys+HookProc] {
                     $script:lastKey = $vk
                     $script:lastAt = $now
                     if ($LogKeys) {
-                        $names = @{ 21 = '←左'; 19 = '↑上'; 20 = '↓下'; 22 = '→右'; 23 = 'OK'; 4 = '返回' }
+                        $names = @{ 21 = '←左'; 19 = '↑上'; 20 = '↓下'; 22 = '→右'; 23 = 'OK'; 82 = '菜单'; 4 = '返回' }
                         Write-Host ("  按键 " + $names[$map[$vk]])
                     }
                     Send-Key $map[$vk]
@@ -237,7 +239,7 @@ if ($hookId -eq [IntPtr]::Zero) {
     throw "键盘钩子安装失败（错误码 $([Runtime.InteropServices.Marshal]::GetLastWin32Error())）"
 }
 
-Write-Host "小键盘映射已启用（NumLock 请打开）：4/8/2/6 方向，5=OK，Esc=返回"
+Write-Host "小键盘映射已启用（NumLock 请打开）：4/8/2/6 方向，5=OK，0=菜单，Esc=返回"
 Write-Host "仅在模拟器（emulator/qemu 进程窗口）前台时接管；关掉本窗口即停止。"
 
 try {

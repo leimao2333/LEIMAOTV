@@ -49,6 +49,7 @@ import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.feature.iptv.ChannelBrowser
+import com.leimao.tv.feature.iptv.ChannelGroup
 import com.leimao.tv.feature.iptv.ChannelLogo
 import com.leimao.tv.feature.iptv.groupChannels
 import com.leimao.tv.feature.settings.SettingsScreen
@@ -447,8 +448,6 @@ private fun LiveSectionContent(
     // 收藏频道 = 全量里被收藏的那批。不做独立查询：收藏 id 已经拿到，在已加载的全量里切一刀即可，
     // 且天然按频道顺序排列（收藏列表该按「列表顺序」而不是「收藏时间」排，用户找台更顺手）。
     val favoriteChannels = remember(channels, favoriteIds) { channels.filter { it.id in favoriteIds } }
-    // 分组快捷入口要跳转的目标分组。null = 未触发；点中后传给 ChannelBrowser，它切完即用。
-    var pendingGroup by rememberSaveable { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
@@ -469,9 +468,8 @@ private fun LiveSectionContent(
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 直播分区放的是「正在直播」那一条（HOME-04），而不是一句「回到播放页」：
-        // 同一块地方，告诉用户「哪个台、在播什么」比告诉他「按这里能回去」有用得多。
-        // 没有台可播时才退回原来那句 —— 空着比说错话好。
+        // 「正在直播」那一条常驻在列表之上：它是「回播放页」最自然的入口（HOME-04），
+        // 也是「现在在播什么」的唯一提示
         if (liveNow != null) {
             LiveNowStrip(item = liveNow, onOpen = { onOpenHero(liveNow) })
         } else {
@@ -483,54 +481,25 @@ private fun LiveSectionContent(
             }
         }
 
-        if (channels.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(16.dp))
-
-            QuickRow(
-                title = "收藏频道",
-                emptyHint = "还没有收藏。播放时打开控制条点「收藏」，或在下方列表里选台。",
-                items = favoriteChannels,
-                itemKey = { it.id },
-            ) { channel ->
-                ChannelChip(channel = channel, isFavorite = true, onClick = { onOpenChannel(channel.id) })
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            QuickRow(
-                title = "最近观看",
-                emptyHint = "还没有观看记录。随便打开一个台就有了。",
-                items = recentChannels,
-                itemKey = { it.id },
-            ) { channel ->
-                ChannelChip(
-                    channel = channel,
-                    isFavorite = channel.id in favoriteIds,
-                    onClick = { onOpenChannel(channel.id) },
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            QuickRow(
-                title = "分组",
-                emptyHint = null,
-                items = remember(channels) { groupChannels(channels) },
-                itemKey = { it.name },
-            ) { group ->
-                GroupChip(name = group.name, count = group.channels.size) { pendingGroup = group.name }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-        }
+        // 收藏与最近观看直接作为频道浏览器的虚拟分组（和浏览器自带的「最近观看」同一套机制）：
+        // 早先是「上面两排卡片 + 下面列表」，540dp 的屏幕放不下 —— 列表被压成 0 高，
+        // 点分组卡什么都不会发生（2026-10-25 用户实测）。并进侧栏后只有一条滚动链，谁也挡不住谁。
+        Spacer(modifier = Modifier.height(10.dp))
 
         if (channels.isNotEmpty()) {
             ChannelBrowser(
-                groups = remember(channels) { groupChannels(channels) },
+                groups =
+                    remember(channels, favoriteChannels) {
+                        buildList {
+                            if (favoriteChannels.isNotEmpty()) add(ChannelGroup(FAVORITE_GROUP_NAME, favoriteChannels))
+                            addAll(groupChannels(channels))
+                        }
+                    },
                 selectedChannelId = null,
                 onChannelClick = { channel -> onOpenChannel(channel.id) },
                 favoriteIds = favoriteIds,
-                pendingGroup = pendingGroup,
+                recentChannels = recentChannels,
+                // 分组入口就用浏览器左侧那一条：它一直可见，按 OK 直接切分组
                 modifier = Modifier.weight(1f),
             )
         }
@@ -783,3 +752,6 @@ private fun ExitConfirmDialog(
 
 /** 收藏星标色。与频道列表/抽屉里的 ★ 同色（LIVE-14）。 */
 private val MATERIAL_GOLD = Color(0xFFE6B422)
+
+/** 收藏在频道浏览器里的虚拟分组名（与「最近观看」并列） */
+private const val FAVORITE_GROUP_NAME = "收藏频道"

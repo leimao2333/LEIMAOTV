@@ -49,6 +49,12 @@ interface ChannelRepository {
         limit: Int = SEARCH_LIMIT,
     ): List<ChannelWithSource>
 
+    /**
+     * 启用源下的全部频道（带源名）。拼音简写搜索要在内存里比对名字，
+     * 需要的是「全部候选 + 源名」，而不是 SQL 已经筛过一轮的结果（SEARCH-06）。
+     */
+    suspend fun enabledWithSource(): List<ChannelWithSource>
+
     suspend fun firstChannelId(): Long?
 
     companion object {
@@ -93,6 +99,8 @@ class RoomChannelRepository(
         keyword: String,
         limit: Int,
     ): List<ChannelWithSource> = channelDao.searchByName(keyword.escapeLike(), limit)
+
+    override suspend fun enabledWithSource(): List<ChannelWithSource> = channelDao.listEnabledWithSource()
 }
 
 internal fun ChannelEntity.toModel(): Channel =

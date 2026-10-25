@@ -61,6 +61,11 @@ class SearchRepository(
     /** 同时最多几个源在搜：源多时一起打既引对方风控，也把本机并发连接吃满 */
     private val maxConcurrency: Int = DEFAULT_CONCURRENCY,
     private val adapterFactory: (VodSourceRef) -> VodSourceAdapter = { VodAdapters.forSource(http, it) },
+    /**
+     * 汉字→拼音表（SEARCH-06）。给了它，频道还能按拼音搜：
+     * `hunan` / `hnws` →「湖南卫视」。没给就退化成只按名字搜。
+     */
+    private val pinyin: PinyinTable = PinyinTable.EMPTY,
 ) {
     /**
      * 发起一次搜索。[scope] 决定搜哪些库、结果要不要过滤：
@@ -88,7 +93,9 @@ class SearchRepository(
             val localHits =
                 buildList {
                     if (scope == SearchScope.IPTV) {
-                        channels.search(keyword).forEach { add(it.toHit()) }
+                        val byName = channels.search(keyword)
+                        byName.forEach { add(it.toHit()) }
+                        addAll(pinyinHits(keyword, byName.mapTo(HashSet()) { it.channel.id }))
                     }
                     media.search(keyword).forEach { add(it.toHit(sourceNames[it.sourceId])) }
                 }
@@ -115,6 +122,78 @@ class SearchRepository(
                 }
             }
         }
+
+    /**
+     * 拼音简写补一轮（SEARCH-06）。
+     *
+     * 只在**查询是纯 ASCII 字母数字**时跑：中文查询走 SQL 的 LIKE 已经够准，
+     * 再比一遍拼音只会把「搜『湖南』」变成「搜 hn」那种误命中。
+     *
+     * [alreadyHit] 是名字已经命中的频道 id：两套口径会重合（`cctv5` 既在名字里、
+     * 也在简写里），去重靠它，不靠结果 key 的二次去重 —— 那样会把名字命中的顺序打乱。
+     */
+    private suspend fun pinyinHits(
+        keyword: String,
+        alreadyHit: Set<Long>,
+    ): List<SearchHit> {
+        if (pinyin.size == 0) return emptyList()
+        if (keyword.isEmpty() || keyword.any { it.code >= 128 || !it.isLetterOrDigit() }) return emptyList()
+
+        return channels
+            .enabledWithSource()
+            .asSequence()
+            .filter { it.channel.id !in alreadyHit }
+            .filter { pinyin.matches(it.channel.name, keyword) }
+            .take(PINYIN_LIMIT)
+            .map { it.toHit() }
+            .toList()
+    }
+
+    /**
+     * 中文候选词（SEARCH-06 的「提示词」）。
+     *
+     * 九宫格只能打出字母，用户看不到自己打的是什么字 —— 所以要把命中的中文名回显成候选：
+     * 打 `hnws` 提示「湖南卫视」，按 OK 直接用它搜。没有这一步，拼音简写搜索在电视上
+     * 就是「打完四个字母，等着看有没有猜对」。
+     *
+     * 中文词优先、去重、限条数：候选是「帮你确认输入」的，不是第二个结果列表。
+     */
+    suspend fun suggest(
+        query: String,
+        limit: Int = SUGGEST_LIMIT,
+    ): List<String> {
+        val keyword = normalizeSearchQuery(query)
+        if (keyword.isEmpty()) return emptyList()
+
+        val out = LinkedHashSet<String>()
+        if (keyword.all { it.code < 128 && it.isLetterOrDigit() }) {
+            // 字母查询：频道名与影视片名都按拼音过一遍（全拼 hunan / 简写 hnws 都命中）
+            channels
+                .enabledWithSource()
+                .asSequence()
+                .filter { pinyin.matches(it.channel.name, keyword) }
+                .map { it.channel.name }
+                .forEach { if (out.size < limit) out.add(it) }
+            if (out.size < limit) {
+                media
+                    .titles()
+                    .asSequence()
+                    .filter { pinyin.matches(it, keyword) }
+                    .forEach { if (out.size < limit) out.add(it) }
+            }
+        } else {
+            // 中文查询（系统输入法打出来的）：直接拿名字里含这个词的
+            channels
+                .search(keyword)
+                .asSequence()
+                .map { it.channel.name }
+                .forEach { if (out.size < limit) out.add(it) }
+        }
+        if (out.size < limit) {
+            media.search(keyword).forEach { if (out.size < limit) out.add(it.name) }
+        }
+        return out.toList()
+    }
 
     private suspend fun searchOne(
         source: Source,
@@ -184,6 +263,12 @@ class SearchRepository(
     private companion object {
         const val DEFAULT_TIMEOUT_MS = 8_000L
         const val DEFAULT_CONCURRENCY = 4
+
+        /** 拼音补的最多条数：简写很宽（`c` 能命中一大片），截一屏就够，别把结果区灌满 */
+        const val PINYIN_LIMIT = 30
+
+        /** 候选词条数：一行放得下、也不至于把用户看花 */
+        const val SUGGEST_LIMIT = 6
     }
 }
 

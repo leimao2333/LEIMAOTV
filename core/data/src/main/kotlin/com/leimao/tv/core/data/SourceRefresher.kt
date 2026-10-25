@@ -64,6 +64,15 @@ class SourceRefresher(
     suspend fun refresh(sourceId: Long): RefreshResult {
         val source = sources.find(sourceId) ?: return RefreshResult.Failed(sourceId, RefreshFailure.SOURCE_MISSING)
 
+        // 本地导入的源（「导入本地文件」）没有网络地址：uri 是 content:// 文件句柄，
+        // 权限属于当次的 Activity、文件也可能被移动。拿它当网络地址去请求只会得到
+        // 「网络错误：地址格式不对」这种看不懂的提示（2026-10-25 实测）。直接明说。
+        if (source.url.startsWith("content:") || source.url.startsWith("file:")) {
+            val note = "本地导入的源没有订阅地址，无法刷新；请改用「添加订阅地址」或重新导入"
+            sources.markRefreshed(source.id, clock(), note)
+            return RefreshResult.Failed(sourceId, RefreshFailure.EMPTY, note)
+        }
+
         val outcome = http.fetch(source.url, source.toRequestHeaders())
         if (outcome is FetchOutcome.Failure) {
             sources.markRefreshed(sourceId, clock(), describe(outcome))

@@ -843,6 +843,16 @@ private fun SourceManagerRoute(
 ) {
     val scope = rememberCoroutineScope()
 
+    // 进入源管理页时的落点快照（§6.6）。用它判断「这次改动是不是让应用从『没得播』
+    // 变成了『有得播』」—— 只有这种从无到有的跨越才接管导航（加完源直达播放）。
+    // 日常的导入 / 新增 / 全部刷新只更新数据：把用户甩去播放页等于打断操作，
+    // 他们还要看导入结果、继续调下一个源（2026-10-25 实测：导入 live.txt 被甩到
+    // 一个失效流画面上，导入是否成功都看不到）。
+    var landingAtEntry by remember { mutableStateOf<StartDestination?>(null) }
+    LaunchedEffect(Unit) {
+        landingAtEntry = container.startupResolver.resolve()
+    }
+
     SourceManagerScreen(
         sourceRepository = container.sourceRepository,
         refresher = container.sourceRefresher,
@@ -858,9 +868,20 @@ private fun SourceManagerRoute(
                 { navController.popBackStack() }
             },
         onSourcesChanged = {
-            // 源变了就重算一次落点：加完源直接进播放页，而不是让用户自己回主页再点直播（§6.6）
+            // 源变了 → 只在「从『没得播』跨越到『有得播』」时才重算落点并跳转：
+            // 无源引导页（AddSource）/ 只知道在加载（Player channelId=null）→ 解析出了可播频道；
+            // 本来就能播的应用只是在更新数据，留在源管理页让用户看完结果（§6.6 + 用户实测反馈）
             scope.launch {
-                navController.replaceStackWith(container.startupResolver.resolve().toRoute())
+                val next = container.startupResolver.resolve()
+                val entry = landingAtEntry
+                val becamePlayable =
+                    when {
+                        entry == null -> false
+                        next !is StartDestination.Player -> false
+                        entry !is StartDestination.Player -> true // 从无源引导跨越到可播
+                        else -> entry.channelId == null && next.channelId != null
+                    }
+                if (becamePlayable) navController.replaceStackWith(next.toRoute())
             }
         },
     )

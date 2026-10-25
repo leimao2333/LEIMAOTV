@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.4.2.0"
+    const val CURRENT_VERSION: String = "0.4.3.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,19 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.4.3.0",
+                date = "2026-10-25",
+                changes =
+                    listOf(
+                        "支持回看：源声明了回看能力的台，控制条里多一个「回看」，可以选一档已经播完的节目从头看",
+                        "没有回看能力的台不会出现这个按钮 —— 不是点进去才告诉你「不支持」",
+                        "节目单里有的档期显示节目名；源没给节目单的，按时间段选（整点一档）",
+                        "回看时画面顶上会写明「回看 20:00–21:30」，随时能点「回直播」回到当前节目",
+                        "回看播不了时只提示这一档坏了，不会把你自动切到别的台去",
+                        "修：播放失败的面板上，方向键推不动焦点（四个按钮按不到）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.4.2.0",
                 date = "2026-10-25",

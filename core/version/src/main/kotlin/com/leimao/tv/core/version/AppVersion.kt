@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.4.0.0"
+    const val CURRENT_VERSION: String = "0.4.1.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.4.1.0",
+                date = "2026-10-25",
+                changes =
+                    listOf(
+                        "影视多了「戏曲」栏目：京剧、越剧、黄梅戏、相声评书都归在这里，不用再去搜",
+                        "一个台全都播不了时，会自动跳到下一个台接着试，不用自己一个个换",
+                        "影视页的年份 / 地区 / 标签改成常驻一行，选了什么一眼看得见",
+                        "修：切换影片类型后，「每源一行」还是原来那批片",
+                    ),
+            ),
             VersionEntry(
                 version = "0.4.0.0",
                 date = "2026-10-25",

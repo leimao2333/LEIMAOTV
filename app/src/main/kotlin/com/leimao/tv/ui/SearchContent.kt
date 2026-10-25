@@ -54,7 +54,7 @@ internal fun SearchContent(
             return@LaunchedEffect
         }
         delay(CANDIDATE_DEBOUNCE_MS)
-        candidates = runCatching { container.searchRepository.suggest(query) }.getOrDefault(emptyList())
+        candidates = runCatching { container.searchRepository.suggest(query, scope) }.getOrDefault(emptyList())
     }
 
     LaunchedEffect(query, scope) {

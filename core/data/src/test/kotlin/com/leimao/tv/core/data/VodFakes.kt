@@ -1,6 +1,7 @@
 package com.leimao.tv.core.data
 
 import com.leimao.tv.core.database.repository.MediaRepository
+import com.leimao.tv.core.database.repository.MediaTitle
 import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
 import com.leimao.tv.core.database.repository.SourceRepository
@@ -119,5 +120,9 @@ internal class FakeMediaRepository : MediaRepository {
         limit: Int,
     ): List<VodSummary> = searchable[keyword].orEmpty()
 
-    override suspend fun titles(limit: Int): List<String> = searchable.values.flatten().map { it.name }
+    override suspend fun titles(limit: Int): List<MediaTitle> =
+        searchable.values.flatten().map { MediaTitle(it.name, it.type.name) }
+
+    override suspend fun allSummaries(limit: Int): List<VodSummary> =
+        searchable.values.flatten().take(limit)
 }

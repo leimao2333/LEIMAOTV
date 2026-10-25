@@ -76,8 +76,11 @@ interface MediaRepository {
         limit: Int = SEARCH_LIMIT,
     ): List<VodSummary>
 
-    /** 启用源下的全部片名（拼音候选词用，只返回名字） */
-    suspend fun titles(limit: Int = TITLES_LIMIT): List<String>
+    /** 启用源下的全部片名 + 类型（拼音候选词用；类型给白名单过滤） */
+    suspend fun titles(limit: Int = TITLES_LIMIT): List<MediaTitle>
+
+    /** 启用源下的全部影视摘要（拼音**结果**搜索用，要完整字段才能渲染卡片） */
+    suspend fun allSummaries(limit: Int = TITLES_LIMIT): List<VodSummary>
 
     companion object {
         /** 本地快照命中上限：本地只负责「先出点东西」，找全归远端 */
@@ -160,7 +163,11 @@ class RoomMediaRepository(
 
     override suspend fun isEmpty(): Boolean = dao.count() == 0
 
-    override suspend fun titles(limit: Int): List<String> = dao.titlesFromEnabledSources(limit)
+    override suspend fun titles(limit: Int): List<MediaTitle> =
+        dao.titlesWithTypesFromEnabledSources(limit).map { MediaTitle(it.title, it.type) }
+
+    override suspend fun allSummaries(limit: Int): List<VodSummary> =
+        dao.allFromEnabledSources(limit).toSummaries()
 
     override suspend fun search(
         keyword: String,
@@ -212,3 +219,9 @@ private fun MediaEntity.toSummary(): VodSummary? {
         tags = tags?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty(),
     )
 }
+
+/** 片名 + 类型（候选词的白名单过滤需要类型，光有名字不够） */
+data class MediaTitle(
+    val text: String,
+    val type: String,
+)

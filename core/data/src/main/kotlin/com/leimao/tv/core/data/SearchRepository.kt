@@ -8,6 +8,7 @@ import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.SearchScope
+import com.leimao.tv.core.model.allowedTypesFor
 import com.leimao.tv.core.model.filterForScope
 import com.leimao.tv.core.model.search.SearchHit
 import com.leimao.tv.core.model.search.SearchKind
@@ -98,6 +99,9 @@ class SearchRepository(
                         addAll(pinyinHits(keyword, byName.mapTo(HashSet()) { it.channel.id }))
                     }
                     media.search(keyword).forEach { add(it.toHit(sourceNames[it.sourceId])) }
+                    // 影视的拼音命中：26 键打全拼（hunan / aichidian）是主要输入方式，
+                    // 只支持频道的拼音等于没支持影视搜索 —— 这是 26 键的核心场景
+                    addAll(mediaPinyinHits(keyword, sourceNames))
                 }
 
             val state = SearchState(hits = localHits, pending = vodSources.size)
@@ -160,6 +164,7 @@ class SearchRepository(
      */
     suspend fun suggest(
         query: String,
+        scope: SearchScope,
         limit: Int = SUGGEST_LIMIT,
     ): List<String> {
         val keyword = normalizeSearchQuery(query)
@@ -178,7 +183,11 @@ class SearchRepository(
                 media
                     .titles()
                     .asSequence()
-                    .filter { pinyin.matches(it, keyword) }
+                    // 候选词与结果同守白名单：直播板块提示「短剧搞笑社」却搜不出它，
+                    // 比不提示更误导（2026-10-25 验收实测）
+                    .filter { ContentType.valueOf(it.type) in allowedTypesFor(scope) }
+                    .filter { pinyin.matches(it.text, keyword) }
+                    .map { it.text }
                     .forEach { if (out.size < limit) out.add(it) }
             }
         } else {
@@ -190,9 +199,37 @@ class SearchRepository(
                 .forEach { if (out.size < limit) out.add(it) }
         }
         if (out.size < limit) {
-            media.search(keyword).forEach { if (out.size < limit) out.add(it.name) }
+            media
+                .search(keyword)
+                .asSequence()
+                .filter { it.type in allowedTypesFor(scope) }
+                .map { it.name }
+                .forEach { if (out.size < limit) out.add(it) }
         }
         return out.toList()
+    }
+
+    /**
+     * 影视的拼音命中（LIVE-13 / SEARCH-06）：全拼与简写都能命中标题。
+     *
+     * 与 [pinyinHits]（频道）分开：频道的命中集来自 `enabledWithSource()`，
+     * 影视的来自 `allSummaries()` —— 两边的数据形态与上限都不同。
+     * 白名单在 snapshot 出口统一过滤，这里不重复判（但**提前滤掉**能省掉白名单外的转换）。
+     */
+    private suspend fun mediaPinyinHits(
+        keyword: String,
+        sourceNames: Map<Long, String>,
+    ): List<SearchHit> {
+        if (pinyin.size == 0) return emptyList()
+        if (keyword.isEmpty() || keyword.any { it.code >= 128 || !it.isLetterOrDigit() }) return emptyList()
+
+        return media
+            .allSummaries()
+            .asSequence()
+            .filter { pinyin.matches(it.name, keyword) }
+            .take(PINYIN_LIMIT)
+            .map { it.toHit(sourceNames[it.sourceId]) }
+            .toList()
     }
 
     private suspend fun searchOne(

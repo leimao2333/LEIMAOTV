@@ -39,6 +39,18 @@ interface MediaDao {
     @Query("SELECT * FROM media ORDER BY updatedAt DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<MediaEntity>
 
+    /** 启用源下的全部影视（拼音搜索要在内存里按全拼/简写比对标题，SQL 做不了） */
+    @Query(
+        """
+        SELECT m.* FROM media m
+        INNER JOIN source s ON s.id = m.sourceId
+        WHERE s.enabled = 1
+        ORDER BY m.updatedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun allFromEnabledSources(limit: Int): List<MediaEntity>
+
     /**
      * 启用的影视源下的全部片名，供**拼音候选词**在内存里比对（SEARCH-06）。
      *
@@ -47,14 +59,14 @@ interface MediaDao {
      */
     @Query(
         """
-        SELECT m.title FROM media m
+        SELECT m.title AS title, m.type AS type FROM media m
         INNER JOIN source s ON s.id = m.sourceId
         WHERE s.enabled = 1
         ORDER BY m.updatedAt DESC
         LIMIT :limit
         """,
     )
-    suspend fun titlesFromEnabledSources(limit: Int): List<String>
+    suspend fun titlesWithTypesFromEnabledSources(limit: Int): List<MediaTitleRow>
 
     /**
      * 按类型查询，年份 / 地区为 null 表示不限。
@@ -166,3 +178,9 @@ interface MediaDao {
     @Query("SELECT COUNT(*) FROM media")
     suspend fun count(): Int
 }
+
+/** 片名 + 类型（候选词要按板块白名单过滤类型，只回标题会漏） */
+data class MediaTitleRow(
+    val title: String,
+    val type: String,
+)

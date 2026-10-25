@@ -169,6 +169,24 @@ RULES §10.4 命名并把包挂到 Release 上（`.github/workflows/release.yml`
   「抓取 → 解析 → 落库」链路拉取真实频道，用来走通「启动直达播放」这条链路；
   其代码只在 `app/src/debug`，**正式包不含任何演示数据**
 
+### 模拟器联调
+
+- **屏幕**：按 1920×1080 横屏跑。本机 AVD 是手机镜像，启动时要带 `-skin`，否则窗口是竖的：
+
+  ```bash
+  emulator -avd <avd名> -skin 1920x1080 -no-audio
+  adb shell "wm size 1920x1080; wm density 320"
+  adb shell "settings put system accelerometer_rotation 0; settings put system user_rotation 0"
+  ```
+
+- **键盘当遥控器**：双击 `scripts/启动按键映射.cmd`（NumLock 要打开）——
+  小键盘 `4/8/2/6` = 左/上/下/右，`5` = OK，`Esc` = 返回。
+  只在模拟器窗口在前台时接管（按前台窗口的进程名判断），关掉那个黑窗口即停止；
+  按键走 adb server 的本地 TCP，单键约 1ms，连按不发涩。
+
+- **图标与横幅**：`scripts/gen-icons.py` 从一张正方形人物图生成各密度图标 + TV 横幅，
+  换图重跑即可（源图要求写在脚本头部注释里）。
+
 ## 项目规则（迭代必读）
 
 **所有改动都必须先读 [RULES.md](RULES.md)。** 它定义了内容合规红线、搜索白名单硬规则、模块边界、

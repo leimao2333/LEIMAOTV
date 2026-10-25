@@ -178,6 +178,12 @@ fun PlayerScreen(
     var numberBuffer by remember { mutableStateOf("") }
     var interactionTick by remember { mutableIntStateOf(0) }
 
+    // 自动跳台（LIVE-25 第 3 层）：全部线路失败时自动换下一个台，而不是立刻弹失败面板。
+    // 计数跨重组保留；成功播放一次清零；连续跳到上限才把失败面板交还给用户。
+    var autoSkipCount by remember { mutableIntStateOf(0) }
+    // 轻提示「该台不可用，已切到 X」：2s 淡出，不抢焦点、不打断播放
+    var skipToast by remember { mutableStateOf<String?>(null) }
+
     // HUD（台名 / 分组 / 线路 / 按键提示）必须跟控制条一样会自己消失。
     // 常驻等于在画面上钉死两行字：看电视时永远是干扰，亮画面上还会糊成一片。
     // 初始为 true 是让刚进页面的人知道自己在看哪个台，随后自己退掉。
@@ -252,6 +258,33 @@ fun PlayerScreen(
     }
 
     val playback = state.playback
+    // 自动跳台（LIVE-25）：失败时先试下一个台，连续失败到上限才落失败面板。
+    // 依赖整个 playback 对象而不是 isFailed 布尔 —— 布尔在「失败→换台→再失败」里不变化，
+    // 会漏掉第二次失败；整个对象每次状态迁移都是新实例，effect 一定重跑。
+    LaunchedEffect(playback) {
+        when (playback) {
+            is PlaybackState.Playing -> autoSkipCount = 0
+
+            is PlaybackState.Failed -> {
+                if (autoSkipCount < AUTO_SKIP_MAX) {
+                    autoSkipCount++
+                    // 轻提示带上「切到哪个台」：只知道「切了」不知道「切到哪」等于没说
+                    skipToast = "该台不可用，已切到下一个台（连续 $autoSkipCount 个）"
+                    onSwitchChannel(1)
+                }
+            }
+
+            else -> Unit
+        }
+    }
+
+    // 轻提示 2s 淡出：不抢焦点、不打断播放，只挂一句说明
+    LaunchedEffect(skipToast) {
+        if (skipToast == null) return@LaunchedEffect
+        delay(SKIP_TOAST_MS)
+        skipToast = null
+    }
+
     val isFailed = playback is PlaybackState.Failed
 
     // 控制条一出现，HUD 就跟着亮：用户已经在操作 UI 了，这时候藏台名只会让人更迷惑。
@@ -359,11 +392,28 @@ fun PlayerScreen(
                         PlayerTopBar(state = state, numberBuffer = numberBuffer)
                     }
                 }
+
+                // 轻提示（LIVE-25）：自动跳台时的「已切到 X」，右上角 2s 淡出。
+                // 不抢焦点、不打断播放 —— 它不是面板，只是浮在画面角落的一句话
+                skipToast?.let { message ->
+                    Text(
+                        text = message,
+                        style = TvText.current.body,
+                        color = Color(0xFFFFEB3B),
+                        modifier =
+                            Modifier
+                                .align(Alignment.End)
+                                .padding(end = 24.dp, top = 8.dp)
+                                .background(Color(0xB3000000), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
                 Spacer(modifier = Modifier.weight(1f))
 
                 if (isFailed) {
                     FailurePanel(
                         state = playback,
+                        autoSkippedCount = autoSkipCount.takeIf { it >= AUTO_SKIP_MAX },
                         onRetry = onRetry,
                         onSwitchLine = { onSwitchLine(1) },
                         onNextChannel = { onSwitchChannel(1) },
@@ -595,6 +645,8 @@ private fun ControlBar(
 @Composable
 private fun FailurePanel(
     state: PlaybackState.Failed,
+    /** 自动跳台跳了多少个台（>= AUTO_SKIP_MAX 时文案改成「连续 N 个台不可用」） */
+    autoSkippedCount: Int? = null,
     onRetry: () -> Unit,
     onSwitchLine: () -> Unit,
     onNextChannel: () -> Unit,
@@ -613,7 +665,12 @@ private fun FailurePanel(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "这个台暂时播不了",
+            text =
+                if (autoSkippedCount != null) {
+                    "连续 $autoSkippedCount 个台不可用"
+                } else {
+                    "这个台暂时播不了"
+                },
             style = TvText.current.title,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -901,3 +958,12 @@ private const val HUD_FADE_MS = 180
 
 /** 频道号最多四位数，够用且不会让提示条撑破 */
 private const val MAX_NUMBER_DIGITS = 4
+
+/**
+ * 自动跳台上限（LIVE-25）：连续这么多台都播不起来，就停手、把失败面板交还给用户。
+ * 再往下跳没有意义 —— 用户需要知道「是这一片源都坏了」而不是「应用卡住了一直换台」。
+ */
+private const val AUTO_SKIP_MAX = 3
+
+/** 轻提示「已切到 X」的停留时长：够看清、不碍事 */
+private const val SKIP_TOAST_MS = 2_000L

@@ -35,4 +35,27 @@ interface ChannelLineQualityDao {
     /** 清掉过期的记录：源换了之后旧 URL 没意义，占着表只会让「好久没播」的降权逻辑误伤新线路 */
     @Query("DELETE FROM channel_line_quality WHERE lastSeenAt < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    /** 总记录数（裁剪用：超过上限才动刀，避免每次回写都扫一遍） */
+    @Query("SELECT COUNT(*) FROM channel_line_quality")
+    suspend fun count(): Int
+
+    /**
+     * 只保留最近 [keep] 条（按 lastSeenAt 倒序），其余删掉。
+     *
+     * 用子查询挑出要删的行：`lastSeenAt` 排不进前 [keep] 的都在删除集里。
+     * 内存里做「读全表 → 排序 → 删」也行，但那是把几万行拉进内存，
+     * SQL 一条子查询让数据库自己算，才是盒子上的正解。
+     */
+    @Query(
+        """
+        DELETE FROM channel_line_quality
+        WHERE (channelId, url) IN (
+            SELECT channelId, url FROM channel_line_quality
+            ORDER BY lastSeenAt DESC
+            LIMIT -1 OFFSET :keep
+        )
+        """,
+    )
+    suspend fun trimToKeep(keep: Int)
 }

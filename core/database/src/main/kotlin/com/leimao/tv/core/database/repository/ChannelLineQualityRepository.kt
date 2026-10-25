@@ -38,6 +38,14 @@ interface ChannelLineQualityRepository {
     suspend fun deleteChannel(channelId: Long)
 
     suspend fun deleteOlderThan(before: Long)
+
+    /**
+     * 落盘裁剪（LIVE-25）：过期删 + 超量删最旧。
+     *
+     * 读失败必须退化为空表、绝不打断起播 —— 所以这里要么成功裁剪，要么什么都不做，
+     * 绝不把裁剪的异常抛给起播链路（§6.6 关键路径）。
+     */
+    suspend fun prune(now: Long)
 }
 
 class RoomChannelLineQualityRepository(
@@ -68,6 +76,7 @@ class RoomChannelLineQualityRepository(
                 lastSeenAt = now,
             ),
         )
+        prune(now)
     }
 
     override suspend fun recordFailure(
@@ -85,11 +94,29 @@ class RoomChannelLineQualityRepository(
                 lastSeenAt = now,
             ),
         )
+        prune(now)
     }
 
     override suspend fun deleteChannel(channelId: Long) = dao.deleteChannel(channelId)
 
     override suspend fun deleteOlderThan(before: Long) = dao.deleteOlderThan(before)
+
+    override suspend fun prune(now: Long) {
+        runCatching {
+            // 过期：180 天没被任何记录碰过，源早就换了，旧 URL 留着只会误伤新线路
+            dao.deleteOlderThan(now - EXPIRE_AFTER_MS)
+            // 超量：只留最近 MAX_ROWS 条，其余删最旧（子查询在数据库里做，不拉全表进内存）
+            if (dao.count() > MAX_ROWS) dao.trimToKeep(MAX_ROWS)
+        }
+    }
+
+    private companion object {
+        /** 记忆上限：再多的「这条线路失败过」也没有参考价值，只会拖慢排序与占表 */
+        const val MAX_ROWS = 200
+
+        /** 180 天过期：太久远的失败记录对「现在这条源还通不通」没有任何参考意义 */
+        const val EXPIRE_AFTER_MS = 180L * 24 * 60 * 60 * 1000
+    }
 }
 
 private fun ChannelLineQualityEntity.toModel(): ChannelLineQuality =

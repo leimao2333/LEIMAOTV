@@ -1,6 +1,7 @@
 package com.leimao.tv.feature.iptv
 
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.CityProvince
 
 /** 一个分组下的频道集合。分组与频道都在仓库层一次查好，UI 不做二次聚合（§7 列表性能）。 */
 data class ChannelGroup(
@@ -14,11 +15,32 @@ data class ChannelGroup(
  * 为什么不在 SQL 里 GROUP BY 再拼：分组只是展示用的切片，保持原顺序能保证
  * 「列表第一个」「上下键换台」与分组展示用的是同一套顺序，不会出现「列表里第一个台
  * 和按上键跳到的不一致」这种只有用户能发现的错位。
+ *
+ * ## 分组归一化（地方台归省）
+ *
+ * 上游源把地方台拆成「地方频道」大组 + 几十个「XX频道」组，而「地方频道」里的台名
+ * 只有「市/县名 + 频道类型」，没有省份。这里把 `groupName == 地方频道` 的台按
+ * [CityProvince] 反查所属省，归进对应的「XX频道」；查不出的归「其他地方台」——
+ * 错归比漏归更糟（用户会在浙江频道里翻到河北台，怀疑整个分组都乱了）。
  */
 fun groupChannels(channels: List<Channel>): List<ChannelGroup> =
     channels
+        .map { it.normalized() }
         .groupBy { it.groupName }
         .map { (name, items) -> ChannelGroup(name = name, channels = items) }
+
+/** 单条频道的分组归一化。只动「地方频道」，其余分组原样。 */
+private fun Channel.normalized(): Channel {
+    if (groupName != LOCAL_GROUP) return this
+    val province = CityProvince.provinceOf(name) ?: return this.copy(groupName = OTHER_LOCAL_GROUP)
+    return this.copy(groupName = "${province}频道")
+}
+
+/** 上游源里「未归省的地方台」这个杂组的名字 */
+private const val LOCAL_GROUP = "地方频道"
+
+/** 反查不到省的地方台的兜底组 */
+private const val OTHER_LOCAL_GROUP = "其他地方台"
 
 /**
  * 换台用：按当前频道在全量列表里的位置，取相邻的一个。

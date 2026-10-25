@@ -109,4 +109,48 @@ class ChannelGroupsTest {
         val groups = groupChannels(channels)
         assertEquals(emptyList<ChannelGroup>(), filterGroups(groups, "不存在"))
     }
+
+    // ---------- 分组归一化：地方台归省（SEARCH-06 之后补的分组整理） ----------
+
+    @Test
+    fun `地方频道按市县归入对应省频道`() {
+        val result =
+            groupChannels(
+                listOf(
+                    channel(1, "上虞新闻综合", "地方频道", 1),
+                    channel(2, "哈尔滨娱乐", "地方频道", 2),
+                    channel(3, "四川科教", "四川频道", 3),
+                ),
+            )
+
+        val byName = result.associateBy { it.name }
+        assertEquals(listOf(1L), byName["浙江频道"]?.channels?.map { it.id })
+        assertEquals(listOf(2L), byName["黑龙江频道"]?.channels?.map { it.id })
+        assertEquals(listOf(3L), byName["四川频道"]?.channels?.map { it.id })
+        assertEquals(null, byName["地方频道"])
+    }
+
+    @Test
+    fun `识别不出的地方台归其他地方台而不是硬塞`() {
+        val result =
+            groupChannels(
+                listOf(channel(1, "中国蓝新闻", "地方频道", 1)),
+            )
+
+        assertEquals(listOf("其他地方台"), result.map { it.name })
+        assertEquals(listOf(1L), result[0].channels.map { it.id })
+    }
+
+    @Test
+    fun `非地方频道的分组原样保留`() {
+        val result =
+            groupChannels(
+                listOf(
+                    channel(1, "CCTV1 综合", "央视频道", 1),
+                    channel(2, "湖南卫视", "卫视频道", 2),
+                ),
+            )
+
+        assertEquals(listOf("央视频道", "卫视频道"), result.map { it.name })
+    }
 }

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.3.0.1"
+    const val CURRENT_VERSION: String = "0.4.0.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,19 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.4.0.0",
+                date = "2026-10-25",
+                changes =
+                    listOf(
+                        "搜索换上了 26 键键盘：数字、字母、删除清空一应俱全，遥控器方向键当手指用",
+                        "打拼音就能搜：打全拼「hunan」或首字母「hnws」都能找到湖南卫视，影视也支持",
+                        "边打字边出中文候选词，按 OK 直接换成中文再搜，不用再背频道全名",
+                        "直播分组更干净：地方频道里的市县级电视台按省份归并到对应的「XX 频道」",
+                        "同一频道多条线路自动挑最流畅的：失败、卡顿过的靠后，越用越顺手",
+                        "导入 / 添加源不再把人硬拽去播放页，留在源管理页看清结果",
+                    ),
+            ),
             VersionEntry(
                 version = "0.3.0.1",
                 date = "2026-10-25",

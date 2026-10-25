@@ -3,6 +3,7 @@ package com.leimao.tv.feature.vod
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,7 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -75,6 +81,10 @@ fun VodHomeScreen(
 ) {
     val firstChip = remember { FocusRequester() }
 
+    // 筛选区折叠开关：聚合源（一个源里几十个站）会把年份/地区/标签撑到十几行，
+    // 把下方影片网格整个顶出屏幕。默认收起，用户想看筛选项再点开（VOD-03）。
+    var filterExpanded by rememberSaveable { mutableStateOf(false) }
+
     // 首帧还没布局完时 requestFocus 会打空，等一帧再要焦点（与全局菜单同一套做法）
     LaunchedEffect(autoFocus) {
         if (!autoFocus) return@LaunchedEffect
@@ -112,34 +122,64 @@ fun VodHomeScreen(
             }
         }
 
-        if (state.hasSource && (state.years.isNotEmpty() || state.areas.isNotEmpty())) {
+        if (state.hasSource && (state.years.isNotEmpty() || state.areas.isNotEmpty() || state.tags.isNotEmpty())) {
             Spacer(modifier = Modifier.height(10.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterRow(
-                    label = "年份",
-                    values = state.years.map { it.toString() },
-                    selected = state.selectedYear?.toString(),
-                    onSelect = { onSelectYear(it?.toIntOrNull()) },
-                )
-                FilterRow(
-                    label = "地区",
-                    values = state.areas,
-                    selected = state.selectedArea,
-                    onSelect = onSelectArea,
-                )
+            // 筛选开关：一行按钮，展开后文字变成「收起筛选」。选中任一筛选项时给个
+            // 视觉提示，让用户知道「现在结果是被筛过的」。
+            FocusableCard(onClick = { filterExpanded = !filterExpanded }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (filterExpanded) "收起筛选" else "筛选",
+                        style = TvText.current.label,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    val hasActiveFilter =
+                        state.selectedYear != null ||
+                            state.selectedArea != null ||
+                            state.selectedTag != null
+                    if (!filterExpanded && hasActiveFilter) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "已筛选",
+                            style = TvText.current.hint,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (filterExpanded) "▲" else "▼",
+                        style = TvText.current.label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-        }
-
-        // 标签（VOD-08）：源里 `vod_class` 的词库，按出现频次排。两行 chip 就是
-        // 电视端的「宫格」—— 一块能一眼扫完的区域，而不是要滚动的长列表；
-        // 首项「不限」与年份/地区两行保持同一套语义
-        if (state.tags.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(10.dp))
-            TagBlock(
-                tags = state.tags,
-                selected = state.selectedTag,
-                onSelect = onSelectTag,
-            )
+            if (filterExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (state.years.isNotEmpty()) {
+                        FilterRow(
+                            label = "年份",
+                            values = state.years.map { it.toString() },
+                            selected = state.selectedYear?.toString(),
+                            onSelect = { onSelectYear(it?.toIntOrNull()) },
+                        )
+                    }
+                    if (state.areas.isNotEmpty()) {
+                        FilterRow(
+                            label = "地区",
+                            values = state.areas,
+                            selected = state.selectedArea,
+                            onSelect = onSelectArea,
+                        )
+                    }
+                    if (state.tags.isNotEmpty()) {
+                        TagBlock(
+                            tags = state.tags,
+                            selected = state.selectedTag,
+                            onSelect = onSelectTag,
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -356,10 +396,26 @@ private fun MediaRow(
             color = MaterialTheme.colorScheme.onBackground,
         )
         Spacer(modifier = Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            // key 必须稳定：刷新时焦点才不会跳到第一张（RULES §7）
-            items(items, key = { "${it.sourceId}-${it.sourceKey}" }) { item ->
-                PosterCard(item = item, onClick = { onSelect(item) })
+        // 行尾不露半张卡（用户实测反馈）：按可用宽度算出整数张数，
+        // 每张宽度均摊。少半张卡难看，比「固定宽度 + 滚动暗示」重要。
+        BoxWithConstraints {
+            val spacing = 14.dp
+            val count =
+                maxOf(
+                    MIN_POSTERS_PER_ROW,
+                    ((maxWidth + spacing) / (POSTER_WIDTH + spacing)).toInt(),
+                )
+            val cardWidth = (maxWidth - spacing * (count - 1)) / count
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                // key 必须稳定：刷新时焦点才不会跳到第一张（RULES §7）
+                items(items, key = { "${it.sourceId}-${it.sourceKey}" }) { item ->
+                    PosterCard(
+                        item = item,
+                        posterWidth = cardWidth,
+                        posterHeight = cardWidth * POSTER_ASPECT,
+                        onClick = { onSelect(item) },
+                    )
+                }
             }
         }
     }
@@ -504,19 +560,21 @@ private fun WatchedCard(
 @Composable
 private fun PosterCard(
     item: VodSummary,
+    posterWidth: Dp = POSTER_WIDTH,
+    posterHeight: Dp = POSTER_HEIGHT,
     onClick: () -> Unit,
 ) {
     FocusableCard(
         onClick = onClick,
         contentPadding = PaddingValues(0.dp),
-        modifier = Modifier.width(POSTER_WIDTH),
+        modifier = Modifier.width(posterWidth),
     ) {
         Column {
             Box(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .height(POSTER_HEIGHT)
+                        .height(posterHeight)
                         .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
@@ -621,10 +679,16 @@ private fun HintBlock(
 /** 标签每行放几个：1080p 下每个 chip 约 100dp，8 个正好铺满安全区 */
 private const val TAG_COLUMNS = 8
 
-private val POSTER_WIDTH = 168.dp
+/** 期望的单张海报宽度：实际宽度按可用宽整除均摊（见 [MediaRow]），这是下限参考值 */
+private val POSTER_WIDTH = 150.dp
 
-/** 2:3 是海报的通行比例；1080p 下一行正好放 5 张（§6.3 的 4~6 列） */
-private val POSTER_HEIGHT = 252.dp
+/** 海报 2:3 通行比例 */
+private const val POSTER_ASPECT = 1.5f
+
+/** 一行最少放几张：太宽的屏幕上海报也不能无限放大到失真 */
+private const val MIN_POSTERS_PER_ROW = 4
+
+private val POSTER_HEIGHT = POSTER_WIDTH * POSTER_ASPECT
 
 /** 继续观看卡：16:9 */
 private val CONTINUE_WIDTH = 244.dp

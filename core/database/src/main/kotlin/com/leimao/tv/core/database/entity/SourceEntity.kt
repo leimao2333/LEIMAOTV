@@ -31,4 +31,6 @@ data class SourceEntity(
     val lastRefreshNote: String? = null,
     /** 列表里的显示顺序（SET-03 上移/下移）。0 起递增，导入时按 JSON 里的顺序续排 */
     val sortOrder: Int = 0,
+    /** 影视源格式（applecms / moontv）。直播源恒为默认 applecms */
+    val format: String = "applecms",
 )

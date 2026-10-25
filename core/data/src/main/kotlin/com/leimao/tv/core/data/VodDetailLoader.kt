@@ -68,7 +68,7 @@ class VodDetailLoader(
         val headers = source.toRequestHeaders()
         val adapter =
             adapterFactory(
-                VodSourceRef(id = source.id, baseUrl = source.url, headers = headers),
+                VodSourceRef(id = source.id, baseUrl = source.url, headers = headers, format = source.format),
             )
 
         return when (val result = adapter.detail(sourceKey)) {

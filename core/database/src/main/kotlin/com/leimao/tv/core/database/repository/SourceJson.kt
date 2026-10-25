@@ -28,6 +28,7 @@ internal object SourceJson {
             if (s.referer != null) sb.append(field("referer", s.referer)).append(',')
             if (s.basicUser != null) sb.append(field("basicUser", s.basicUser)).append(',')
             if (s.basicPass != null) sb.append(field("basicPass", s.basicPass)).append(',')
+            if (s.format != SourceFormat.APPLECMS) sb.append(field("format", s.format)).append(',')
             sb.append("\"enabled\":").append(s.enabled)
             sb.append('}')
         }
@@ -98,6 +99,7 @@ internal object SourceJson {
         var referer: String? = null
         var basicUser: String? = null
         var basicPass: String? = null
+        var format = SourceFormat.APPLECMS
 
         val typeV = valueOf(obj, "type")
         if (typeV != null) type = typeV
@@ -111,6 +113,8 @@ internal object SourceJson {
         referer = valueOf(obj, "referer")
         basicUser = valueOf(obj, "basicUser")
         basicPass = valueOf(obj, "basicPass")
+        val formatV = valueOf(obj, "format")
+        if (formatV != null) format = normalizeFormat(formatV)
 
         if (url.isBlank()) throw IllegalArgumentException("备份里的某个源缺少 url")
         return Source(
@@ -123,6 +127,7 @@ internal object SourceJson {
             referer = referer,
             basicUser = basicUser,
             basicPass = basicPass,
+            format = format,
         )
     }
 
@@ -165,6 +170,17 @@ internal object SourceJson {
 
     private fun field(key: String, value: String): String =
         "\"$key\":\"${escape(value)}\""
+
+    /**
+     * 外部文件的 format 字段写法不统一（`moontv` / `moontv-encrypted`），
+     * 归一成客户端枚举名。认不出的落回 applecms。
+     */
+    private fun normalizeFormat(raw: String): String =
+        when (raw.trim().lowercase()) {
+            "moontv", "moontv-encrypted", "moontv_encrypted" -> SourceFormat.MOONTV
+            "applecms" -> SourceFormat.APPLECMS
+            else -> SourceFormat.APPLECMS
+        }
 
     private fun escape(value: String): String =
         value

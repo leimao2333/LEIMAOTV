@@ -99,7 +99,12 @@ class VodCatalogRefresher(
     ): VodSourceOutcome {
         val adapter =
             adapterFactory(
-                VodSourceRef(id = source.id, baseUrl = source.url, headers = source.toRequestHeaders()),
+                VodSourceRef(
+                    id = source.id,
+                    baseUrl = source.url,
+                    headers = source.toRequestHeaders(),
+                    format = source.format,
+                ),
             )
 
         val categories =

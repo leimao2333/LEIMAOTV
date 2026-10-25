@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -229,7 +231,12 @@ fun SourceManagerScreen(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // horizontalScroll：六个按钮在窄屏 / 大字号下放不下一行，不加的话最后一张
+                // 卡片会被挤压换行、撑高整行，把列表顶出屏幕（2026-10-24 模拟器实测抓出）
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     FocusableCard(
                         onClick = { adding = true },
                         modifier = Modifier.focusRequester(firstActionFocus),
@@ -317,7 +324,12 @@ fun SourceManagerScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 if (sources.isEmpty() && !busy) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    // weight(1f) 而不是 fillMaxSize：Column 里非 weight 子项会拿满整个父高度，
+                    // 排在头部内容之后就被顶出屏幕外，列表 / 空态整个看不见
+                    Box(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
                             text = "还没有订阅源",
                             style = TvText.current.title,
@@ -326,7 +338,7 @@ fun SourceManagerScreen(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(items = sources, key = { it.id }) { source ->

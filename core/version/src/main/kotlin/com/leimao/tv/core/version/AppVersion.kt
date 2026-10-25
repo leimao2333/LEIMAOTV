@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.2.9.10"
+    const val CURRENT_VERSION: String = "0.3.0.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.3.0.0",
+                date = "2026-10-24",
+                changes =
+                    listOf(
+                        "新增影视聚合源：导入 MoonTV 加密配置（含几十个影视站）后，搜索与浏览聚合全部站点一起出片",
+                        "影视页筛选默认收起为一行「筛选」，点开才展开，聚合源下影片列表不再被顶出屏幕",
+                        "左侧导航栏选中栏目后自动收起，到最左按返回键重新拉出",
+                        "影片海报行尾不再露半张卡，海报加载跟随网络代理设置",
+                    ),
+            ),
             VersionEntry(
                 version = "0.2.9.10",
                 date = "2026-10-24",

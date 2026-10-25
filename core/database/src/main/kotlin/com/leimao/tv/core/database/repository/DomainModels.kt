@@ -22,6 +22,8 @@ data class Source(
     val basicUser: String? = null,
     val basicPass: String? = null,
     val sortOrder: Int = 0,
+    /** 影视源的格式（`applecms` / `moontv`）。直播源不关心，恒为默认 */
+    val format: String = SourceFormat.APPLECMS,
 ) {
     val hasCustomHeaders: Boolean
         get() = !userAgent.isNullOrBlank() || !referer.isNullOrBlank() || !basicUser.isNullOrBlank()
@@ -36,6 +38,7 @@ data class NewSource(
     val referer: String? = null,
     val basicUser: String? = null,
     val basicPass: String? = null,
+    val format: String = SourceFormat.APPLECMS,
 )
 
 /**
@@ -54,6 +57,12 @@ data class ChannelWithSource(
 object SourceType {
     const val LIVE = "LIVE"
     const val VOD = "VOD"
+}
+
+/** 影视源的格式（VOD）。与 :core:network 的 `VodSourceRef.FORMAT_*` 一一对应。 */
+object SourceFormat {
+    const val APPLECMS = "applecms"
+    const val MOONTV = "moontv"
 }
 
 /**

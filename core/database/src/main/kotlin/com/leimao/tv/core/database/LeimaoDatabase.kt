@@ -53,7 +53,7 @@ import com.leimao.tv.core.database.entity.VodProgressEntity
         VodProgressEntity::class,
         VodFavoriteEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -352,6 +352,19 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 9 → 10：`source` 加格式列（VOD moontv 聚合）。
+         *
+         * 纯加法。老行 `format = 'applecms'`（默认值），直播源与老影视源都落这个值，
+         * 只有新导入的 moontv 加密订阅会写 `'moontv'`。
+         */
+        val MIGRATION_9_10: Migration =
+            object : Migration(9, 10) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE `source` ADD COLUMN `format` TEXT NOT NULL DEFAULT 'applecms'")
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
                 .addMigrations(
@@ -363,6 +376,7 @@ abstract class LeimaoDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
+                    MIGRATION_9_10,
                 )
                 .build()
     }

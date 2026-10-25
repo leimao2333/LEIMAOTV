@@ -63,6 +63,7 @@ class RoomSourceRepository(
                 basicPass = source.basicPass?.takeIf { it.isNotBlank() },
                 enabled = true,
                 sortOrder = nextOrder,
+                format = source.format,
             ),
         )
     }
@@ -117,6 +118,7 @@ class RoomSourceRepository(
                     basicPass = src.basicPass?.takeIf { it.isNotBlank() },
                     enabled = src.enabled,
                     sortOrder = order,
+                    format = src.format,
                 ),
             )
             order += 1
@@ -140,4 +142,5 @@ private fun SourceEntity.toSource(): Source =
         basicUser = basicUser,
         basicPass = basicPass,
         sortOrder = sortOrder,
+        format = format,
     )

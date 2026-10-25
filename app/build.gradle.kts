@@ -42,10 +42,10 @@ android {
         minSdk = 21
         targetSdk = 35
 
-        // versionCode 按 RULES §10.2 公式算：0×1000000 + 2×10000 + 9×100 + 10 = 20910
+        // versionCode 按 RULES §10.2 公式算：0×1000000 + 3×10000 + 0×100 + 0 = 30000
         // versionName 必须与 AppVersion.CURRENT_VERSION 逐字符相等（SYS-10，单测钉住）
-        versionCode = 20910
-        versionName = "0.2.9.10"
+        versionCode = 30000
+        versionName = "0.3.0.0"
     }
 
     signingConfigs {

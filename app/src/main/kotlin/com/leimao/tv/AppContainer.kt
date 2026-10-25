@@ -86,12 +86,13 @@ class AppContainer(context: Context) {
 
     /**
      * 全应用共用一个 OkHttp 实例：连接池复用是它性能的大头，
-     * 播放内核（Media3 的 data source）也拿同一个实例。
+     * 播放内核（Media3 的 data source）与图片加载（Coil）也拿同一个实例。
      *
      * 从 [AppHttp] 的基线 client 派生出带用户超时/代理的那份：`newBuilder()` 共用连接池与
-     * Dispatcher，不会因为「多一层配置」就丢掉连接复用。
+     * Dispatcher，不会因为「多一层配置」就丢掉连接复用。图片走同一份代理 / 超时，
+     * 否则隔离网络下海报全都拉不到。
      */
-    private val okHttpClient: OkHttpClient = buildNetworkClient(AppHttp.client, networkSettings)
+    val okHttpClient: OkHttpClient = buildNetworkClient(AppHttp.client, networkSettings)
 
     val httpClient: HttpClient = OkHttpHttpClient(okHttpClient)
 

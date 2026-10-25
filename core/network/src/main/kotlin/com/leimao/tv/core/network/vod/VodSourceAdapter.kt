@@ -13,12 +13,22 @@ import com.leimao.tv.core.network.RequestHeaders
  *
  * [id] 是数据库里 `source.id`，用来给解析出来的条目打「来自哪个源」的标记 ——
  * 跨源的 `vod_id` 会撞，只有 `(sourceId, sourceKey)` 才唯一。
+ *
+ * [format] 是源的格式（`applecms` / `moontv`），决定 [VodAdapters.forSource] 造出
+ * 哪种适配器。默认 `applecms`：大多数影视源都是苹果CMS 接口，显式标注 moontv 的
+ * 才走聚合适配器。
  */
 data class VodSourceRef(
     val id: Long,
     val baseUrl: String,
     val headers: RequestHeaders = RequestHeaders.NONE,
-)
+    val format: String = FORMAT_APPLECMS,
+) {
+    companion object {
+        const val FORMAT_APPLECMS = "applecms"
+        const val FORMAT_MOONTV = "moontv"
+    }
+}
 
 /** 抓取失败的原因。文案在 UI 层翻译 —— 同一个原因在「添加源」和「刷新首页」两种场景下说法不同。 */
 enum class VodFailure {
@@ -139,15 +149,19 @@ class AppleCmsVodAdapter(
         }
 }
 
-/** 按源造适配器。目前只有苹果CMS 一种格式，将来按 `source` 的配置字段分发。 */
+/** 按源的 format 造适配器。苹果CMS 是默认；moontv 加密订阅走聚合适配器。 */
 object VodAdapters {
     fun forSource(
         http: HttpClient,
         source: VodSourceRef,
-    ): VodSourceAdapter = AppleCmsVodAdapter(http, source)
+    ): VodSourceAdapter =
+        when (source.format) {
+            VodSourceRef.FORMAT_MOONTV -> MoontvVodAdapter(http, source)
+            else -> AppleCmsVodAdapter(http, source)
+        }
 }
 
-private fun FetchErrorKind.toVodFailure(): VodFailure =
+internal fun FetchErrorKind.toVodFailure(): VodFailure =
     when (this) {
         FetchErrorKind.TIMEOUT -> VodFailure.TIMEOUT
         FetchErrorKind.HTTP -> VodFailure.HTTP

@@ -3,6 +3,7 @@ package com.leimao.tv.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -166,6 +167,10 @@ fun HomeScreen(
     val firstNavFocus = remember { FocusRequester() }
     val stayFocus = remember { FocusRequester() }
 
+    // 内容区焦点入口：导航项上按 → 时把焦点显式送进内容区 —— 不拦的话焦点搜索会被
+    // 几何上更近的 ModeSwitch 抢走，用户按右没反应、导航也不收（2026-10-24 模拟器实测）
+    val contentFocus = remember { FocusRequester() }
+
     // 导航栏自动隐藏（SET-02）。
     //
     // 驱动信号用「内容区是否有焦点」而不是「导航栏是否失焦」：导航栏内部节点之间移动
@@ -176,14 +181,6 @@ fun HomeScreen(
     // 收起时左侧留一个 56dp 的窄条：完全隐藏后左侧没有任何可聚焦目标，按 ← 焦点
     // 无处可去。窄条是收起状态下唯一的焦点目标，接住焦点立刻展开 —— 这是「回得来」的保证。
     var navExpanded by rememberSaveable { mutableStateOf(true) }
-
-    // 焦点迁移冷静期（模拟器实测抓到的焦点回弹）：
-    // 窄条拿到焦点 → 展开 → 窄条销毁 → LaunchedEffect 抢焦点到第一个导航项。但抢焦点
-    // 跑不过焦点系统的「就近回填」—— 窄条销毁的瞬间焦点先落到内容区，内容区的
-    // hasFocus=true 又把导航栏收回去，两个 onFocusChanged 打架，导航栏在展开/收起间
-    // 震荡后死区。解法：窄条触发展开时开一个短暂冷静期，期间内容区不响应 hasFocus，
-    // 给 LaunchedEffect 完成迁移留出窗口。
-    var collapseSuppressedUntil by remember { mutableStateOf(0L) }
 
     // navExpanded 变 true 时（含首帧）把焦点接到第一个导航项。注意这步是必须的而不是
     // 锦上添花：从窄条展开是一次 if/else 重组，窄条节点被销毁，落在它身上的焦点会跟着
@@ -197,10 +194,6 @@ fun HomeScreen(
         }
     }
 
-    // 从播放页 BACK 回来时，rememberSaveable 会把收起状态（navExpanded=false）一并恢复：
-    // 收起态首帧没有任何初始焦点落点（上面的 effect 只在展开时请求），直接死区。
-    // 回首页 = 回到导航起点，强制展开一次 —— 下次进内容区还会照常收起，不丢用户状态。
-    LaunchedEffect(Unit) { if (!navExpanded) navExpanded = true }
     LaunchedEffect(showExitConfirm) { if (showExitConfirm) stayFocus.requestFocus() }
 
     // 主页按返回 = 退出确认，不回到播放页，避免「播放 ↔ 主页」来回打转（§6.4）
@@ -243,6 +236,10 @@ fun HomeScreen(
                                 onClick = {
                                     onSectionChange(item)
                                     item.mode?.let { target -> if (target != mode) onModeChange(target) }
+                                    // 选中栏目即收起导航栏（SET-02）：用户要的是内容，不是
+                                    // 一直留着导航。收起来后焦点交给内容区，别停在已销毁的导航上
+                                    navExpanded = false
+                                    contentFocus.requestFocus()
                                 },
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -264,9 +261,6 @@ fun HomeScreen(
                                 .onFocusChanged {
                                     if (it.isFocused) {
                                         navExpanded = true
-                                        // 焦点从窄条迁到导航项需要一帧，期间内容区可能被
-                                        // 焦点系统就近回填，别让它把导航栏又收回去
-                                        collapseSuppressedUntil = System.currentTimeMillis() + 500
                                     }
                                 }
                                 .focusable()
@@ -290,13 +284,10 @@ fun HomeScreen(
                         Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            // 焦点进内容区 = 用户在操作内容 → 收起导航栏（SET-02）。
-                            // hasFocus 而不是 isFocused：焦点在内容区任何子孙节点上都该收
-                            .onFocusChanged {
-                                if (it.hasFocus && System.currentTimeMillis() >= collapseSuppressedUntil) {
-                                    navExpanded = false
-                                }
-                            },
+                            // focusGroup：导航栏点选栏目后 requestFocus 指到这里，
+                            // 焦点落进组内首个可聚焦目标（SET-02）
+                            .focusRequester(contentFocus)
+                            .focusGroup(),
                 ) {
                     ContentArea(
                         section = section,

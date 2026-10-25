@@ -105,6 +105,10 @@ class LineSchedulerTest {
             override suspend fun deleteChannel(channelId: Long) = Unit
 
             override suspend fun deleteOlderThan(before: Long) = Unit
+
+            // 裁剪（LIVE-25）在调度器里不会被调用：它是「落盘后的维护动作」，
+            // 由起播链路自己触发，这里给个空实现即可
+            override suspend fun prune(now: Long) = Unit
         }
 
     /** 每条 url → (是否可达, 耗时ms)；耗时 null 表示不可达 */

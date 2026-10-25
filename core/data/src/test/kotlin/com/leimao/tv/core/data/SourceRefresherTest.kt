@@ -225,6 +225,8 @@ class SourceRefresherTest {
 
         override suspend fun move(id: Long, direction: Int) = Unit
 
+        override suspend fun entryCounts(): Map<Long, Int> = emptyMap()
+
         override suspend fun exportJson(): String = ""
 
         override suspend fun importJson(json: String): Int = 0

@@ -60,7 +60,24 @@ fun FilterBar(
 ) {
     var openIndex by remember { mutableStateOf<Int?>(null) }
 
-    Box(modifier = modifier) {
+    Box(
+        modifier =
+            modifier
+                // BACK 收面板的唯一入口（2026-10-25 模拟器实测抓出）。
+                //
+                // 以前这条判断写在值菜单自己的 `onPreviewKeyEvent` 里：只有焦点落在菜单里才收得到。
+                // 焦点还在 chip 上（刚点开、还没往下按）时按 BACK，事件一路传到主页的
+                // 退出确认，面板却还开着 —— 用户看到「退出对话框压在筛选面板上」。
+                // 放在这一层是因为它是 chip 与菜单的共同祖先：不管焦点在哪，预览阶段都先经过它。
+                .onPreviewKeyEvent { event ->
+                    if (openIndex != null && event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                        openIndex = null
+                        true
+                    } else {
+                        false
+                    }
+                },
+    ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             filters.forEachIndexed { index, spec ->
                 FilterChip(
@@ -87,7 +104,6 @@ fun FilterBar(
                         spec.onSelect(value)
                         openIndex = null
                     },
-                    onDismiss = { openIndex = null },
                 )
             }
         }
@@ -138,14 +154,13 @@ private fun FilterChip(
  * 值弹层：竖向选项列表，遥控器全流程。
  *
  * [onPick] 返回 null 表示「选了全部」（清空筛选），非 null 是选中的值。
- * BACK 走 [onDismiss]（收层、不选值）；OK 走 [onPick]（选值、收层）。
+ * BACK 由 [FilterBar] 那一层统一收（见那里的说明），这里只负责 OK 选值。
  */
 @Composable
 private fun ValueMenu(
     values: List<String>,
     selected: String?,
     onPick: (String?) -> Unit,
-    onDismiss: () -> Unit,
 ) {
     val allOptions = listOf<String?>(null) + values
 
@@ -153,15 +168,7 @@ private fun ValueMenu(
         modifier =
             Modifier
                 .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.medium)
-                .padding(8.dp)
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
-                        onDismiss()
-                        true
-                    } else {
-                        false
-                    }
-                },
+                .padding(8.dp),
     ) {
         LazyColumn(
             modifier = Modifier.width(220.dp).heightIn(max = 360.dp),

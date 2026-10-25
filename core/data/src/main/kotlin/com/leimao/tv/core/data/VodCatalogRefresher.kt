@@ -89,8 +89,31 @@ class VodCatalogRefresher(
             coroutineScope {
                 vodSources.map { source -> async { refreshOne(source, now, gate) } }.awaitAll()
             }
+        // 把这次结果写回源本身（SET-09）：源管理页的卡片要显示「最近刷新时间」与失败原因。
+        // 影视源以前从不写这两个字段，卡片上永远写着「从未刷新」，旁边却是「490 部影片」——
+        // 两句话自相矛盾，用户没法判断这份片库是新是旧。
+        outcomes.forEach { outcome ->
+            sources.markRefreshed(outcome.sourceId, now, noteFor(outcome))
+        }
         return VodCatalogReport(at = now, outcomes = outcomes)
     }
+
+    /** 刷新结果 → 卡片上那一行「上次刷新：…」。成功的说条数，失败的说原因 */
+    private fun noteFor(outcome: VodSourceOutcome): String =
+        if (outcome.ok) {
+            "${outcome.itemCount} 条内容 · ${outcome.fetchedTypes.size} 个分类"
+        } else {
+            val reason =
+                when (outcome.failure) {
+                    VodFailure.TIMEOUT -> "接口超时"
+                    VodFailure.HTTP -> "接口报错"
+                    VodFailure.NETWORK -> "网络不可达"
+                    VodFailure.EMPTY -> "接口返回空内容"
+                    VodFailure.NOT_VOD_SOURCE -> "不是影视接口"
+                    null -> "没有抓到内容"
+                }
+            outcome.detail?.let { "$reason（$it）" } ?: reason
+        }
 
     private suspend fun refreshOne(
         source: Source,

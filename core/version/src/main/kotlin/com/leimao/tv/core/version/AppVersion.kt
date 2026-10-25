@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.4.1.0"
+    const val CURRENT_VERSION: String = "0.4.2.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,20 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.4.2.0",
+                date = "2026-10-25",
+                changes =
+                    listOf(
+                        "频道列表更清爽：选中的分组有底色和竖条，每组后面标了台数，一屏能多看两三个台",
+                        "正在看的那个台带「正在播」标记，回到列表一眼找得回来",
+                        "换台后台名两秒就淡出，不再一直压在画面上；按 OK 出控制条时台名挪到下面那一行",
+                        "源管理每条源一张卡片：直播还是影视、有多少个台、多久前刷新过、通不通，都写在上面",
+                        "「健康检查」的结果会留在卡片上，离开再回来还看得到",
+                        "修：筛选面板按返回会误弹「退出磊毛TV」",
+                        "修：影视源一直显示「从未刷新」",
+                    ),
+            ),
             VersionEntry(
                 version = "0.4.1.0",
                 date = "2026-10-25",

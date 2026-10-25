@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,8 +52,11 @@ import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.catchup.Catchup
+import com.leimao.tv.core.model.catchup.CatchupEntry
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.buildEpgTimeline
+import com.leimao.tv.core.player.PlaybackItem
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.PlaybackTrack
 import com.leimao.tv.core.player.TrackKind
@@ -60,6 +65,7 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /**
  * 顶部「正在播 / 下一档」（LIVE-20 的展示部分）。
@@ -136,6 +142,18 @@ data class PlayerUiState(
      * 双语伴音、以及少数带内嵌字幕的源。
      */
     val tracks: List<PlaybackTrack> = emptyList(),
+    /**
+     * 回看能力（LIVE-24）。null = 这个台不支持回看，控制条里**不出现**「回看」按钮。
+     * 功能清单的口径是「不支持时不显示」，而不是「显示出来点了报错」。
+     */
+    val catchup: Catchup? = null,
+    /**
+     * 回看面板里可选的档位，最近的在前。为空时面板给一句「没有可回看的节目」而不是空列表 ——
+     * 空列表会让人以为面板没加载出来。
+     */
+    val catchupEntries: List<CatchupEntry> = emptyList(),
+    /** 正在回看哪一档：null = 看直播。非空时 HUD 顶上加一行说明，控制条多一个「回直播」 */
+    val catchupPlaying: CatchupEntry? = null,
 ) {
     val audioTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.AUDIO }
 
@@ -180,11 +198,16 @@ fun PlayerScreen(
     onRetry: () -> Unit,
     onOpenSourceManager: () -> Unit,
     onBack: () -> Unit,
+    onPlayCatchup: (CatchupEntry) -> Unit = {},
+    onBackToLive: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var controlsVisible by remember { mutableStateOf(false) }
     var drawerOpen by remember { mutableStateOf(false) }
     var epgOpen by remember { mutableStateOf(false) }
+
+    /** 回看面板开着（LIVE-24）：与抽屉、节目单一样，同一时刻只开一个 */
+    var catchupOpen by remember { mutableStateOf(false) }
 
     /** 打开着的轨道面板（PLAY-07）：null = 没开 */
     var trackPanel by remember { mutableStateOf<TrackKind?>(null) }
@@ -264,6 +287,7 @@ fun PlayerScreen(
     BackHandler {
         when {
             trackPanel != null -> trackPanel = null
+            catchupOpen -> catchupOpen = false
             epgOpen -> epgOpen = false
             drawerOpen -> drawerOpen = false
             controlsVisible -> controlsVisible = false
@@ -280,7 +304,14 @@ fun PlayerScreen(
             is PlaybackState.Playing -> autoSkipCount = 0
 
             is PlaybackState.Failed -> {
-                if (autoSkipCount < AUTO_SKIP_MAX) {
+                // 回看失败不跳台（LIVE-24）：坏的是「那一档的回看地址」，换到下一个台
+                // 等于把用户从「我想看昨天那场球」直接甩到另一个频道，比报错更让人困惑。
+                //
+                // 判据取自 playback.item 而不是 state.catchupPlaying：后者是 Compose 状态，
+                // 起播到失败可能发生在同一帧里，effect 拿到的 state 还停在「没在回看」，
+                // 实测就是「回看失败后被自动跳到了别的台」。
+                val isCatchup = playback.item is PlaybackItem.Catchup
+                if (!isCatchup && autoSkipCount < AUTO_SKIP_MAX) {
                     autoSkipCount++
                     // 轻提示带上「切到哪个台」：只知道「切了」不知道「切到哪」等于没说
                     skipToast = "该台不可用，已切到下一个台（连续 $autoSkipCount 个）"
@@ -312,6 +343,7 @@ fun PlayerScreen(
             !controlsVisible &&
             !drawerOpen &&
             !epgOpen &&
+            !catchupOpen &&
             !isFailed &&
             trackPanel == null
 
@@ -351,6 +383,16 @@ fun PlayerScreen(
                         // 所以在这里显式拦下，行为与 ESC（直调 dispatcher）保持一致。
                         if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
                             epgOpen = false
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+
+                    // 回看面板与节目单同理：面板里的上下移动靠焦点系统，方向键必须放行，
+                    // 只拦返回键
+                    if (catchupOpen) {
+                        if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                            catchupOpen = false
                             return@onPreviewKeyEvent true
                         }
                         return@onPreviewKeyEvent false
@@ -438,10 +480,12 @@ fun PlayerScreen(
                     FailurePanel(
                         state = playback,
                         autoSkippedCount = autoSkipCount.takeIf { it >= AUTO_SKIP_MAX },
+                        isCatchup = playback.item is PlaybackItem.Catchup,
                         onRetry = onRetry,
                         onSwitchLine = { onSwitchLine(1) },
                         onNextChannel = { onSwitchChannel(1) },
                         onOpenSourceManager = onOpenSourceManager,
+                        onBackToLive = onBackToLive,
                     )
                     Spacer(modifier = Modifier.weight(1f))
                 }
@@ -468,6 +512,11 @@ fun PlayerScreen(
                             epgOpen = true
                             controlsVisible = false
                         },
+                        onOpenCatchup = {
+                            catchupOpen = true
+                            controlsVisible = false
+                        },
+                        onBackToLive = onBackToLive,
                         onSwitchLine = onSwitchLine,
                         onToggleFavorite = onToggleFavorite,
                         onOpenAudio = { trackPanel = TrackKind.AUDIO },
@@ -526,6 +575,22 @@ fun PlayerScreen(
                 channelName = state.channel?.name.orEmpty(),
                 timeline = timeline,
                 nowMillis = System.currentTimeMillis(),
+            )
+        }
+
+        // 回看面板（LIVE-24）：盖在节目单之上 —— 两者都是「过去 / 现在看什么」的选择器，
+        // 同一时刻只会开一个（打开一个就关掉控制条），叠在一起只是防御性写法
+        if (catchupOpen) {
+            CatchupOverlay(
+                channelName = state.channel?.name.orEmpty(),
+                entries = state.catchupEntries,
+                playing = state.catchupPlaying,
+                days = state.catchup?.days ?: 0,
+                onSelect = { entry ->
+                    catchupOpen = false
+                    onPlayCatchup(entry)
+                },
+                onDismiss = { catchupOpen = false },
             )
         }
     }
@@ -609,6 +674,15 @@ private fun PlayerTopBar(state: PlayerUiState, numberBuffer: String) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // 回看态必须显眼（LIVE-24）：正在看的是昨天那场球，而画面里没有任何
+            // 「这不是直播」的迹象时，用户会以为节目单错了
+            state.catchupPlaying?.let { entry ->
+                Text(
+                    text = "回看 ${catchupRangeLabel(entry, System.currentTimeMillis())}",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
 
         // 第三层：正在播（HUD 里最该被读到的一行，给 body 档）
@@ -642,6 +716,8 @@ private fun ControlBar(
     firstFocus: FocusRequester,
     onOpenDrawer: () -> Unit,
     onOpenEpg: () -> Unit,
+    onOpenCatchup: () -> Unit,
+    onBackToLive: () -> Unit,
     onSwitchLine: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenAudio: () -> Unit,
@@ -692,6 +768,23 @@ private fun ControlBar(
             FocusableCard(onClick = onOpenEpg) {
                 Text(text = "节目单", style = TvText.current.label)
             }
+            // 回看（LIVE-24）：源没声明能力时整个按钮不存在。
+            // 「不支持就不显示」比「显示出来点了报错」少一次失望
+            if (state.catchup != null) {
+                FocusableCard(onClick = onOpenCatchup) {
+                    Text(text = "回看", style = TvText.current.label)
+                }
+            }
+            // 正在回看时给一条回直播的明路：否则用户只能靠换台或退出重进
+            if (state.catchupPlaying != null) {
+                FocusableCard(onClick = onBackToLive) {
+                    Text(
+                        text = "回直播",
+                        style = TvText.current.label,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
             FocusableCard(onClick = onToggleFavorite) {
                 Text(text = if (isFavorite) "★ 已收藏" else "☆ 收藏", style = TvText.current.label)
             }
@@ -724,10 +817,13 @@ private fun FailurePanel(
     state: PlaybackState.Failed,
     /** 自动跳台跳了多少个台（>= AUTO_SKIP_MAX 时文案改成「连续 N 个台不可用」） */
     autoSkippedCount: Int? = null,
+    /** 失败的是回看档期而不是直播（LIVE-24）：文案要说清坏的是「这一档」，不是这个台 */
+    isCatchup: Boolean = false,
     onRetry: () -> Unit,
     onSwitchLine: () -> Unit,
     onNextChannel: () -> Unit,
     onOpenSourceManager: () -> Unit,
+    onBackToLive: () -> Unit = {},
 ) {
     val retryFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { retryFocus.requestFocus() }
@@ -743,10 +839,10 @@ private fun FailurePanel(
     ) {
         Text(
             text =
-                if (autoSkippedCount != null) {
-                    "连续 $autoSkippedCount 个台不可用"
-                } else {
-                    "这个台暂时播不了"
+                when {
+                    isCatchup -> "这一档回看播不了"
+                    autoSkippedCount != null -> "连续 $autoSkippedCount 个台不可用"
+                    else -> "这个台暂时播不了"
                 },
             style = TvText.current.title,
             color = MaterialTheme.colorScheme.onSurface,
@@ -768,8 +864,16 @@ private fun FailurePanel(
                     Text(text = "换线路", style = TvText.current.label)
                 }
             }
-            FocusableCard(onClick = onNextChannel) {
-                Text(text = "下一个台", style = TvText.current.label)
+            // 回看失败时「下一个台」是错的出口：用户想看的是那一档，不是别的台。
+            // 换成「回直播」，让他先回到能看的画面上
+            if (isCatchup) {
+                FocusableCard(onClick = onBackToLive) {
+                    Text(text = "回直播", style = TvText.current.label)
+                }
+            } else {
+                FocusableCard(onClick = onNextChannel) {
+                    Text(text = "下一个台", style = TvText.current.label)
+                }
             }
             FocusableCard(onClick = onOpenSourceManager) {
                 Text(text = "去源管理", style = TvText.current.label)
@@ -876,6 +980,167 @@ private fun TrackOverlay(
     }
 }
 
+/**
+ * 回看面板（LIVE-24）。
+ *
+ * 只列**已经播完**的档：正在播的那一档就在直播里，列出来会让人以为回看比直播慢一档。
+ *
+ * 两种来源共用同一个面板：有节目单时每行是「时间 + 节目名」，没有节目单时是「时间段」——
+ * 后者的标题位留空而不是编一个「节目 1」，因为编出来的名字比空着更容易让人误会。
+ */
+@Composable
+private fun CatchupOverlay(
+    channelName: String,
+    entries: List<CatchupEntry>,
+    playing: CatchupEntry?,
+    days: Int,
+    onSelect: (CatchupEntry) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val firstFocus = remember { FocusRequester() }
+    // 「今天 / 昨天」的判定基准取打开面板这一刻：面板开着跨过午夜的概率很低，
+    // 而每秒重算一次日期只会让每一行都在闪
+    val now = remember(entries) { System.currentTimeMillis() }
+    val hasTitles = entries.any { it.title != null }
+
+    LaunchedEffect(entries) {
+        withFrameNanos { }
+        runCatching { firstFocus.requestFocus() }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color(0xCC000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .width(560.dp)
+                    .fillMaxHeight(0.88f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xF2101418))
+                    .padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text(
+                        text = "回看 · $channelName",
+                        style = TvText.current.title,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        // 把「为什么只有时间段」说清楚：用户看到一排没有名字的时段，
+                        // 第一反应是「这 App 坏了」，写明白才知道是源没给节目单
+                        text =
+                            if (hasTitles) {
+                                "最近 $days 天内已播完的节目，选一档从头看"
+                            } else {
+                                "这个台没有节目单，按时间段选（可回看 $days 天）"
+                            },
+                        style = TvText.current.hint,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                FocusableCard(onClick = onDismiss) {
+                    Text(text = "关闭", style = TvText.current.hint)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (entries.isEmpty()) {
+                // 空面板要说清「是没有」而不是「没加载出来」
+                Text(
+                    text = "最近 $days 天内没有可回看的档期",
+                    style = TvText.current.body,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(items = entries, key = { it.startAt }) { entry ->
+                        val isPlaying = playing?.startAt == entry.startAt
+                        FocusableCard(
+                            onClick = { onSelect(entry) },
+                            // 焦点落在最近那一档：打开面板十次有九次是想看刚播完的那档
+                            focusRequester =
+                                if (entries.firstOrNull()?.startAt == entry.startAt) {
+                                    firstFocus
+                                } else {
+                                    null
+                                },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = catchupRangeLabel(entry, now),
+                                    style = TvText.current.hint,
+                                    color =
+                                        if (isPlaying) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = entry.title ?: "—",
+                                    style = TvText.current.body,
+                                    color =
+                                        if (isPlaying) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                if (isPlaying) {
+                                    Text(
+                                        text = "正在看",
+                                        style = TvText.current.hint,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 一档回看的时间标签：「20:00–21:30」/「昨天 20:00–21:30」/「10-23 20:00–21:30」。
+ *
+ * 今天之外必须带日期：只写时刻的话，回看三天前的节目和两小时前的节目长得一模一样，
+ * 用户点错一次就得从头再找。
+ */
+internal fun catchupRangeLabel(
+    entry: CatchupEntry,
+    nowMillis: Long,
+    zone: TimeZone = TimeZone.getDefault(),
+): String {
+    val time = SimpleDateFormat("HH:mm", Locale.getDefault()).apply { timeZone = zone }
+    val day = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).apply { timeZone = zone }
+    val monthDay = SimpleDateFormat("M-d", Locale.getDefault()).apply { timeZone = zone }
+
+    val startDay = day.format(Date(entry.startAt))
+    val prefix =
+        when (startDay) {
+            day.format(Date(nowMillis)) -> ""
+            day.format(Date(nowMillis - DAY_MILLIS)) -> "昨天 "
+            else -> "${monthDay.format(Date(entry.startAt))} "
+        }
+    return "$prefix${time.format(Date(entry.startAt))}–${time.format(Date(entry.endAt))}"
+}
+
 @Composable
 private fun ChannelDrawer(
     state: PlayerUiState,
@@ -950,6 +1215,19 @@ private fun handleKey(
     if (drawerOpen) {
         if (event.key == Key.Back) {
             onCloseDrawer()
+            return true
+        }
+        return false
+    }
+
+    // 失败面板可见时，除返回以外一律放行给焦点系统。
+    //
+    // 这一条以前只写在注释里、代码里漏了：面板上「重试 / 换线路 / 下一个台 / 去源管理」
+    // 全靠方向键走过去，而方向键在这里被当成「换台 / 切线路」吃掉 —— 遥控器上再也没有
+    // 别的手段能按到它们（实测：失败面板上按左右只会切线路，焦点一动不动）。
+    if (failurePanelVisible) {
+        if (event.key == Key.Back) {
+            onBack()
             return true
         }
         return false
@@ -1052,3 +1330,6 @@ private const val AUTO_SKIP_MAX = 3
 
 /** 轻提示「已切到 X」的停留时长：够看清、不碍事 */
 private const val SKIP_TOAST_MS = 2_000L
+
+/** 一天的毫秒数：回看面板判断「今天 / 昨天」用（LIVE-24） */
+private const val DAY_MILLIS = 86_400_000L

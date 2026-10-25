@@ -44,6 +44,9 @@ class RoomChannelWriter(
             plan.writes.forEach { write ->
                 when (write) {
                     is ChannelWrite.Insert -> {
+                        // 回看能力三列（LIVE-24）：null 时三列一起清空，不留半条能力在库里
+                        val (catchupMode, catchupTemplate, catchupDays) =
+                            write.merged.catchup.toColumns()
                         val id =
                             channelDao.insert(
                                 ChannelEntity(
@@ -54,6 +57,9 @@ class RoomChannelWriter(
                                     logo = write.merged.logoUrl,
                                     url = write.merged.primaryLine,
                                     number = write.number,
+                                    catchupMode = catchupMode,
+                                    catchupTemplate = catchupTemplate,
+                                    catchupDays = catchupDays,
                                 ),
                             )
                         replaceLines(channelId = id, channel = write.merged)
@@ -62,6 +68,8 @@ class RoomChannelWriter(
 
                     is ChannelWrite.Update -> {
                         if (write.changed) {
+                            val (catchupMode, catchupTemplate, catchupDays) =
+                                write.merged.catchup.toColumns()
                             channelDao.update(
                                 ChannelEntity(
                                     id = write.id,
@@ -72,6 +80,9 @@ class RoomChannelWriter(
                                     logo = write.merged.logoUrl,
                                     url = write.merged.primaryLine,
                                     number = write.number,
+                                    catchupMode = catchupMode,
+                                    catchupTemplate = catchupTemplate,
+                                    catchupDays = catchupDays,
                                 ),
                             )
                             updated++
@@ -111,5 +122,6 @@ class RoomChannelWriter(
             groupName = groupName,
             logoUrl = logo,
             primaryUrl = url,
+            catchup = toCatchup(),
         )
 }

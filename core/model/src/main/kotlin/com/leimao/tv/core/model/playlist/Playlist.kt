@@ -1,5 +1,7 @@
 package com.leimao.tv.core.model.playlist
 
+import com.leimao.tv.core.model.catchup.Catchup
+
 /**
  * 候选分组名。没有 `group-title` / 没有 `#genre#` 的频道统一落到这里（LIVE-01）。
  *
@@ -28,6 +30,11 @@ data class ParsedChannel(
     val logoUrl: String? = null,
     /** 源文件里显式写的频道号（`tvg-chno` / TXT 的 `序号`），没有就为 null，入库时再补 */
     val numberInPlaylist: Int? = null,
+    /**
+     * 这个台声明的回看能力（LIVE-24）。null 表示**不支持回看**，或声明了但我们不会拼它的地址 ——
+     * 两种情况下播放页都不出现「回看」入口。
+     */
+    val catchup: Catchup? = null,
 )
 
 /**

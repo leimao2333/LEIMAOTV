@@ -1,6 +1,9 @@
 package com.leimao.tv.core.model.playlist
 
+import com.leimao.tv.core.model.catchup.Catchup
+import com.leimao.tv.core.model.catchup.CatchupMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -142,6 +145,36 @@ class ChannelMergeTest {
         // 空白一律去掉，所以 HDTV Channel 与 HDTVChannel 视作同名；
         // 但开头的 HD 不会被当成清晰度后缀剥掉 —— 只有结尾才剥
         assertEquals("hdtvchannel", normalizeChannelName("HDTV Channel"))
+    }
+
+    @Test
+    fun `回看能力跟着有能力的线路一起并进来`() {
+        val catchup = Catchup(mode = CatchupMode.TEMPLATE, template = "https://e.com/t?s=\${start}")
+
+        // 只有第二条线路声明了能力：合并后必须留下来，否则「同一个台有两条线路、
+        // 只有一条能回看」的常见情况会让入口凭空消失
+        val merged =
+            mergeChannels(
+                listOf(
+                    channel("CCTV-1", "https://example.com/a"),
+                    channel("CCTV-1 高清", "https://example.com/b").copy(catchup = catchup),
+                ),
+            )
+
+        assertEquals(catchup, merged.single().catchup)
+    }
+
+    @Test
+    fun `都没有回看能力时合并结果也没有`() {
+        val merged =
+            mergeChannels(
+                listOf(
+                    channel("CCTV-1", "https://example.com/a"),
+                    channel("CCTV-1 高清", "https://example.com/b"),
+                ),
+            )
+
+        assertNull(merged.single().catchup)
     }
 
     private fun channel(

@@ -56,7 +56,7 @@ import com.leimao.tv.core.database.entity.VodProgressEntity
         VodFavoriteEntity::class,
         ChannelLineQualityEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -394,6 +394,23 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 11 → 12：频道表加三列，承载回看能力（LIVE-24）。
+         *
+         * 只做加法，老数据不用搬：三列默认值就是「不支持回看」，
+         * 升级上来的用户第一次刷新源时才会拿到能力（那正是应该拿到的时候）。
+         */
+        val MIGRATION_11_12: Migration =
+            object : Migration(11, 12) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE `channel` ADD COLUMN `catchupMode` TEXT")
+                    db.execSQL("ALTER TABLE `channel` ADD COLUMN `catchupTemplate` TEXT")
+                    db.execSQL(
+                        "ALTER TABLE `channel` ADD COLUMN `catchupDays` INTEGER NOT NULL DEFAULT 0",
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
                 .addMigrations(
@@ -407,6 +424,7 @@ abstract class LeimaoDatabase : RoomDatabase() {
                     MIGRATION_8_9,
                     MIGRATION_9_10,
                     MIGRATION_10_11,
+                    MIGRATION_11_12,
                 )
                 .build()
     }

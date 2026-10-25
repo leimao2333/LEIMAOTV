@@ -1,5 +1,7 @@
 package com.leimao.tv.core.model.playlist
 
+import com.leimao.tv.core.model.catchup.Catchup
+
 /**
  * 合并后的频道：一个频道 + 它的若干条线路（LIVE-13）。
  *
@@ -14,6 +16,8 @@ data class MergedChannel(
     val numberInPlaylist: Int?,
     /** 线路地址，按源文件出现顺序去重；第一条为首选 */
     val lines: List<String>,
+    /** 回看能力（LIVE-24）：取第一条声明了能力的线路，见 [toMergedChannel] */
+    val catchup: Catchup? = null,
 ) {
     val primaryLine: String get() = lines.first()
 }
@@ -112,6 +116,9 @@ private fun MutableList<ParsedChannel>.toMergedChannel(): MergedChannel {
         logoUrl = primary.logoUrl ?: firstNotNullOfOrNull { it.logoUrl },
         numberInPlaylist = primary.numberInPlaylist ?: firstNotNullOfOrNull { it.numberInPlaylist },
         lines = map { it.url }.distinct(),
+        // 回看能力取「第一条声明了能力的线路」：同一台的多条线路里往往只有一条支持回看，
+        // 取 primary 会漏掉它（primary 是按 tvg-id 挑的，跟能力无关）
+        catchup = primary.catchup ?: firstNotNullOfOrNull { it.catchup },
     )
 }
 

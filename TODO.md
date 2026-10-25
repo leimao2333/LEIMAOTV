@@ -8,7 +8,7 @@
 
 图例：`- [ ]` 待办 / `- [x]` 已完成（末尾标版本）/ `⏸` 暂缓（标原因）
 
-当前进度：**80 / 86 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 本轮 6 条全部完成，剩 M4 既有待办与验收）
+当前进度：**81 / 86 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，剩 LIVE-08 / PLAY-06 / VOD-09 / SYS-06 与验收）
 
 ---
 
@@ -411,8 +411,29 @@
   - [x] `epg_source` 表存订阅地址（DB v4）；失败原因与更新时间留痕
   - [x] `EpgImporter.importUrl` 走网络抓取，与本地导入共用解析/合并/落库链路
   - [x] WorkManager 24h 周期（幂等 UPDATE 策略）；无地址时空跑不打扰
-- [ ] **LIVE-24** 回看 / 时移 ｜ P2
-  - [ ] 仅当源声明 catchup 能力时出现入口；不支持时**不显示**
+- [x] **LIVE-24** 回看 / 时移 ｜ P2（0.4.3.0）
+  - [x] 能力只在「会拼地址」时才成立：`catchup-source` 带 `${start}` / `${end}` / `${utc}` /
+        `${lutc}` / `${duration}` 占位符 → 模板模式；`catchup="flussonic"` / `"xc"` → 按服务端
+        固定拼法；**声明了却给不出拼法（`catchup="default"` 无模板）→ 不产出能力**，入口根本不出现
+        （功能清单口径：不支持时不显示，而不是点了报错）
+  - [x] 时间一律按 **UTC** 拼：`${start}` = `yyyyMMddHHmmss`、`${utc}` = epoch 秒、Xtream 用
+        `yyyy-MM-dd:HH-mm`；按本地时区拼会让东八区用户拿到早八小时的节目（单测逐条钉住）
+  - [x] 三列落库（`catchupMode` / `catchupTemplate` / `catchupDays`，DB v12 加法迁移）；
+        能力挂在 `PlaybackConfig` 上而不是 `Channel` 上 —— 列表里的每个频道不必背它，
+        起播那一次主键查询顺手取回
+  - [x] 面板档期两种来源：有节目单 → 已播完的节目（按时间倒序、限定回看天数与条数上限）；
+        没节目单 → 按整点切最近 N 小时（不含正在走的这一小时），标题位留空不编假名
+  - [x] 回看态与直播态分得开：HUD 第二层挂「回看 20:00–21:30」、控制条多一个「回直播」、
+        失败面板改成「这一档回看播不了」并把「下一个台」换成「回直播」
+  - [x] **回看失败不自动跳台**：判据取自 `playback.item is PlaybackItem.Catchup` 而不是 Compose 状态
+        （起播到失败可能同一帧内发生，状态还停在「没在回看」，实测就是回看失败后被甩到别的台）
+  - [x] 回看地址不进线路质量表：新增 `PlaybackItem.Catchup`，一次性地址不该污染线路统计
+  - [x] 单测 24 条（`CatchupTest` 17 + `M3uParserTest` 5 + `ChannelMergeTest` 2 + `CatchupRangeLabelTest` 3）
+  - [x] 模拟器实测（1080p，本地起的测试源）：入口出现 / 面板按小时兜底 / 拼出的地址
+        `…?start=20261025080000&end=20261025090000`（logcat 抓到）/ 失败面板不跳台 / 回直播恢复 /
+        flussonic 也有入口 / 只有声明没有模板时**没有**入口（截图 `docs/verify/catchup_*.png`）
+  - [ ] 带真实节目单的源上验「按节目名选档」：手头没有声明 catchup 且带 EPG 的源，
+        逻辑层已由单测覆盖（`catchupEntriesFrom`），面板标题分支待真源确认
 - [ ] **LIVE-08** 远程配置 ｜ P2
 - [x] **LIVE-09** 订阅源健康检查 ｜ P2（v0.2.9.10）
   - [x] 源管理页「健康检查」按钮：`SourceHealthChecker` 并发探测，源级粒度（响应即算通）
@@ -491,6 +512,13 @@
   - [ ] 若仓库是公开的，考虑改私有：密钥在库里意味着「能 clone 的人就有签名能力」
   - [x] ABI 拆包（v0.2.9.10）：接入 libVLC 后三产物，arm64 主名 + v7a + universal；校验与回下载比对逐包跑
 - [ ] **M4 验收**：RULES §7 性能红线逐项实测填表；§9.2 全流程走查；真机 + 模拟器双通过
+  - [x] 本轮 LIVE-24 模拟器走查（2026-10-25，1080p，本地起的测试源）：
+        回看入口只对有能力的台出现（`catchup_entry.png` / `catchup_no_entry.png`）、
+        面板按整点兜底（`catchup_panel.png`）、失败面板不跳台且给「回直播」（`catchup_fail.png`）、
+        回直播恢复出帧（`catchup_backlive.png`）、flussonic 同样有入口（`catchup_flussonic.png`）
+  - [x] 顺带修掉一个老洞：失败面板上方向键被当成「换台 / 切线路」吃掉，焦点一步也挪不动 ——
+        注释里写了「失败面板可见时 OK 与 ←→ 一律不消费」，代码里漏了这个判断。
+        遥控器上除了方向键没有别的手段能按到「重试 / 换线路 / 下一个台 / 去源管理」
   - [x] 本轮 5 条模拟器走查（2026-10-25，1080p）：
         LIVE-26 分组选中态 / 计数 / 56dp 行高 / 「正在播」徽标（截图 `docs/verify/v041_drawer4.png`）；
         PLAY-10 四层 HUD + 2s 淡出 + 控制条展开时 HUD 收起 + 台名进控制条（`v041_hud.png` / `v041_controls.png`）；

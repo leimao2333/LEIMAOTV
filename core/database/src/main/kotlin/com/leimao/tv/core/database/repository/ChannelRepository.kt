@@ -3,11 +3,15 @@ package com.leimao.tv.core.database.repository
 import com.leimao.tv.core.database.LeimaoDatabase
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.catchup.Catchup
+import com.leimao.tv.core.model.catchup.CatchupMode
 
 /**
- * 起播需要的全部信息：线路 + 该源配置的请求头（LIVE-06）。
+ * 起播需要的全部信息：线路 + 该源配置的请求头（LIVE-06）+ 回看能力（LIVE-24）。
  *
  * 请求头按「源」配置而不是按「频道」配置 —— 同一源下的台通常共用一套 UA / Referer。
+ * 回看能力挂在这里，是因为它和线路、请求头一样都是「起播那一刻才知道要不要用」的东西：
+ * 同一次主键查询就能取到，不必让列表里的每个频道都背着它。
  */
 data class PlaybackConfig(
     val lines: List<String>,
@@ -15,6 +19,8 @@ data class PlaybackConfig(
     val referer: String? = null,
     val basicUser: String? = null,
     val basicPass: String? = null,
+    /** null = 这个台不支持回看，播放页不出现入口 */
+    val catchup: Catchup? = null,
 )
 
 /**
@@ -90,6 +96,7 @@ class RoomChannelRepository(
             referer = source?.referer,
             basicUser = source?.basicUser,
             basicPass = source?.basicPass,
+            catchup = channel.toCatchup(),
         )
     }
 
@@ -112,3 +119,32 @@ internal fun ChannelEntity.toModel(): Channel =
         streamUrl = url,
         number = number,
     )
+
+/**
+ * 三列 → [Catchup]（LIVE-24）。
+ *
+ * `catchupMode` 存的是枚举名：多存一个映射函数而不是存序号，
+ * 是为了让库里能被人眼看懂，也让「枚举重排」不会悄悄改变老数据的含义。
+ * 认不出的名字（被降级安装后写入的、或手工改过的库）一律当「不支持」。
+ */
+internal fun ChannelEntity.toCatchup(): Catchup? {
+    val mode =
+        catchupMode
+            ?.let { name -> CatchupMode.entries.firstOrNull { it.name == name } }
+            ?: return null
+    val result =
+        Catchup(
+            mode = mode,
+            template = catchupTemplate,
+            days = if (catchupDays > 0) catchupDays else Catchup.DEFAULT_DAYS,
+        )
+    return result.takeIf { it.isUsable }
+}
+
+/** 模型 → 三列。`Catchup` 为 null 时三列一起清空，不留半条能力在库里。 */
+internal fun Catchup?.toColumns(): Triple<String?, String?, Int> =
+    if (this == null) {
+        Triple(null, null, 0)
+    } else {
+        Triple(mode.name, template, days)
+    }

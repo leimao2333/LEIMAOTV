@@ -1,5 +1,7 @@
 package com.leimao.tv.core.model.playlist
 
+import com.leimao.tv.core.model.catchup.Catchup
+
 /**
  * 刷新时「库里已有什么」的快照。只带合并判断要用的字段 —— 计划函数不该依赖数据库实体。
  */
@@ -11,6 +13,8 @@ data class ExistingChannel(
     val groupName: String,
     val logoUrl: String?,
     val primaryUrl: String,
+    /** 库里的回看能力（LIVE-24），参与「这行要不要重写」的判断 */
+    val catchup: Catchup? = null,
 )
 
 /** 对一条频道的写入动作。 */
@@ -104,4 +108,7 @@ private fun hasChanged(existing: ExistingChannel, merged: MergedChannel): Boolea
         existing.groupName != merged.groupName ||
         existing.logoUrl != merged.logoUrl ||
         existing.primaryUrl != merged.primaryLine ||
-        existing.tvgId != merged.tvgId
+        existing.tvgId != merged.tvgId ||
+        // 源作者补上（或撤掉）回看能力时，这一行必须重写：漏掉这一项的话，
+        // 已经入库的老频道永远不会长出「回看」入口
+        existing.catchup != merged.catchup

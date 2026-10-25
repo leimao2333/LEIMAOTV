@@ -1,8 +1,10 @@
 package com.leimao.tv.core.network.playlist
 
+import com.leimao.tv.core.model.catchup.CatchupMode
 import com.leimao.tv.core.model.playlist.PlaylistFormat
 import com.leimao.tv.core.model.playlist.UNGROUPED
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -160,5 +162,61 @@ class M3uParserTest {
         val text = "#EXTINF:-1 tvg-chno=\"12\",Demo\nhttps://example.com/j"
 
         assertEquals(12, Playlists.parse(text).channels.single().numberInPlaylist)
+    }
+
+    // ---- 回看能力（LIVE-24）----
+
+    @Test
+    fun `catchup-source 的模板带出为模板模式`() {
+        val text =
+            """
+            #EXTINF:-1 catchup="default" catchup-source="https://example.com/ts?start=${'$'}{start}&end=${'$'}{end}" catchup-days="5",Demo
+            https://example.com/live/1.m3u8
+            """.trimIndent()
+
+        val catchup = Playlists.parse(text).channels.single().catchup
+
+        assertEquals(CatchupMode.TEMPLATE, catchup?.mode)
+        assertEquals(5, catchup?.days)
+    }
+
+    @Test
+    fun `声明了能力却没给模板时不产出能力`() {
+        val text = "#EXTINF:-1 catchup=\"default\",Demo\nhttps://example.com/live/1.m3u8"
+
+        // 不会拼就不长入口：功能清单要求「不支持时不显示，而不是点了报错」
+        assertNull(Playlists.parse(text).channels.single().catchup)
+    }
+
+    @Test
+    fun `flussonic 与 xtream 按服务端类型识别`() {
+        val text =
+            """
+            #EXTINF:-1 catchup="flussonic",A
+            https://example.com/a
+            #EXTINF:-1 catchup="xc" timeshift="2",B
+            https://example.com/b
+            """.trimIndent()
+
+        val channels = Playlists.parse(text).channels
+
+        assertEquals(CatchupMode.FLUSSONIC, channels[0].catchup?.mode)
+        assertEquals(CatchupMode.XTREAM, channels[1].catchup?.mode)
+        // `timeshift` 与 `catchup-days` 同义：能回看几天
+        assertEquals(2, channels[1].catchup?.days)
+    }
+
+    @Test
+    fun `catchup 关闭时没有能力`() {
+        val text = "#EXTINF:-1 catchup=\"0\",Demo\nhttps://example.com/live/1.m3u8"
+
+        assertNull(Playlists.parse(text).channels.single().catchup)
+    }
+
+    @Test
+    fun `没有 catchup 属性的频道没有能力`() {
+        val text = "#EXTINF:-1 group-title=\"央视\",Demo\nhttps://example.com/live/1.m3u8"
+
+        assertNull(Playlists.parse(text).channels.single().catchup)
     }
 }

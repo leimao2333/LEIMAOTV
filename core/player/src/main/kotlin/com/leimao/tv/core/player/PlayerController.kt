@@ -16,6 +16,15 @@ sealed interface PlaybackItem {
     /** 直播频道 */
     data class Channel(val channelId: Long) : PlaybackItem
 
+    /**
+     * 直播频道的回看档期（LIVE-24）。
+     *
+     * 单独一个类型而不是复用 [Channel]：线路质量记忆是按 `(channelId, url)` 记的，
+     * 回看地址是「拼出来的一次性地址」，记进线路质量表只会给每条线路塞一堆
+     * 永远不会再出现的 URL，把真正有用的统计冲淡。
+     */
+    data class Catchup(val channelId: Long, val startAt: Long) : PlaybackItem
+
     /** 影视剧集。[index] 是**源里的原始下标**，不是倒序后的位置（VOD-04 的约定） */
     data class Episode(
         val sourceId: Long,

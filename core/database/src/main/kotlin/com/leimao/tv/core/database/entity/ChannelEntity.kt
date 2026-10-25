@@ -44,4 +44,14 @@ data class ChannelEntity(
     val url: String,
     /** 频道号，数字键换台与「列表第一个」都按它排序（LIVE-11） */
     val number: Int = 0,
+    /**
+     * 回看能力（LIVE-24）。三列拆开存而不是塞一个 JSON 字符串：
+     * 天数要参与「能回看几天」的窗口计算，塞进字符串就得在 SQL 里解析。
+     *
+     * `catchupMode` 为 null 表示这个台不支持回看 —— 也就没有入口。
+     */
+    val catchupMode: String? = null,
+    val catchupTemplate: String? = null,
+    /** 0 = 没有能力（与 mode 为 null 同步），非 0 时表示能回看的天数 */
+    val catchupDays: Int = 0,
 )

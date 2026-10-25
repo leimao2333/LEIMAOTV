@@ -1,5 +1,7 @@
 package com.leimao.tv.core.network.playlist
 
+import com.leimao.tv.core.model.catchup.Catchup
+import com.leimao.tv.core.model.catchup.CatchupMode
 import com.leimao.tv.core.model.playlist.ParsedChannel
 import com.leimao.tv.core.model.playlist.ParsedPlaylist
 import com.leimao.tv.core.model.playlist.PlaylistFormat
@@ -88,7 +90,38 @@ internal object M3uParser {
             tvgId = attributes["tvg-id"],
             logoUrl = attributes["tvg-logo"],
             numberInPlaylist = attributes["tvg-chno"]?.toIntOrNull(),
+            catchup = parseCatchup(attributes),
         )
+    }
+
+    /**
+     * 回看能力（LIVE-24）。
+     *
+     * 三种情况分开处理，判据是「我们到底会不会拼这个地址」：
+     *
+     * 1. 给了 `catchup-source` 且里面带占位符 → 模板模式，能拼；
+     * 2. 没给模板，但 `catchup` 写明了服务端类型（flussonic / xc）→ 按该类型的固定拼法；
+     * 3. 声明了能力却没给拼法（`catchup="default"` / `"append"` / `"1"`）→ **返回 null**。
+     *
+     * 第 3 条是刻意的：功能清单要求「不支持时不显示，而不是点了报错」。
+     * 拿不准拼法就不长入口，用户不会遇到一个必然失败的按钮。
+     */
+    private fun parseCatchup(attributes: Map<String, String>): Catchup? {
+        val declared = attributes["catchup"]?.trim()?.lowercase()
+        val template = attributes["catchup-source"]?.trim()?.takeIf { it.isNotEmpty() }
+        // `timeshift` 是另一套写法里表示「能回看几天」的字段，与 catchup-days 同义
+        val days = Catchup.daysOr(attributes["catchup-days"] ?: attributes["timeshift"])
+
+        if (template != null && template.contains(CATCHUP_PLACEHOLDER)) {
+            return Catchup(mode = CatchupMode.TEMPLATE, template = template, days = days)
+        }
+
+        return when (declared) {
+            null, "", "0", "no", "false", "none" -> null
+            "flussonic" -> Catchup(mode = CatchupMode.FLUSSONIC, days = days)
+            "xc", "xtream", "xtream-codes" -> Catchup(mode = CatchupMode.XTREAM, days = days)
+            else -> null
+        }
     }
 
     /** 找第一个**不在引号里**的逗号：`group-title="新闻,财经"` 里的逗号不是标题分隔符。 */
@@ -120,6 +153,7 @@ internal object M3uParser {
         val tvgId: String?,
         val logoUrl: String?,
         val numberInPlaylist: Int?,
+        val catchup: Catchup?,
     ) {
         fun toChannel(url: String): ParsedChannel =
             ParsedChannel(
@@ -129,12 +163,16 @@ internal object M3uParser {
                 tvgId = tvgId?.takeIf { it.isNotBlank() },
                 logoUrl = logoUrl?.takeIf { it.isNotBlank() },
                 numberInPlaylist = numberInPlaylist,
+                catchup = catchup,
             )
     }
 
     private const val TAG_EXTINF = "#EXTINF"
     private const val TAG_EXTGRP = "#EXTGRP"
     private const val FALLBACK_NAME = "未命名频道"
+
+    /** 模板占位符的前缀：`${start}` / `${end}` / `${utc}` 都长这样 */
+    private const val CATCHUP_PLACEHOLDER = "\${"
 
     /**
      * 属性形如 `tvg-id="a" group-title='b' tvg-chno=12`。

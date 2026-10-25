@@ -36,6 +36,11 @@ import com.leimao.tv.core.model.TvRoute
 import com.leimao.tv.core.model.appearance.FontScale
 import com.leimao.tv.core.model.appearance.ThemeMode
 import com.leimao.tv.core.model.cache.CacheUsage
+import com.leimao.tv.core.model.catchup.Catchup
+import com.leimao.tv.core.model.catchup.CatchupEntry
+import com.leimao.tv.core.model.catchup.buildCatchupUrl
+import com.leimao.tv.core.model.catchup.catchupEntriesFrom
+import com.leimao.tv.core.model.catchup.catchupSlots
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.currentAt
 import com.leimao.tv.core.model.epg.nextAfter
@@ -722,6 +727,10 @@ private fun PlayerRoute(
     var recentChannels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var programme by remember { mutableStateOf<ProgrammeLine?>(null) }
     var epgProgrammes by remember { mutableStateOf<List<EpgProgramme>>(emptyList()) }
+    // 回看（LIVE-24）：能力来自起播配置，档期来自节目单（没有节目单时按小时兜底）
+    var catchup by remember { mutableStateOf<Catchup?>(null) }
+    var catchupEntries by remember { mutableStateOf<List<CatchupEntry>>(emptyList()) }
+    var catchupPlaying by remember { mutableStateOf<CatchupEntry?>(null) }
     val scope = rememberCoroutineScope()
 
     // 线路质量回写（LIVE-13）：成功出帧记「这条线路成功」，整链失败记「失败」。
@@ -775,6 +784,10 @@ private fun PlayerRoute(
         // 换台先清空上一个台的节目单：留着的话打开网格会看到上一个台的节目
         // 铺在当前这个台的名字下面，比空白更糟
         epgProgrammes = emptyList()
+        // 回看能力跟着起播配置一起换（同一次查询取到的），换台时必须一起清掉：
+        // 留着上一个台的能力，会出现「这个台明明不支持回看却有按钮」
+        catchup = config.catchup
+        catchupPlaying = null
         // 智能调度（LIVE-13）：同一频道的多条线路按历史质量排序，失败/卡顿过的靠后、
         // 快且稳的靠前；没历史时并发探测一次，跳过失效源
         val orderedLines =
@@ -796,6 +809,55 @@ private fun PlayerRoute(
         container.historyRepository.touch(channel.id, System.currentTimeMillis())
         // 最近观看分组要跟着换台更新，否则抽屉里的「最近观看」一直是旧名单
         refreshRecent()
+    }
+
+    /**
+     * 回看起播（LIVE-24）。
+     *
+     * 用频道自己的地址去拼：模板里的 `${start}` 之类替换的是「这一档的起止时间」，
+     * 基地址仍是这个台的线路地址。拼不出来就什么也不做 —— 宁可按钮没反应，
+     * 也不要把一个带 `${` 的地址交给内核，那会变成一块「播放失败」面板，
+     * 而用户根本无从判断是源不支持还是网络问题。
+     */
+    suspend fun playCatchup(entry: CatchupEntry) {
+        val channel = current ?: return
+        val ability = catchup ?: return
+        val config = container.channelRepository.playbackConfig(channel.id) ?: return
+        val url = buildCatchupUrl(channel.streamUrl, ability, entry.startAt, entry.endAt) ?: return
+
+        catchupPlaying = entry
+        container.player.play(
+            PlaybackRequest(
+                // 用 Catchup 而不是 Channel：回看地址不该进线路质量表（见 PlaybackItem 注释）
+                item = PlaybackItem.Catchup(channel.id, entry.startAt),
+                url = url,
+                headers = config.toHeaders(),
+                lines = listOf(url),
+                kind = PlaybackKind.LIVE,
+            ),
+        )
+    }
+
+    // 回看档期：只在台声明了能力时才查库。窗口按「能回看几天」放宽，
+    // 没有节目单时退回按小时切档 —— 很多聚合源声明了 catchup 却不给 EPG，
+    // 只认节目单的话这类源上「回看」永远是空面板。
+    LaunchedEffect(current?.id, catchup) {
+        val channel = current ?: return@LaunchedEffect
+        val ability = catchup
+        if (ability == null) {
+            catchupEntries = emptyList()
+            return@LaunchedEffect
+        }
+        val now = System.currentTimeMillis()
+        val past =
+            container.epgRepository.programmesFor(
+                channelName = channel.name,
+                nowMillis = now,
+                lookBackMillis = ability.days * DAY_MILLIS,
+                lookAheadMillis = 0L,
+            )
+        catchupEntries =
+            catchupEntriesFrom(past, now, ability.days).ifEmpty { catchupSlots(now, ability.days) }
     }
 
     LaunchedEffect(Unit) {
@@ -852,6 +914,9 @@ private fun PlayerRoute(
                 recentChannels = recentChannels,
                 epgProgrammes = epgProgrammes,
                 tracks = tracks,
+                catchup = catchup,
+                catchupEntries = catchupEntries,
+                catchupPlaying = catchupPlaying,
             ),
         surfaceHost = container.player as? VideoSurfaceHost,
         onSwitchChannel = { delta ->
@@ -874,6 +939,12 @@ private fun PlayerRoute(
         },
         onOpenSourceManager = onOpenSourceManager,
         onBack = onBackToHome,
+        onPlayCatchup = { entry -> scope.launch { playCatchup(entry) } },
+        onBackToLive = {
+            // 回直播 = 重新起播当前台：进度与线路调度都回到直播那一套，
+            // 不用在播放内核里维护「退出回看」这种第二形态
+            current?.let { channel -> scope.launch { startChannel(channel.id) } }
+        },
     )
 }
 
@@ -1571,6 +1642,9 @@ private const val ARG_START_MS = "startMs"
  * 再密就是在为「精确到秒」做无用功 —— 每次都要过一遍 Room 的时间窗查询。
  */
 private const val EPG_REFRESH_MS = 60_000L
+
+/** 一天的毫秒数：回看查节目单的窗口按「能回看几天」放宽（LIVE-24） */
+private const val DAY_MILLIS = 86_400_000L
 
 /** 影视进度轮询间隔：肉眼看着在走就够了，再密只是烧 CPU */
 private const val POSITION_POLL_MS = 500L

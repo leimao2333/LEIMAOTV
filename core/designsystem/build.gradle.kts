@@ -31,4 +31,6 @@ dependencies {
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)
     api(libs.androidx.tv.material)
+
+    testImplementation(libs.junit)
 }

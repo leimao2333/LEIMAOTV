@@ -22,9 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -41,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
+import com.leimao.tv.core.designsystem.components.FilterBar
+import com.leimao.tv.core.designsystem.components.FilterSpec
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.ContentType
@@ -81,10 +81,6 @@ fun VodHomeScreen(
 ) {
     val firstChip = remember { FocusRequester() }
 
-    // 筛选区折叠开关：聚合源（一个源里几十个站）会把年份/地区/标签撑到十几行，
-    // 把下方影片网格整个顶出屏幕。默认收起，用户想看筛选项再点开（VOD-03）。
-    var filterExpanded by rememberSaveable { mutableStateOf(false) }
-
     // 首帧还没布局完时 requestFocus 会打空，等一帧再要焦点（与全局菜单同一套做法）
     LaunchedEffect(autoFocus) {
         if (!autoFocus) return@LaunchedEffect
@@ -124,62 +120,45 @@ fun VodHomeScreen(
 
         if (state.hasSource && (state.years.isNotEmpty() || state.areas.isNotEmpty() || state.tags.isNotEmpty())) {
             Spacer(modifier = Modifier.height(10.dp))
-            // 筛选开关：一行按钮，展开后文字变成「收起筛选」。选中任一筛选项时给个
-            // 视觉提示，让用户知道「现在结果是被筛过的」。
-            FocusableCard(onClick = { filterExpanded = !filterExpanded }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (filterExpanded) "收起筛选" else "筛选",
-                        style = TvText.current.label,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    val hasActiveFilter =
-                        state.selectedYear != null ||
-                            state.selectedArea != null ||
-                            state.selectedTag != null
-                    if (!filterExpanded && hasActiveFilter) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "已筛选",
-                            style = TvText.current.hint,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (filterExpanded) "▲" else "▼",
-                        style = TvText.current.label,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (filterExpanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (state.years.isNotEmpty()) {
-                        FilterRow(
-                            label = "年份",
-                            values = state.years.map { it.toString() },
-                            selected = state.selectedYear?.toString(),
-                            onSelect = { onSelectYear(it?.toIntOrNull()) },
-                        )
-                    }
-                    if (state.areas.isNotEmpty()) {
-                        FilterRow(
-                            label = "地区",
-                            values = state.areas,
-                            selected = state.selectedArea,
-                            onSelect = onSelectArea,
-                        )
-                    }
-                    if (state.tags.isNotEmpty()) {
-                        TagBlock(
-                            tags = state.tags,
-                            selected = state.selectedTag,
-                            onSelect = onSelectTag,
-                        )
-                    }
-                }
-            }
+            // 常驻筛选行（VOD-12）：年份 / 地区 / 标签各自独立下拉，不再「一次展开全部」。
+            // 聚合源下几十个值在弹层里滚，不会把影片网格顶出屏幕；触发器上直接显示所选值。
+            FilterBar(
+                filters =
+                    buildList {
+                        if (state.years.isNotEmpty()) {
+                            add(
+                                FilterSpec(
+                                    label = "年份",
+                                    values = state.years.map { it.toString() },
+                                    selected = state.selectedYear?.toString(),
+                                    onSelect = { onSelectYear(it?.toIntOrNull()) },
+                                ),
+                            )
+                        }
+                        if (state.areas.isNotEmpty()) {
+                            add(
+                                FilterSpec(
+                                    label = "地区",
+                                    values = state.areas,
+                                    selected = state.selectedArea,
+                                    onSelect = onSelectArea,
+                                ),
+                            )
+                        }
+                        // 标签维度仅在标签池非空时出现：空池放个「标签」触发器点进去是空的，
+                        // 比不放更让人怀疑坏了
+                        if (state.tags.isNotEmpty()) {
+                            add(
+                                FilterSpec(
+                                    label = "标签",
+                                    values = state.tags,
+                                    selected = state.selectedTag,
+                                    onSelect = onSelectTag,
+                                ),
+                            )
+                        }
+                    },
+            )
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -304,76 +283,6 @@ private fun SelectableChip(
                         .height(2.dp)
                         .background(if (selected) accent else Color.Transparent),
             )
-        }
-    }
-}
-
-/**
- * 标签区（VOD-08）：两行 chip，每行最多 [TAG_COLUMNS] 个。
- *
- * 为什么不做成一行横向滚动的 `LazyRow`：年份 / 地区那两行是「顺序可能有意义」的维度
- * （2024 比 2023 新），而标签之间没有顺序，用户是**扫一眼挑一个**。摊成两行能在
- * 不滚动的情况下看全，这比「能放下更多」重要得多。
- *
- * 标签池本身就在仓库层截到「两行放得下」的数量（`MediaRepository.MAX_TAGS`），
- * 这里不再截断：界面按 8 个一行分块，多出来的自然会排到第三行，而那说明上限被改过。
- */
-@Composable
-private fun TagBlock(
-    tags: List<String>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
-) {
-    val rows = (listOf<String?>(null) + tags).chunked(TAG_COLUMNS)
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        rows.forEachIndexed { index, row ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    // 标签名只在第一行写：两行都写「标签」会让第二行看起来是另一个维度
-                    text = if (index == 0) "标签" else "",
-                    style = TvText.current.hint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(44.dp),
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(row, key = { "tag-${it ?: "all"}" }) { tag ->
-                        SelectableChip(
-                            text = tag ?: "不限",
-                            selected = if (tag == null) selected == null else selected == tag,
-                            onClick = { onSelect(tag) },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** 一行筛选：`年份  全部 | 2024 | 2023 …` */
-@Composable
-private fun FilterRow(
-    label: String,
-    values: List<String>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            style = TvText.current.hint,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(44.dp),
-        )
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item(key = "$label-all") {
-                SelectableChip(text = "全部", selected = selected == null, onClick = { onSelect(null) })
-            }
-            items(values, key = { "$label-$it" }) { value ->
-                SelectableChip(text = value, selected = selected == value, onClick = { onSelect(value) })
-            }
         }
     }
 }
@@ -675,9 +584,6 @@ private fun HintBlock(
         }
     }
 }
-
-/** 标签每行放几个：1080p 下每个 chip 约 100dp，8 个正好铺满安全区 */
-private const val TAG_COLUMNS = 8
 
 /** 期望的单张海报宽度：实际宽度按可用宽整除均摊（见 [MediaRow]），这是下限参考值 */
 private val POSTER_WIDTH = 150.dp

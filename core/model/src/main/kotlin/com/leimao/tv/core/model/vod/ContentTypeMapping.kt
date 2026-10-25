@@ -25,6 +25,7 @@ fun contentTypeOfSourceName(raw: String?): ContentType? {
         name.containsAny(DOCUMENTARY_WORDS) -> ContentType.DOCUMENTARY
         name.containsAny(NEWS_WORDS) -> ContentType.NEWS
         name.containsAny(ANIME_WORDS) -> ContentType.ANIME
+        name.containsAny(OPERA_WORDS) -> ContentType.OPERA
         name.containsAny(VARIETY_WORDS) -> ContentType.VARIETY
         name.containsAny(SPORTS_WORDS) -> ContentType.SPORTS
         name.containsAny(MOVIE_WORDS) -> ContentType.MOVIE
@@ -70,6 +71,9 @@ private val NEWS_WORDS = listOf("资讯", "新闻", "快讯")
 private val ANIME_WORDS = listOf("动漫", "动画", "番剧", "国漫", "日漫", "欧美漫")
 
 private val VARIETY_WORDS = listOf("综艺", "真人秀", "脱口秀", "晚会")
+
+/** 戏曲 / 曲艺：传统舞台艺术。排在综艺之前 —— 「戏曲」不能落进综艺的兜底 */
+private val OPERA_WORDS = listOf("戏曲", "曲艺", "京剧", "越剧", "黄梅戏", "豫剧", "相声", "评书")
 
 private val SPORTS_WORDS = listOf("体育", "赛事", "足球", "篮球", "网球", "奥运", "NBA", "CBA")
 

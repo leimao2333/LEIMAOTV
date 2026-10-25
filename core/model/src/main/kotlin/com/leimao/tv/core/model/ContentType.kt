@@ -14,6 +14,9 @@ enum class ContentType(val displayName: String) {
     TV_SERIES("电视剧"),
     ANIME("动漫"),
     VARIETY("综艺"),
+
+    /** 戏曲 / 曲艺：京剧、越剧、黄梅戏、相声等传统舞台艺术（VOD-13） */
+    OPERA("戏曲"),
     SPORTS("体育"),
 
     // ↓ 以下四类：影视板块能搜到，直播板块一律不返回（RULES §3.1）
@@ -24,7 +27,7 @@ enum class ContentType(val displayName: String) {
     ;
 
     companion object {
-        /** 影视库的九个分类（VOD-02），不含直播频道。 */
+        /** 影视库的十个分类（VOD-02 / VOD-13），不含直播频道。 */
         val VOD_TYPES: Set<ContentType> = entries.toSet() - LIVE_CHANNEL
     }
 }

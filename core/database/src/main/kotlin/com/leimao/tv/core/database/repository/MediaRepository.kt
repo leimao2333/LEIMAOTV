@@ -35,6 +35,7 @@ interface MediaRepository {
     /** 某个源的一行 */
     suspend fun bySource(
         sourceId: Long,
+        type: ContentType,
         limit: Int = DEFAULT_LIMIT,
     ): List<VodSummary>
 
@@ -130,8 +131,9 @@ class RoomMediaRepository(
 
     override suspend fun bySource(
         sourceId: Long,
+        type: ContentType,
         limit: Int,
-    ): List<VodSummary> = dao.bySource(sourceId, limit).toSummaries()
+    ): List<VodSummary> = dao.bySource(sourceId, type.name, limit).toSummaries()
 
     override suspend fun yearsOf(type: ContentType): List<Int> = dao.yearsOf(type.name)
 

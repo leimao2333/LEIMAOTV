@@ -95,6 +95,7 @@ internal class FakeMediaRepository : MediaRepository {
 
     override suspend fun bySource(
         sourceId: Long,
+        type: ContentType,
         limit: Int,
     ): List<VodSummary> = emptyList()
 

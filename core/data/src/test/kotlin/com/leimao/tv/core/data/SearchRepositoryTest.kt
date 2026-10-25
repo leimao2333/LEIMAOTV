@@ -67,7 +67,7 @@ class SearchRepositoryTest {
         }
 
     @Test
-    fun `白名单外的四类在直播板块一条都不出现`() =
+    fun `白名单外的五类在直播板块一条都不出现`() =
         runTest {
             val allTypes = FakeVodSearchAdapter(page = VodPage(items = allVodTypes(1)))
 
@@ -78,6 +78,8 @@ class SearchRepositoryTest {
                 ContentType.DOCUMENTARY,
                 ContentType.NEWS,
                 ContentType.TRAILER,
+                // 戏曲（VOD-13）：影视库有它，白名单里没有它
+                ContentType.OPERA,
             ).forEach { forbidden ->
                 assertEquals(
                     "$forbidden 不该出现在直播板块的搜索结果里",
@@ -88,7 +90,7 @@ class SearchRepositoryTest {
         }
 
     @Test
-    fun `影视板块九类全返回，且不查频道`() =
+    fun `影视板块十类全返回，且不查频道`() =
         runTest {
             val channelRepo = FakeChannelRepository(hits = mapOf("片" to listOf(channelHit(11))))
             val allTypes = FakeVodSearchAdapter(page = VodPage(items = allVodTypes(1)))

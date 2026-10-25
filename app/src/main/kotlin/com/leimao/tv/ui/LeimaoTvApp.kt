@@ -1505,7 +1505,7 @@ private suspend fun loadVodHomeState(
     val vodSources = container.sourceRepository.list().filter { it.type == SourceType.VOD && it.enabled }
     val rows =
         vodSources.mapNotNull { source ->
-            val items = media.bySource(source.id)
+            val items = media.bySource(source.id, type)
             // 这次没抓到内容的源不占一行空白
             if (items.isEmpty()) null else VodSourceRow(source.id, source.name, items)
         }

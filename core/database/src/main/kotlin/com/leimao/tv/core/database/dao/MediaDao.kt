@@ -103,10 +103,18 @@ interface MediaDao {
     @Query("SELECT tags FROM media WHERE type = :type AND tags IS NOT NULL AND tags != ''")
     suspend fun tagColumnOf(type: String): List<String>
 
-    /** 「每源一行」 */
-    @Query("SELECT * FROM media WHERE sourceId = :sourceId ORDER BY updatedAt DESC LIMIT :limit")
+    /**
+     * 「每源一行」，按当前类型过滤（VOD-12 修「切类型内容不变」）。
+     *
+     * 之前不过滤 type，「每源一行」显示的是该源的**全量**内容 —— 切类型后这一大块
+     * 纹丝不动，用户以为类型切换失效了（2026-10-25 实测反馈）。
+     */
+    @Query(
+        "SELECT * FROM media WHERE sourceId = :sourceId AND type = :type ORDER BY updatedAt DESC LIMIT :limit",
+    )
     suspend fun bySource(
         sourceId: Long,
+        type: String,
         limit: Int,
     ): List<MediaEntity>
 

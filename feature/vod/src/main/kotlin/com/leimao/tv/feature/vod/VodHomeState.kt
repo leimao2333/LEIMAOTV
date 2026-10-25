@@ -8,8 +8,10 @@ import com.leimao.tv.core.model.vod.VodSummary
 /**
  * 首页栏目顺序（VOD-03）。
  *
- * 只放七个「用户会主动逛」的类型。**资讯与预告片不进首页**：这两类内容密度低、
+ * 只放八个「用户会主动逛」的类型。**资讯与预告片不进首页**：这两类内容密度低、
  * 更新碎，塞进首屏只会把电影/剧集挤下去，需要它们时走搜索。
+ *
+ * 戏曲（VOD-13）排在综艺与体育之间：老年观众把它当「固定栏目」找，靠搜索太深。
  */
 val VOD_HOME_TYPES: List<ContentType> =
     listOf(
@@ -17,6 +19,7 @@ val VOD_HOME_TYPES: List<ContentType> =
         ContentType.TV_SERIES,
         ContentType.ANIME,
         ContentType.VARIETY,
+        ContentType.OPERA,
         ContentType.SPORTS,
         ContentType.SHORT_PLAY,
         ContentType.DOCUMENTARY,

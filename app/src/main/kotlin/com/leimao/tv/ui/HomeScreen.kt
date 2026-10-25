@@ -81,6 +81,7 @@ enum class HomeSection(
     SERIES("电视剧", AppMode.VOD, setOf(AppMode.VOD)),
     ANIME("动漫", AppMode.VOD, setOf(AppMode.VOD)),
     VARIETY("综艺", AppMode.VOD, setOf(AppMode.VOD)),
+    OPERA("戏曲", AppMode.VOD, setOf(AppMode.VOD)),
     SPORTS("体育", AppMode.VOD, setOf(AppMode.VOD)),
     SEARCH("搜索", null, setOf(AppMode.LIVE, AppMode.VOD)),
     SETTINGS("设置", null, setOf(AppMode.LIVE, AppMode.VOD)),
@@ -99,11 +100,12 @@ internal fun HomeSection.toVodType(): ContentType? =
         HomeSection.SERIES -> ContentType.TV_SERIES
         HomeSection.ANIME -> ContentType.ANIME
         HomeSection.VARIETY -> ContentType.VARIETY
+        HomeSection.OPERA -> ContentType.OPERA
         HomeSection.SPORTS -> ContentType.SPORTS
         else -> null
     }
 
-/** 影视类型 → 导航项，仅限有导航项的五类；短剧 / 纪录片返回 null */
+/** 影视类型 → 导航项，仅限有导航项的六类；短剧 / 纪录片返回 null */
 internal fun ContentType.toHomeSection(): HomeSection? =
     HomeSection.entries.firstOrNull { it.toVodType() == this }
 

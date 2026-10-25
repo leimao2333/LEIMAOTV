@@ -13,7 +13,7 @@ import org.junit.Test
 class SearchWhitelistTest {
     private data class Item(val title: String, val type: ContentType)
 
-    /** 刻意让九类影视类型各来一条，另加一条直播频道。 */
+    /** 刻意让十类影视类型各来一条，另加一条直播频道。 */
     private val allTypes: List<Item> = ContentType.entries.map { Item("样例-${it.name}", it) }
 
     @Test
@@ -35,7 +35,7 @@ class SearchWhitelistTest {
     }
 
     @Test
-    fun `白名单外的四类在 IPTV 板块一条都不许出现`() {
+    fun `白名单外的五类在 IPTV 板块一条都不许出现`() {
         val result = allTypes.filterForScope(SearchScope.IPTV) { it.type }
 
         listOf(
@@ -43,6 +43,9 @@ class SearchWhitelistTest {
             ContentType.DOCUMENTARY,
             ContentType.NEWS,
             ContentType.TRAILER,
+            // 戏曲（VOD-13）是影视库的分类，不在 RULES §3.1 的六类白名单里 ——
+            // 直播板块搜不到它是有意的：白名单没变，新增类型默认就不在名单内
+            ContentType.OPERA,
         ).forEach { forbidden ->
             assertEquals(
                 "$forbidden 不该出现在直播板块的搜索结果里",
@@ -60,8 +63,9 @@ class SearchWhitelistTest {
     }
 
     @Test
-    fun `VOD 类型集合是九类，不含直播频道`() {
-        assertEquals(9, ContentType.VOD_TYPES.size)
+    fun `VOD 类型集合是十类，不含直播频道`() {
+        assertEquals(10, ContentType.VOD_TYPES.size)
         assertEquals(false, ContentType.LIVE_CHANNEL in ContentType.VOD_TYPES)
+        assertEquals(true, ContentType.OPERA in ContentType.VOD_TYPES)
     }
 }

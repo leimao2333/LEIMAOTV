@@ -3,6 +3,7 @@ package com.leimao.tv
 import android.content.Context
 import android.os.Build
 import com.leimao.tv.core.data.EpgImporter
+import com.leimao.tv.core.data.LineScheduler
 import com.leimao.tv.core.data.PinyinTable
 import com.leimao.tv.core.data.SearchRepository
 import com.leimao.tv.core.data.SourceHealthChecker
@@ -11,12 +12,14 @@ import com.leimao.tv.core.data.UpdateChecker
 import com.leimao.tv.core.data.VodCatalogRefresher
 import com.leimao.tv.core.data.VodDetailLoader
 import com.leimao.tv.core.database.LeimaoDatabase
+import com.leimao.tv.core.database.repository.ChannelLineQualityRepository
 import com.leimao.tv.core.database.repository.ChannelRepository
 import com.leimao.tv.core.database.repository.ChannelWriter
 import com.leimao.tv.core.database.repository.EpgRepository
 import com.leimao.tv.core.database.repository.FavoriteRepository
 import com.leimao.tv.core.database.repository.HistoryRepository
 import com.leimao.tv.core.database.repository.MediaRepository
+import com.leimao.tv.core.database.repository.RoomChannelLineQualityRepository
 import com.leimao.tv.core.database.repository.RoomChannelRepository
 import com.leimao.tv.core.database.repository.RoomChannelWriter
 import com.leimao.tv.core.database.repository.RoomFavoriteRepository
@@ -127,6 +130,17 @@ class AppContainer(context: Context) {
     val favoriteRepository: FavoriteRepository = RoomFavoriteRepository(database)
 
     val historyRepository: HistoryRepository = RoomHistoryRepository(database)
+
+    /** 频道线路质量（LIVE-13 智能调度）：记住每条线路成功/失败，挑最优 */
+    val channelLineQualityRepository: ChannelLineQualityRepository =
+        RoomChannelLineQualityRepository(database.channelLineQualityDao())
+
+    /** 线路调度：按历史质量排序 + 无历史时并发探测，起播前挑最优线路 */
+    val lineScheduler: LineScheduler =
+        LineScheduler(
+            quality = channelLineQualityRepository,
+            http = httpClient,
+        )
 
     private val channelWriter: ChannelWriter = RoomChannelWriter(database)
 

@@ -8,6 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.leimao.tv.core.database.dao.ChannelDao
 import com.leimao.tv.core.database.dao.ChannelLineDao
+import com.leimao.tv.core.database.dao.ChannelLineQualityDao
 import com.leimao.tv.core.database.dao.EpgDao
 import com.leimao.tv.core.database.dao.EpgSourceDao
 import com.leimao.tv.core.database.dao.FavoriteDao
@@ -18,6 +19,7 @@ import com.leimao.tv.core.database.dao.VodFavoriteDao
 import com.leimao.tv.core.database.dao.VodProgressDao
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.entity.ChannelLineEntity
+import com.leimao.tv.core.database.entity.ChannelLineQualityEntity
 import com.leimao.tv.core.database.entity.EpgChannelEntity
 import com.leimao.tv.core.database.entity.EpgProgrammeEntity
 import com.leimao.tv.core.database.entity.EpgSourceEntity
@@ -52,8 +54,9 @@ import com.leimao.tv.core.database.entity.VodProgressEntity
         MediaEntity::class,
         VodProgressEntity::class,
         VodFavoriteEntity::class,
+        ChannelLineQualityEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class LeimaoDatabase : RoomDatabase() {
@@ -76,6 +79,8 @@ abstract class LeimaoDatabase : RoomDatabase() {
     abstract fun vodProgressDao(): VodProgressDao
 
     abstract fun vodFavoriteDao(): VodFavoriteDao
+
+    abstract fun channelLineQualityDao(): ChannelLineQualityDao
 
     companion object {
         private const val DB_NAME = "leimao-tv.db"
@@ -365,6 +370,30 @@ abstract class LeimaoDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 10 → 11：新建频道线路质量表（LIVE-13 智能调度）。
+         *
+         * 纯加法。复合主键 `channelId + url`，记录每条线路的成功 / 失败次数与最近时间戳。
+         * 老用户升级后表是空的，第一次播某频道走「无历史 → 实时探测」，随后逐步积累。
+         */
+        val MIGRATION_10_11: Migration =
+            object : Migration(10, 11) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS `channel_line_quality` (
+                            `channelId` INTEGER NOT NULL,
+                            `url` TEXT NOT NULL,
+                            `successCount` INTEGER NOT NULL,
+                            `failCount` INTEGER NOT NULL,
+                            `lastSeenAt` INTEGER NOT NULL,
+                            PRIMARY KEY(`channelId`, `url`)
+                        )
+                        """.trimIndent(),
+                    )
+                }
+            }
+
         fun build(context: Context): LeimaoDatabase =
             Room.databaseBuilder(context.applicationContext, LeimaoDatabase::class.java, DB_NAME)
                 .addMigrations(
@@ -377,6 +406,7 @@ abstract class LeimaoDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_8_9,
                     MIGRATION_9_10,
+                    MIGRATION_10_11,
                 )
                 .build()
     }

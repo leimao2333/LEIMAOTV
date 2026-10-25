@@ -724,6 +724,42 @@ private fun PlayerRoute(
     var epgProgrammes by remember { mutableStateOf<List<EpgProgramme>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
+    // 线路质量回写（LIVE-13）：成功出帧记「这条线路成功」，整链失败记「失败」。
+    //
+    // 只记「每个 url 的每一次**起播会话**」：直播流卡顿缓冲后会从 BUFFERING 回到 READY，
+    // 同一条 url 在一次观看里可能 Playing 十几次 —— 全记的话「成功次数」只反映观看时长，
+    // 不反映线路质量。所以用 lastRecordedUrl 去重：换线路 / 换台之后才记下一条。
+    var lastRecordedUrl by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(playback) {
+        val state = playback // 委托属性不能 smart cast，先落成局部变量
+        when (state) {
+            is PlaybackState.Playing -> {
+                if (state.url == lastRecordedUrl) return@LaunchedEffect
+                val channelId = (state.item as? PlaybackItem.Channel)?.channelId ?: return@LaunchedEffect
+                lastRecordedUrl = state.url
+                container.channelLineQualityRepository.recordSuccess(
+                    channelId = channelId,
+                    url = state.url,
+                    now = System.currentTimeMillis(),
+                )
+            }
+
+            is PlaybackState.Failed -> {
+                val channelId = (state.item as? PlaybackItem.Channel)?.channelId ?: return@LaunchedEffect
+                if (state.url != lastRecordedUrl) {
+                    container.channelLineQualityRepository.recordFailure(
+                        channelId = channelId,
+                        url = state.url,
+                        now = System.currentTimeMillis(),
+                    )
+                }
+                lastRecordedUrl = null // 失败后重试成功要重新记一次成功
+            }
+
+            else -> Unit
+        }
+    }
+
     suspend fun refreshRecent() {
         recentChannels = container.historyRepository.recent()
     }
@@ -739,12 +775,20 @@ private fun PlayerRoute(
         // 换台先清空上一个台的节目单：留着的话打开网格会看到上一个台的节目
         // 铺在当前这个台的名字下面，比空白更糟
         epgProgrammes = emptyList()
+        // 智能调度（LIVE-13）：同一频道的多条线路按历史质量排序，失败/卡顿过的靠后、
+        // 快且稳的靠前；没历史时并发探测一次，跳过失效源
+        val orderedLines =
+            container.lineScheduler.orderLines(
+                channelId = channel.id,
+                lines = config.lines,
+                headers = config.toRequestHeaders(),
+            )
         container.player.play(
             PlaybackRequest(
                 item = PlaybackItem.Channel(channel.id),
-                url = config.lines.first(),
+                url = orderedLines.first(),
                 headers = config.toHeaders(),
-                lines = config.lines,
+                lines = orderedLines,
                 kind = PlaybackKind.LIVE,
             ),
         )
@@ -1608,6 +1652,10 @@ private fun NavHostController.replaceStackWith(route: String) {
 
 /** 源级请求头 → 播放头。Basic 认证只在用户名非空时才注入。 */
 private fun com.leimao.tv.core.database.repository.PlaybackConfig.toHeaders(): Map<String, String> =
+    toRequestHeaders().toPlaybackHeaders()
+
+/** 同一份配置 → 探测用请求头（HttpClient 要 RequestHeaders，播放器要 Map，别混用） */
+private fun com.leimao.tv.core.database.repository.PlaybackConfig.toRequestHeaders(): RequestHeaders =
     RequestHeaders(
         userAgent = userAgent?.takeIf { it.isNotBlank() },
         referer = referer?.takeIf { it.isNotBlank() },
@@ -1615,4 +1663,4 @@ private fun com.leimao.tv.core.database.repository.PlaybackConfig.toHeaders(): M
             basicUser?.takeIf { it.isNotBlank() }?.let { user ->
                 BasicAuth(username = user, password = basicPass.orEmpty())
             },
-    ).toPlaybackHeaders()
+    )

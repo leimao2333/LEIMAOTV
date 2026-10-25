@@ -437,6 +437,11 @@ tag 是「版本号 ↔ 提交」的唯一可追溯锚点，少了它，事后�
 ### 10.4 发版清单（缺一不发）
 
 1. 全量单测绿 + §9.2 手工验收通过；
+   > 「绿」必须是**强制重跑**出来的：`./gradlew ktlintCheck testDebugUnitTest :core:model:test
+   > :core:version:test --rerun-tasks`。增量构建会跳过「测试源码是否要重编」的判断，
+   > 接口加了方法而测试里的匿名实现没跟上时，本地一路 UP-TO-DATE 全绿、CI 一跑就挂在
+   > 编译上（实测 v0.4.3.0：`LineSchedulerTest` 少实现 `prune`，本地绿、CI 红）。
+   > 平时迭代用增量没问题，**发版那一次必须重跑**。
 2. **§10.3 四处同步全部完成**，`versionName` 与 `CURRENT_VERSION` 一致；
 3. `docs/功能清单.md` 里相关条目状态改为「已完成 + 版本号」，`TODO.md` 对应条目打勾；
 4. Release 构建签名校验通过（`apksigner verify` 必须看到 v2 = true）；

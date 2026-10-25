@@ -29,6 +29,17 @@ data class Source(
         get() = !userAgent.isNullOrBlank() || !referer.isNullOrBlank() || !basicUser.isNullOrBlank()
 }
 
+/**
+ * 一条源在本地库里有多少条目（SET-09 源卡片上的「条目数」）。
+ *
+ * 直播源数的是频道行、影视源数的是影片行 —— 两边分开统计再相加，
+ * 因为同一个 id 下不会同时有两种（源的类型在建源时就定死了）。
+ */
+data class SourceEntryCount(
+    val sourceId: Long,
+    val total: Int,
+)
+
 /** 新增源时的入参（还没有 id 与时间戳，由 [SourceRepository.add] 补）。 */
 data class NewSource(
     val type: String = SourceType.LIVE,

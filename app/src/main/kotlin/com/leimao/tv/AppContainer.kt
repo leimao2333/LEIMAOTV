@@ -7,6 +7,7 @@ import com.leimao.tv.core.data.LineScheduler
 import com.leimao.tv.core.data.PinyinTable
 import com.leimao.tv.core.data.SearchRepository
 import com.leimao.tv.core.data.SourceHealthChecker
+import com.leimao.tv.core.data.SourceHealthStore
 import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.UpdateChecker
 import com.leimao.tv.core.data.VodCatalogRefresher
@@ -124,6 +125,9 @@ class AppContainer(context: Context) {
      * 必须声明在 [sourceRepository] 与 `httpClient` 之后 —— 属性按书写顺序初始化（MEMORY 坑） */
     val sourceHealthChecker: SourceHealthChecker =
         SourceHealthChecker(sources = sourceRepository, http = httpClient)
+
+    /** 健康检查结果的会话内缓存（SET-09）：放在容器里，离开源管理页再回来结论还在 */
+    val sourceHealthStore: SourceHealthStore = SourceHealthStore()
 
     val channelRepository: ChannelRepository = RoomChannelRepository(database)
 

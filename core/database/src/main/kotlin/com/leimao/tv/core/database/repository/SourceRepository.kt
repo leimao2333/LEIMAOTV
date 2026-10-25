@@ -28,6 +28,14 @@ interface SourceRepository {
     /** 上移/下移（SET-03）。direction = -1 上移、+1 下移；边界处不动作 */
     suspend fun move(id: Long, direction: Int)
 
+    /**
+     * 每条源在本地有多少条目：直播源 = 频道数，影视源 = 影片数（SET-09 源卡片）。
+     *
+     * 没有条目的源不出现在 map 里（而不是给 0）—— 「刚加的源还没刷过」与
+     * 「刷过但一条没抓到」在卡片上是两种文案，0 会把它们混成一种。
+     */
+    suspend fun entryCounts(): Map<Long, Int>
+
     /** 把全部源（含停用）序列化成 JSON，供导出备份（SET-03） */
     suspend fun exportJson(): String
 
@@ -98,6 +106,12 @@ class RoomSourceRepository(
         val a = ordered[index]
         val b = ordered[target]
         dao.swapSortOrder(a.id, a.sortOrder, b.id, b.sortOrder)
+    }
+
+    override suspend fun entryCounts(): Map<Long, Int> {
+        val channels = database.channelDao().countBySource().associate { it.sourceId to it.total }
+        val media = database.mediaDao().countBySource().associate { it.sourceId to it.total }
+        return (channels.keys + media.keys).associateWith { (channels[it] ?: 0) + (media[it] ?: 0) }
     }
 
     override suspend fun exportJson(): String = SourceJson.encode(dao.listAll().map { it.toSource() })

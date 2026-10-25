@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,9 +29,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,6 +44,7 @@ import com.leimao.tv.core.data.EpgImportResult
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.RefreshFailure
 import com.leimao.tv.core.data.RefreshResult
+import com.leimao.tv.core.data.SourceHealthStore
 import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.VodCatalogRefresher
 import com.leimao.tv.core.data.VodCatalogReport
@@ -88,6 +92,13 @@ fun SourceManagerScreen(
     vodRefresher: VodCatalogRefresher? = null,
     /** 源健康检查（LIVE-09）。可空；为 null 时不显示「健康检查」按钮 */
     healthChecker: com.leimao.tv.core.data.SourceHealthChecker? = null,
+    /**
+     * 健康检查结果的会话内缓存（SET-09）。
+     *
+     * 默认在页面内建一个：预览与测试不必造依赖。真正跑应用时由 `AppContainer` 传进来 ——
+     * 那样离开页面再回来，卡片上的「正常 / 失效」还在。
+     */
+    healthStore: SourceHealthStore = remember { SourceHealthStore() },
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -100,10 +111,17 @@ fun SourceManagerScreen(
     var epgSummary by remember { mutableStateOf<EpgImportSummary?>(null) }
     var epgSourceUrl by remember { mutableStateOf<String?>(null) }
 
+    /** 每条源的条目数（SET-09）：直播数频道、影视数影片 */
+    var entryCounts by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
+
+    /** 健康状态按 sourceId 索引，来自会话缓存（SET-09） */
+    val healthEntries by healthStore.entries.collectAsState()
+
     val firstActionFocus = remember { FocusRequester() }
 
     suspend fun reload() {
         sources = sourceRepository.list()
+        entryCounts = sourceRepository.entryCounts()
         epgSummary = epgRepository?.summary()
         epgSourceUrl = epgRepository?.sourceUrl()
     }
@@ -248,13 +266,16 @@ fun SourceManagerScreen(
                     }
                     FocusableCard(
                         onClick = {
-                            scope.launch {
-                                busy = true
-                                val results = refresher.refreshAll()
-                                status = summarize(results)
-                                busy = false
-                                reload()
-                                if (results.any { it is RefreshResult.Done }) onSourcesChanged()
+                            // 同样不禁用按钮，只是忙时不重复触发（连按两下会并发刷两轮）
+                            if (!busy) {
+                                scope.launch {
+                                    busy = true
+                                    val results = refresher.refreshAll()
+                                    status = summarize(results)
+                                    busy = false
+                                    reload()
+                                    if (results.any { it is RefreshResult.Done }) onSourcesChanged()
+                                }
                             }
                         },
                     ) {
@@ -263,17 +284,23 @@ fun SourceManagerScreen(
                     if (healthChecker != null) {
                         FocusableCard(
                             onClick = {
-                                scope.launch {
-                                    busy = true
-                                    // 状态行先给出「在查」的明确提示：并发探测也要几秒，
-                                    // 不说明的话用户只会觉得按钮按了没反应
-                                    status = "正在逐条探测可用性…"
-                                    val healths = healthChecker.checkAll()
-                                    status = healthSummary(healths)
-                                    busy = false
+                                // 忙时不是「禁用」，而是「按下不做事」：禁用会让焦点从这颗按钮上
+                                // 消失、跳回页面第一个按钮（RULES §6.2 第 2 条：焦点不许丢）。
+                                // 探测本身要几秒，用户很可能连按两下。
+                                if (!busy) {
+                                    scope.launch {
+                                        busy = true
+                                        // 状态行先给出「在查」的明确提示：并发探测也要几秒，
+                                        // 不说明的话用户只会觉得按钮按了没反应
+                                        status = "正在逐条探测可用性…"
+                                        val healths = healthChecker.checkAll()
+                                        // 结论沉淀到卡片上（SET-09）：报告只闪一次的毛病在这里收口
+                                        healthStore.record(healths)
+                                        status = healthSummary(healths)
+                                        busy = false
+                                    }
                                 }
                             },
-                            enabled = !busy,
                         ) {
                             Text(text = "健康检查", style = TvText.current.label)
                         }
@@ -344,6 +371,8 @@ fun SourceManagerScreen(
                         items(items = sources, key = { it.id }) { source ->
                             SourceRow(
                                 source = source,
+                                entryCount = entryCounts[source.id],
+                                health = healthEntries[source.id],
                                 busy = busy,
                                 isFirst = sources.first().id == source.id,
                                 isLast = sources.last().id == source.id,
@@ -372,6 +401,8 @@ fun SourceManagerScreen(
                                 onDelete = {
                                     scope.launch {
                                         sourceRepository.delete(source.id)
+                                        // 同 id 被复用时不该带着上一条源的体检结论（SET-09）
+                                        healthStore.forget(source.id)
                                         status = "已删除「${source.name}」及其下的频道"
                                         reload()
                                         onSourcesChanged()
@@ -467,9 +498,23 @@ private fun StatusLine(status: String?, busy: Boolean) {
     }
 }
 
+/**
+ * 一条源 = 一张卡片（SET-09）。
+ *
+ * 卡片上四块信息，顺序按「用户最想先知道什么」排：
+ * ① 名字 + 类型徽标（直播 / 影视）+ 条目数 —— 先分清这是哪条源、有没有东西；
+ * ② 地址（打码）与最近刷新时间 —— 判断「列表是新的还是旧的」；
+ * ③ 健康状态（正常 / 慢 / 失效 / 未测）+ 上次失败原因 —— 判断「该刷新、该等，还是该换源」；
+ * ④ 操作按钮。
+ *
+ * **失效源置灰但不消失**：它可能只是今天抽风，直接藏起来等于把用户配过的源弄丢了；
+ * 灰掉 + 写明原因，用户才知道该停用还是再等等。停用按钮就在手边，一键。
+ */
 @Composable
 private fun SourceRow(
     source: Source,
+    entryCount: Int?,
+    health: SourceHealthStore.Entry?,
     busy: Boolean,
     isFirst: Boolean,
     isLast: Boolean,
@@ -478,13 +523,18 @@ private fun SourceRow(
     onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val isVod = source.type == SourceType.VOD
+    // 置灰的两种情形：用户主动停用、探测判定失效。两种都保留在列表里
+    val dimmed = !source.enabled || health?.health?.ok == false
+
     Column(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .alpha(if (dimmed) DIMMED_ALPHA else 1f),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -493,16 +543,17 @@ private fun SourceRow(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.width(260.dp),
+                modifier = Modifier.width(240.dp),
             )
+            TypeBadge(isVod = isVod)
+            Spacer(modifier = Modifier.width(12.dp))
             Text(
-                // 地址只显示域名部分：整条地址很可能是带订阅 token 的（RULES §2.5）
-                text = maskUrl(source.url),
+                // 条目数是「这条源到底抓到了东西没有」的直接证据
+                text = describeEntryCount(source.type, entryCount),
                 style = TvText.current.hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.width(120.dp),
             )
             Text(
                 text = if (source.enabled) "已启用" else "已停用",
@@ -513,26 +564,58 @@ private fun SourceRow(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
+                maxLines = 1,
+                modifier = Modifier.width(64.dp),
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            HealthBadge(health = health)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                // 地址只显示域名部分：整条地址很可能是带订阅 token 的（RULES §2.5）
+                text = maskUrl(source.url),
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = describeRefreshTime(source.updatedAt),
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = source.lastRefreshNote ?: "尚未刷新过",
-            style = TvText.current.hint,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // 上次失败原因单独一行：与健康状态不是一回事（刷新失败 vs 探测连不上），
+        // 混在一行里会让人以为「刷新失败」等于「源坏了」
+        source.lastRefreshNote?.let { note ->
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "上次刷新：$note",
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            FocusableCard(onClick = { onMove(-1) }, enabled = !isFirst) {
+            // 这几个按钮**不做禁用**（不用 enabled=false）：禁用会让焦点从按钮上消失、
+            // 跳回页面第一个按钮（RULES §6.2 第 2 条）。边界与忙碌改成「按下不做事」，
+            // 焦点留在原地，用户继续按也没问题。
+            FocusableCard(onClick = { if (!isFirst) onMove(-1) }) {
                 Text(text = "上移", style = TvText.current.label)
             }
-            FocusableCard(onClick = { onMove(1) }, enabled = !isLast) {
+            FocusableCard(onClick = { if (!isLast) onMove(1) }) {
                 Text(text = "下移", style = TvText.current.label)
             }
-            FocusableCard(onClick = onRefresh, enabled = !busy) {
+            FocusableCard(onClick = { if (!busy) onRefresh() }) {
                 Text(text = "刷新", style = TvText.current.label)
             }
             FocusableCard(onClick = onToggle) {
+                // 失效时这个按钮就是「一键停用」：文案随状态变，用户不用先想该按哪个
                 Text(text = if (source.enabled) "停用" else "启用", style = TvText.current.label)
             }
             FocusableCard(onClick = onDelete) {
@@ -541,6 +624,117 @@ private fun SourceRow(
         }
     }
 }
+
+/** 类型徽标：直播 / 影视。底色区分，不靠文字细看（SET-09） */
+@Composable
+private fun TypeBadge(isVod: Boolean) {
+    Text(
+        text = if (isVod) "影视" else "直播",
+        style = TvText.current.hint,
+        color = MaterialTheme.colorScheme.onPrimary,
+        modifier =
+            Modifier
+                .background(
+                    if (isVod) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                    RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * 健康徽标（SET-09）：正常 / 慢 / 失效 / 未测。
+ *
+ * 「未测」必须显式写出来：空白会让人以为这条源没问题，而它其实从来没被检查过。
+ */
+@Composable
+private fun HealthBadge(health: SourceHealthStore.Entry?) {
+    val ok = health?.health?.ok
+    val slow = ok == true && health.health.latencyMs >= SLOW_SOURCE_MS
+    val color =
+        when {
+            ok == null -> MaterialTheme.colorScheme.onSurfaceVariant
+            !ok -> MaterialTheme.colorScheme.error
+            slow -> WARN_COLOR
+            else -> MaterialTheme.colorScheme.primary
+        }
+    Text(
+        text = describeHealth(health),
+        style = TvText.current.hint,
+        color = color,
+        maxLines = 1,
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(color.copy(alpha = BADGE_TINT_ALPHA))
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * 健康状态 → 一句人话（SET-09）。
+ *
+ * 带延迟：「正常」两个字分不出 80ms 和 2.8s，而后者正是用户刷不动列表的原因。
+ * 失效时把原因带出来 —— 只说「失效」，用户还得再点一次健康检查才知道为什么。
+ */
+internal fun describeHealth(
+    entry: SourceHealthStore.Entry?,
+    slowMs: Long = SLOW_SOURCE_MS,
+): String =
+    when {
+        entry == null -> "未测"
+        !entry.health.ok -> "失效（${entry.health.detail ?: "未知原因"}）"
+        entry.health.latencyMs >= slowMs -> "慢 ${formatLatency(entry.health.latencyMs)}"
+        else -> "正常 ${formatLatency(entry.health.latencyMs)}"
+    }
+
+/** 延迟格式化：1s 以下给毫秒，以上给一位小数的秒 —— 「2843ms」在客厅里读不出来 */
+internal fun formatLatency(ms: Long): String =
+    if (ms < 1_000) {
+        "${ms}ms"
+    } else {
+        String.format(Locale.US, "%.1fs", ms / 1000.0)
+    }
+
+/** 条目数 → 一句人话（SET-09）。直播数频道、影视数影片，量词不能混 */
+internal fun describeEntryCount(
+    type: String,
+    count: Int?,
+): String =
+    when {
+        count == null || count <= 0 -> if (type == SourceType.VOD) "还没有影片" else "还没有频道"
+        type == SourceType.VOD -> "$count 部影片"
+        else -> "$count 个频道"
+    }
+
+/**
+ * 最近刷新时间 → 相对时间（SET-09）。
+ *
+ * 用相对时间而不是「10-25 14:03」：用户看这张卡片时问的是「这份列表新不新」，
+ * 相对时间直接回答这个问题；绝对时间还得自己减一遍。
+ */
+internal fun describeRefreshTime(
+    at: Long,
+    now: Long = System.currentTimeMillis(),
+): String {
+    if (at <= 0) return "从未刷新"
+    val minutes = (now - at).coerceAtLeast(0) / 60_000
+    return when {
+        minutes < 1 -> "刚刚刷新"
+        minutes < 60 -> "$minutes 分钟前刷新"
+        minutes < 60 * 24 -> "${minutes / 60} 小时前刷新"
+        else -> "${minutes / (60 * 24)} 天前刷新"
+    }
+}
+
+/** 失效 / 停用的卡片压到多暗：还能读清，但一眼看得出「这条现在不用管它」 */
+private const val DIMMED_ALPHA = 0.55f
+
+/** 徽标底色的透明度：够看出是一块，又不至于把文字压得看不清 */
+private const val BADGE_TINT_ALPHA = 0.18f
+
+/** 「慢」的提示色。不用 error（那是失效），也不用 primary（那是正常） */
+private val WARN_COLOR = Color(0xFFFFB300)
 
 /** 结果 → 一句人话。成功的显示改了什么，失败的显示为什么。 */
 internal fun describe(result: RefreshResult): String =

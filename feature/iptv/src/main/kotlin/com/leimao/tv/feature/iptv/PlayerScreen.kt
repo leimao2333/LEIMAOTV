@@ -85,16 +85,29 @@ data class ProgrammeLine(
 internal fun ProgrammeLine?.toCaption(
     formatter: SimpleDateFormat = SimpleDateFormat("HH:mm", Locale.getDefault()),
 ): String? {
-    if (this == null || isEmpty) return null
+    val parts = listOfNotNull(currentCaption(formatter), nextCaption(formatter))
+    return if (parts.isEmpty()) null else parts.joinToString("　·　")
+}
 
-    val parts = mutableListOf<String>()
-    current?.let { title ->
-        parts += currentEndsAt?.let { "正在播 $title ${formatter.format(Date(it))} 结束" } ?: "正在播 $title"
-    }
-    next?.let { title ->
-        parts += nextStartsAt?.let { "下一档 $title ${formatter.format(Date(it))}" } ?: "下一档 $title"
-    }
-    return parts.joinToString("　·　")
+/**
+ * 「正在播 …」单独一层（PLAY-10）。
+ *
+ * 与 [toCaption] 分开是因为 HUD 要分档排版：当前节目是用户在 HUD 里最想读到的信息，
+ * 用 body 档；下一档只是预告，压到 hint 档。拼成一行就只能整行一个字号。
+ */
+internal fun ProgrammeLine?.currentCaption(
+    formatter: SimpleDateFormat = SimpleDateFormat("HH:mm", Locale.getDefault()),
+): String? {
+    val title = this?.current ?: return null
+    return currentEndsAt?.let { "正在播 $title ${formatter.format(Date(it))} 结束" } ?: "正在播 $title"
+}
+
+/** 「下一档 …」单独一层（PLAY-10），见 [currentCaption] 的说明 */
+internal fun ProgrammeLine?.nextCaption(
+    formatter: SimpleDateFormat = SimpleDateFormat("HH:mm", Locale.getDefault()),
+): String? {
+    val title = this?.next ?: return null
+    return nextStartsAt?.let { "下一档 $title ${formatter.format(Date(it))}" } ?: "下一档 $title"
 }
 
 /** 播放页要展示的全部状态。UI 不自己算业务，只把它画出来。 */
@@ -214,11 +227,12 @@ fun PlayerScreen(
         runCatching { firstControlFocus.requestFocus() }
     }
 
-    // HUD 用同一个窗口：亮起来之后 5s 没人按键就退掉。
-    // 抽屉开着时不计时 —— 那时候屏幕上是频道列表在跟台名抢位置，HUD 本来就不显示。
+    // HUD 自己一个更短的窗口（PLAY-10：切台闪现 2s 后淡出）。
+    // 它只回答「现在这是哪个台」，答案给完就该让开画面 —— 5s 是控制条的长度，
+    // 不是一行字的长度。抽屉开着时不计时：那时候屏幕上是频道列表在跟台名抢位置。
     LaunchedEffect(hudVisible, hudTick, drawerOpen) {
         if (!hudVisible || drawerOpen) return@LaunchedEffect
-        delay(CONTROLS_AUTO_HIDE_MS)
+        delay(HUD_AUTO_HIDE_MS)
         hudVisible = false
     }
 
@@ -287,9 +301,19 @@ fun PlayerScreen(
 
     val isFailed = playback is PlaybackState.Failed
 
-    // 控制条一出现，HUD 就跟着亮：用户已经在操作 UI 了，这时候藏台名只会让人更迷惑。
-    // 反过来说，控制条收起后 HUD 仍由自己的计时器管，两者不共享状态。
-    val showHud = hudVisible || controlsVisible
+    // HUD 的可见性（PLAY-10「四者互不重叠」）。
+    //
+    // 以前是 `hudVisible || controlsVisible`：控制条一展开 HUD 也跟着亮，顶部台名与
+    // 底部控制条同时占屏。现在改成互斥 —— 控制条展开时 HUD 收起，台名改由控制条那一行
+    // 承担（那里放得下完整台名）。抽屉、节目单、失败面板、轨道浮层同理：它们各自带标题，
+    // HUD 再叠上去就是两层字压在一起。
+    val showHud =
+        hudVisible &&
+            !controlsVisible &&
+            !drawerOpen &&
+            !epgOpen &&
+            !isFailed &&
+            trackPanel == null
 
     // 淡入淡出而不是硬切：硬切在黑画面上会闪一下，观感很差
     val hudAlpha by animateFloatAsState(
@@ -387,7 +411,7 @@ fun PlayerScreen(
                 // 抽屉打开时把台名与提示行收起来：抽屉是半透明的，两层文字叠在一起
                 // 会出现「频道列表」压着台名的重影（模拟器上实拍确认过）。
                 // HUD 退掉时整块也一起走，只留画面
-                if (showHud && !drawerOpen) {
+                if (showHud) {
                     Box(modifier = Modifier.alpha(hudAlpha)) {
                         PlayerTopBar(state = state, numberBuffer = numberBuffer)
                     }
@@ -450,7 +474,7 @@ fun PlayerScreen(
                         onOpenText = { trackPanel = TrackKind.TEXT },
                         onOpenSourceManager = onOpenSourceManager,
                     )
-                } else if (hudVisible && !isFailed && !state.loadingChannels && !drawerOpen) {
+                } else if (showHud && !state.loadingChannels) {
                     Text(
                         // 按键提示只在控制条收起、HUD 还亮着的时候露出：
                         // 控制条里已经有按钮了，再并排一行说明只会抢注意力；
@@ -526,62 +550,87 @@ private fun VideoSurface(surfaceHost: VideoSurfaceHost?) {
     )
 }
 
+/**
+ * 顶部 HUD（PLAY-10）。
+ *
+ * 四层信息，各占一个字号档位，**页面不自己调字号**（RULES §6.3）：
+ * 台名 → `title`；分组 / 线路 → `hint`；当前节目 → `body`；下一档 → `hint` 且压暗。
+ * 分档的理由很实际：原来四行全是 hint，用户扫一眼分不出哪个是台名、哪个是节目。
+ *
+ * 台名固定一行、尾部省略：长台名（「CCTV-1 综合 高清」这类）一换行就把下面三层
+ * 往下推，画面被切掉一大块。完整台名在控制条里（控制条展开时 HUD 不显示，不重复）。
+ */
 @Composable
 private fun PlayerTopBar(state: PlayerUiState, numberBuffer: String) {
     val playback = state.playback
     // 线路位置在 PlaybackState 接口上，不必再按状态分支取值
     val lineIndex = playback.lineIndex
     val lineCount = playback.lineCount
+    val channel = state.channel
 
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        // 第一层：台名
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = state.channel?.name ?: if (state.loadingChannels) "正在载入频道" else "暂无可播放的频道",
+                text = channel?.name ?: if (state.loadingChannels) "正在载入频道" else "暂无可播放的频道",
                 style = TvText.current.title,
                 color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                state.channel?.let { channel ->
-                    Text(
-                        text = channel.groupName,
-                        style = TvText.current.hint,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (lineCount > 1) {
-                    Text(
-                        // 多线路时把当前线路露出来，用户才知道 ←→ 按了有没有反应
-                        text = "线路 ${lineIndex + 1}/$lineCount",
-                        style = TvText.current.hint,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            // 节目单那一行是可选的：没导入节目单、或者这份节目单不覆盖这个台，
-            // 就整行不出现，而不是显示「暂无节目信息」占一行位置
-            state.programme.toCaption()?.let { caption ->
+            if (numberBuffer.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = caption,
+                    // 数字输入的即时反馈：用户按了 1 就得看到 1，而不是等 2 秒后才知道跳哪
+                    text = "跳转：$numberBuffer",
+                    style = TvText.current.title,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        // 第二层：分组 · 线路
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            channel?.let {
+                Text(
+                    text = it.groupName,
                     style = TvText.current.hint,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (lineCount > 1) {
+                Text(
+                    // 多线路时把当前线路露出来，用户才知道 ←→ 按了有没有反应
+                    text = "线路 ${lineIndex + 1}/$lineCount",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
-
-        if (numberBuffer.isNotEmpty()) {
+        // 第三层：正在播（HUD 里最该被读到的一行，给 body 档）
+        state.programme.currentCaption()?.let { caption ->
             Text(
-                // 数字输入的即时反馈：用户按了 1 就得看到 1，而不是等 2 秒后才知道跳哪
-                text = "跳转：$numberBuffer",
-                style = TvText.current.title,
-                color = MaterialTheme.colorScheme.primary,
+                text = caption,
+                style = TvText.current.body,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        // 第四层：下一档（预告性质，压到 hint 档并降一档亮度）
+        // 节目单没覆盖这个台时这两层都不出现 —— 宁可空着，也不要编一条假节目出来
+        state.programme.nextCaption()?.let { caption ->
+            Text(
+                text = caption,
+                style = TvText.current.hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -600,44 +649,72 @@ private fun ControlBar(
     onOpenSourceManager: () -> Unit,
 ) {
     val isFavorite = state.channel?.let { state.favoriteIds.contains(it.id) } == true
-    Row(
+    val lineIndex = state.playback.lineIndex
+    val lineCount = state.playback.lineCount
+
+    Column(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xCC1A1A1A))
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        FocusableCard(onClick = onOpenDrawer, modifier = Modifier.focusRequester(firstFocus)) {
-            Text(text = "频道", style = TvText.current.label)
-        }
-        FocusableCard(onClick = onOpenEpg) {
-            Text(text = "节目单", style = TvText.current.label)
-        }
-        FocusableCard(onClick = onToggleFavorite) {
-            Text(text = if (isFavorite) "★ 已收藏" else "☆ 收藏", style = TvText.current.label)
-        }
-        FocusableCard(onClick = { onSwitchLine(1) }) {
-            Text(text = "换线路", style = TvText.current.label)
-        }
-        // 音轨 / 字幕：没有就不显示。一个点进去空空的菜单比没有按钮更让人怀疑坏了
-        if (state.canPickAudio) {
-            FocusableCard(onClick = onOpenAudio) {
-                Text(text = "音轨", style = TvText.current.label)
-            }
-        }
-        if (state.hasTextTracks) {
-            FocusableCard(onClick = onOpenText) {
+        // 台名挪到控制条里（PLAY-10）：控制条展开时 HUD 是收起的，否则顶部台名与底部按钮行
+        // 同时占屏。这里比 HUD 宽裕（不省略、可容下频道号），HUD 里被截断的长台名在这里看得全。
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = state.channel?.let { "${it.number}　${it.name}" } ?: "暂无频道",
+                style = TvText.current.body,
+                color = Color(0xFFFFFFFF),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (lineCount > 1) {
                 Text(
-                    text = if (state.textDisabled) "字幕·关" else "字幕",
-                    style = TvText.current.label,
+                    text = "线路 ${lineIndex + 1}/$lineCount",
+                    style = TvText.current.hint,
+                    color = Color(0x99FFFFFF),
                 )
             }
         }
-        FocusableCard(onClick = onOpenSourceManager) {
-            Text(text = "源管理", style = TvText.current.label)
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FocusableCard(onClick = onOpenDrawer, modifier = Modifier.focusRequester(firstFocus)) {
+                Text(text = "频道", style = TvText.current.label)
+            }
+            FocusableCard(onClick = onOpenEpg) {
+                Text(text = "节目单", style = TvText.current.label)
+            }
+            FocusableCard(onClick = onToggleFavorite) {
+                Text(text = if (isFavorite) "★ 已收藏" else "☆ 收藏", style = TvText.current.label)
+            }
+            FocusableCard(onClick = { onSwitchLine(1) }) {
+                Text(text = "换线路", style = TvText.current.label)
+            }
+            // 音轨 / 字幕：没有就不显示。一个点进去空空的菜单比没有按钮更让人怀疑坏了
+            if (state.canPickAudio) {
+                FocusableCard(onClick = onOpenAudio) {
+                    Text(text = "音轨", style = TvText.current.label)
+                }
+            }
+            if (state.hasTextTracks) {
+                FocusableCard(onClick = onOpenText) {
+                    Text(
+                        text = if (state.textDisabled) "字幕·关" else "字幕",
+                        style = TvText.current.label,
+                    )
+                }
+            }
+            FocusableCard(onClick = onOpenSourceManager) {
+                Text(text = "源管理", style = TvText.current.label)
+            }
         }
     }
 }
@@ -949,6 +1026,14 @@ private fun digitOf(event: KeyEvent): Char? =
 
 /** 控制条自动隐藏时间（PLAY-04）：太短会让人按不到，太长会挡住画面 */
 private const val CONTROLS_AUTO_HIDE_MS = 5_000L
+
+/**
+ * HUD 自动隐藏时间（PLAY-10）。
+ *
+ * 比控制条短：HUD 只是回答「现在这是哪个台」，切台后两秒够看清了；
+ * 停留 5s 等于让一行字压在画面上多占三秒。
+ */
+private const val HUD_AUTO_HIDE_MS = 2_000L
 
 /** 数字键换台的等待窗口（LIVE-11）：给用户按完两位数的机会 */
 private const val NUMBER_INPUT_TIMEOUT_MS = 2_000L

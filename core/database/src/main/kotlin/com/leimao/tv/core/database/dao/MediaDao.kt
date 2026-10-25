@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import com.leimao.tv.core.database.entity.MediaEntity
+import com.leimao.tv.core.database.repository.SourceEntryCount
 
 @Dao
 interface MediaDao {
@@ -117,6 +118,10 @@ interface MediaDao {
         type: String,
         limit: Int,
     ): List<MediaEntity>
+
+    /** 每条源在本地有多少影片（SET-09 源卡片上的条目数），口径见 `ChannelDao.countBySource` */
+    @Query("SELECT sourceId AS sourceId, COUNT(*) AS total FROM media GROUP BY sourceId")
+    suspend fun countBySource(): List<SourceEntryCount>
 
     /** 该类型下出现过的年份，倒序 —— 筛选项按「新的在前」排 */
     @Query(

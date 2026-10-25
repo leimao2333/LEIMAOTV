@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.LocalContentColor
@@ -63,6 +64,14 @@ fun FocusableCard(
      * 否则 40dp 的水平内边距会把标题挤成一个字。
      */
     contentPadding: PaddingValues = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+    /**
+     * 底色。默认 null = 走 [MaterialTheme.colorScheme.surfaceVariant]（「这里有个可点的块」）。
+     *
+     * 只有「列表里被选中的那一项」需要传值（LIVE-26 的分组栏）：选中态若只改文字颜色，
+     * 客厅距离下几乎看不出来。底色属于容器而不是内容，所以放在这里，页面不自己套一层背景 ——
+     * 那样会把焦点描边压在下面，选中项一聚焦就变成「描边被自己的底色盖住半圈」。
+     */
+    containerColor: Color? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val visuals = LocalTvFocusVisuals.current
@@ -81,7 +90,11 @@ fun FocusableCard(
     // 未聚焦时用 surfaceVariant 而不是 surface：surface 跟页面底色几乎一个值，
     // 一整排按钮会糊成一片，看不出「这里有几个可点的东西」
     val backgroundColor =
-        if (enabled) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+        when {
+            !enabled -> MaterialTheme.colorScheme.surface
+            containerColor != null -> containerColor
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        }
 
     Box(
         modifier =

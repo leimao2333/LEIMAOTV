@@ -64,4 +64,32 @@ class ProgrammeLineTest {
         val missing: ProgrammeLine? = null
         assertNull(missing.toCaption(formatter))
     }
+
+    // ---------- PLAY-10：HUD 分档后的两层文案 ----------
+
+    @Test
+    fun `当前档与下一档能各自取出，拼起来与整行文案一致`() {
+        val line =
+            ProgrammeLine(
+                current = "新闻联播",
+                currentEndsAt = at(21),
+                next = "焦点访谈",
+                nextStartsAt = at(21, 30),
+            )
+        assertEquals("正在播 新闻联播 21:00 结束", line.currentCaption(formatter))
+        assertEquals("下一档 焦点访谈 21:30", line.nextCaption(formatter))
+        assertEquals(
+            "${line.currentCaption(formatter)}　·　${line.nextCaption(formatter)}",
+            line.toCaption(formatter),
+        )
+    }
+
+    @Test
+    fun `缺哪一层就哪一层为 null，不拿空串占位`() {
+        assertNull(ProgrammeLine(next = "焦点访谈").currentCaption(formatter))
+        assertNull(ProgrammeLine(current = "新闻联播").nextCaption(formatter))
+        val missing: ProgrammeLine? = null
+        assertNull(missing.currentCaption(formatter))
+        assertNull(missing.nextCaption(formatter))
+    }
 }

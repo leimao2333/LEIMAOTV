@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.leimao.tv.core.database.entity.ChannelEntity
 import com.leimao.tv.core.database.repository.ChannelWithSource
+import com.leimao.tv.core.database.repository.SourceEntryCount
 
 @Dao
 interface ChannelDao {
@@ -106,6 +107,15 @@ interface ChannelDao {
 
     @Query("SELECT * FROM channel WHERE sourceId = :sourceId ORDER BY number ASC, id ASC")
     suspend fun listBySource(sourceId: Long): List<ChannelEntity>
+
+    /**
+     * 每条源在本地有多少频道（SET-09 源卡片上的条目数）。
+     *
+     * 用 `GROUP BY` 一次算完，而不是每条源发一次 `COUNT` —— 源管理页一屏十几条源，
+     * 一次一条就是十几次往返，而这只是给卡片填一个数字。
+     */
+    @Query("SELECT sourceId AS sourceId, COUNT(*) AS total FROM channel GROUP BY sourceId")
+    suspend fun countBySource(): List<SourceEntryCount>
 
     /**
      * 刻意用 ABORT 而不是 REPLACE。

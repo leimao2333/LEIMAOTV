@@ -26,12 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import coil.compose.AsyncImage
+import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import kotlinx.coroutines.delay
@@ -147,21 +146,11 @@ private fun HeroPoster(item: HeroItem) {
                 .background(MaterialTheme.colorScheme.surface),
         contentAlignment = Alignment.Center,
     ) {
-        val poster = item.poster
-        if (poster.isNullOrBlank()) {
-            Text(
-                text = item.title.take(1),
-                style = TvText.current.display,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            AsyncImage(
-                model = poster,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        RemoteImage(
+            url = item.poster,
+            fallbackText = item.title,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

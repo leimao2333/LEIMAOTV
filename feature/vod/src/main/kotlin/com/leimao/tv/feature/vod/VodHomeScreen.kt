@@ -31,16 +31,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import coil.compose.AsyncImage
 import com.leimao.tv.core.designsystem.components.FilterBar
 import com.leimao.tv.core.designsystem.components.FilterSpec
+import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.ContentType
@@ -385,21 +384,11 @@ private fun WatchedCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
-                val poster = item.poster
-                if (poster.isNullOrBlank()) {
-                    Text(
-                        text = item.title.take(1),
-                        style = TvText.current.display,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    AsyncImage(
-                        model = poster,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                RemoteImage(
+                    url = item.poster,
+                    fallbackText = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                )
 
                 // 集号压在左上角：用户扫这一行时先确认「是不是我看到那一集的地方」。
                 // 看完的片子写「已看完」而不是集号 —— 集号只对「接着看」有意义
@@ -488,22 +477,11 @@ private fun PosterCard(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
-                val poster = item.pic
-                if (poster.isNullOrBlank()) {
-                    // 没有海报时用片名首字占位：比一个灰色空盒子更好认
-                    Text(
-                        text = item.name.take(1),
-                        style = TvText.current.display,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    AsyncImage(
-                        model = poster,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
+                RemoteImage(
+                    url = item.pic,
+                    fallbackText = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                )
 
                 val remarks = item.remarks
                 if (!remarks.isNullOrBlank()) {

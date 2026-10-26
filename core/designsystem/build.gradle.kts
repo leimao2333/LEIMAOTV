@@ -31,6 +31,8 @@ dependencies {
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)
     api(libs.androidx.tv.material)
+    // 海报 / 台标的统一入口（RemoteImage）：图片加载属于「UI 契约」，跟着本模块一起传出去
+    api(libs.coil.compose)
 
     testImplementation(libs.junit)
 }

@@ -76,5 +76,8 @@ class LeimaoTvApplication :
                     .build()
             }
             .crossfade(true)
+            // 只在 debug 打日志：海报/台标拉不到时，界面上只有一个灰盒子，
+            // 而原因（DNS / 403 / 解码失败）只有这里看得到
+            .logger(if (BuildConfig.DEBUG) coil.util.DebugLogger() else null)
             .build()
 }

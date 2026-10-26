@@ -15,6 +15,7 @@ import com.leimao.tv.core.model.search.SearchKind
 import com.leimao.tv.core.model.search.SearchOutcome
 import com.leimao.tv.core.model.search.channelSearchKey
 import com.leimao.tv.core.model.search.normalizeSearchQuery
+import com.leimao.tv.core.model.search.trailingPinyinSegment
 import com.leimao.tv.core.model.search.vodSearchKey
 import com.leimao.tv.core.model.vod.VodPage
 import com.leimao.tv.core.model.vod.VodSummary
@@ -178,6 +179,10 @@ class SearchRepository(
         if (keyword.isEmpty()) return emptyList()
 
         val out = LinkedHashSet<String>()
+        // 末尾「正在打的拼音」：中文输入法是分段的 —— 选了「我」再打 `ai`，输入框是 `我ai`，
+        // 真正要出候选的是 `ai` 这一段。拿整串去查拼音永远查不到（打第二个字没提示的根因）
+        val segment = trailingPinyinSegment(query)
+
         if (keyword.all { it.code < 128 && it.isLetterOrDigit() }) {
             // 先给**输入法候选**：用户打 `wo` 想看的是「我」，不是「哪个台名带 wo」
             ime.candidates(keyword, limit).forEach { if (out.size < limit) out.add(it) }
@@ -189,6 +194,9 @@ class SearchRepository(
             if (out.size < limit) {
                 mediaNameCandidates(keyword, limit, out, scope, allowedTypesFor(scope))
             }
+        } else if (segment != null) {
+            // 已经有汉字、末尾还在打拼音：只给这一段拼音的候选（`我ai` → 爱/哀/挨…）
+            ime.candidates(segment, limit).forEach { if (out.size < limit) out.add(it) }
         } else {
             // 中文查询（系统输入法打出来的）：直接拿名字里含这个词的
             channels

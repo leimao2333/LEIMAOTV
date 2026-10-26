@@ -110,10 +110,12 @@ def load_single_chars(char_table: Path, freq_of: dict[str, int]) -> list[tuple[s
         freq = freq_of.get(ch)
         if freq is None:
             continue
-        for reading in line[1:].split(","):
-            reading = reading.strip()
-            if reading:
-                out.append((reading, ch, freq))
+        # **只用首选读音**：多音字全挂上去会出噪声 —— `乃` 在 pinyin-data 里还有 ǎi 这个读音，
+        # 于是打 `ai` 会跳出「乃」，而用户几乎不可能想打它。词组的读音由 phrase-pinyin 给，
+        # 那里才是多音字真正需要消歧的地方（银行 yinhang）
+        reading = line[1:].split(",")[0].strip()
+        if reading:
+            out.append((reading, ch, freq))
     return out
 
 

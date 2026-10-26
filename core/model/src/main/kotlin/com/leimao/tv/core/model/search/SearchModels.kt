@@ -84,6 +84,23 @@ fun vodSearchKey(
 ): String = "vod:$sourceId:$sourceKey"
 
 /**
+ * 查询末尾「正在打的那一段拼音」。
+ *
+ * 中文输入法是**分段**的：选了「我」之后继续打 `ai`，输入框里是 `我ai` ——
+ * 这一段 `ai` 才是当前在打的拼音，`我` 是已经确认的汉字。整串拿去查拼音永远查不到，
+ * 于是「打第二个字没有任何提示」。
+ *
+ * `我ai` → `ai`；`wo` → `wo`（整串都是拼音）；`我` → null（没有正在打的拼音）；
+ * `CCTV5` → `cctv5`（整串是英文数字，按整串替换）。
+ *
+ * 调用方据此决定**替换哪一段**：`query.dropLast(段长) + 候选`。
+ */
+fun trailingPinyinSegment(raw: String): String? {
+    val tail = raw.takeLastWhile { it.isLetterOrDigit() && it.code < 128 }
+    return tail.takeIf { it.isNotEmpty() }?.lowercase()
+}
+
+/**
  * 关键词归一化（SEARCH-06）。
  *
  * 做三件事：全角转半角（电视遥控器与手机分享来的关键词常带全角字符）、

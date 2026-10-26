@@ -13,6 +13,7 @@ import com.leimao.tv.AppContainer
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.SearchScope
 import com.leimao.tv.core.model.search.SearchOutcome
+import com.leimao.tv.core.model.search.trailingPinyinSegment
 import com.leimao.tv.feature.search.SearchScreen
 import com.leimao.tv.feature.search.SearchUiState
 import com.leimao.tv.feature.search.opensVodDetail
@@ -80,7 +81,12 @@ internal fun SearchContent(
         onSubmit = { scopeLauncher.launch { container.settings.rememberSearchQuery(query) } },
         onSelectHistory = { query = it },
         // 点候选词 = 改成用这个中文词搜：既确认了输入，也让「最近搜索」里留下能看懂的中文
-        onSelectCandidate = { query = it },
+        onSelectCandidate = { candidate ->
+            // 只替换「正在打的那一段拼音」：`我ai` 选「爱」→ `我爱`，而不是把整串换成「爱」。
+            // 整串都是拼音（`wo`）时，段长等于全长，效果就是整串替换
+            val segment = trailingPinyinSegment(query)
+            query = if (segment == null) candidate else query.dropLast(segment.length) + candidate
+        },
         onRemoveHistory = { scopeLauncher.launch { container.settings.forgetSearchQuery(it) } },
         onClearHistory = { scopeLauncher.launch { container.settings.clearSearchHistory() } },
         onSelectHit = { hit ->

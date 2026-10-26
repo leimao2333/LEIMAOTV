@@ -43,6 +43,8 @@ fun TvKeypad(
     symbolPage: Boolean = false,
     onToggleSymbols: (() -> Unit)? = null,
     onDone: (() -> Unit)? = null,
+    /** 回车：搜索页用它提交（记历史 / 收起键盘），弹层用它代替「完成」 */
+    onSubmit: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -93,13 +95,16 @@ fun TvKeypad(
                 modifier = Modifier.weight(2f),
                 onClick = { onQueryChange("") },
             )
-            if (onDone != null) {
+            // 回车：`onSubmit`（搜索）与 `onDone`（完成）是同一颗键的两种语义 ——
+            // 电视上没有实体回车键，没有它就只能靠「移开焦点」来确认输入
+            val confirm = onDone ?: onSubmit
+            if (confirm != null) {
                 KeypadCell(
                     key = Key.Empty,
-                    label = "完成",
+                    label = if (onDone != null) "完成" else "搜索",
                     accent = true,
                     modifier = Modifier.weight(3f),
-                    onClick = onDone,
+                    onClick = confirm,
                 )
             }
         }
@@ -117,7 +122,7 @@ private fun KeypadCell(
     val title =
         label ?: when (key) {
             is Key.Char -> key.value.toString()
-            Key.Backspace -> "删除"
+            Key.Backspace -> "退格"
             Key.Clear -> "清空"
             Key.Empty -> ""
         }

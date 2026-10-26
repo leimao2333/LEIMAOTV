@@ -151,7 +151,12 @@ fun SearchScreen(
 
         if (keypadVisible) {
             Spacer(modifier = Modifier.height(10.dp))
-            TvKeypad(query = state.query, onQueryChange = onQueryChange)
+            TvKeypad(
+                query = state.query,
+                onQueryChange = onQueryChange,
+                // 回车 = 提交：记进搜索历史（结果本来就在跟着输入走）
+                onSubmit = onSubmit,
+            )
         }
 
         Spacer(modifier = Modifier.height(14.dp))

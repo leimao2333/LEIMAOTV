@@ -403,6 +403,8 @@ class Media3PlayerController(
             // 缓冲档位由设置页（SET-01）决定，默认均衡档
             .setLoadControl(bufferProfile.loadControl())
             .build()
+            // 诊断日志：解码器是硬解还是软解、分辨率帧率、丢帧数 —— 用户说「卡」时先看这个
+            .apply { addAnalyticsListener(PlaybackDiagnostics()) }
 
     companion object {
         /** 单条线路上连续重连的次数上限；再失败就该换线了（PLAY-08） */

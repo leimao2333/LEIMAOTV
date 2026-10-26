@@ -13,3 +13,13 @@
 -dontwarn org.videolan.**
 
 # 一旦接入 Room 的反射路径或序列化库，把 keep 规则写在这里并注明原因。
+
+# RULES §8.6：release 构建关闭 Log.d / Log.v。
+#
+# 不裁的话，播放诊断（`PlaybackDiagnostics`）这类常开日志会在正式包里持续刷 logcat：
+# 既拖慢主线程（Log 是同步 IO），又可能把源地址带进用户日志（§2.5 要求打码）。
+# Log.w / Log.e 保留 —— 真出问题时那些是唯一线索。
+-assumenosideeffects class android.util.Log {
+    public static int d(...);
+    public static int v(...);
+}

@@ -558,6 +558,13 @@
   - [ ] 冷启动 / 换台 / 列表 jank 三项：**模拟器无 GPU，数据不可作判据**，必须真机复测
   - [ ] 弱网 / 断网降级未测
   - [ ] 弹层「第一次按键被窗口聚焦吃掉」未解决（解法：三个弹层改树内全屏覆盖层）
+  - [x] **播放诊断日志**（`PlaybackDiagnostics`）：`adb logcat -s LeimaoPlay` 直接看
+        解码器（硬解/软解）、分辨率帧率、丢帧数、缓冲状态 —— 「卡」是解码跟不上还是源在抖，
+        一行就能分。release 里 `Log.d` 由 R8 裁掉（本轮补的 `-assumenosideeffects`，RULES §8.6）
+  - [x] 实测（模拟器）：解码器 `c2.goldfish.h264.decoder`（**软解**，因为 AVD 里只有
+        `c2.goldfish.*`，没有厂商硬解器）；720×576 流、软解初始化 240ms、30 秒内
+        **0 丢帧 / 1 次初始缓冲** —— 解码与网络都不卡，观感差主要是标清放大到 2400×1080
+        加上模拟器无 GPU 合成。真机上会用厂商硬解（`DefaultRenderersFactory` 默认硬解优先）
   - [x] 本轮 LIVE-24 模拟器走查（2026-10-25，1080p，本地起的测试源）：
         回看入口只对有能力的台出现（`catchup_entry.png` / `catchup_no_entry.png`）、
         面板按整点兜底（`catchup_panel.png`）、失败面板不跳台且给「回直播」（`catchup_fail.png`）、

@@ -62,6 +62,28 @@ internal object SourceJson {
         return result
     }
 
+    /**
+     * 挑出真正需要新增的源（SET-03）。
+     *
+     * 导入必须**幂等**：同一份备份点两次，不该变成两份源。以前是直接追加，于是
+     * 「导入清单 → 发现少点什么 → 再导一次」会得到双份列表，用户只能逐条手工删。
+     * 判据用**地址**而不是名字：名字是给人看的，用户随时会改；地址才是源的身份。
+     *
+     * 文件内部重复的也一并去掉 —— 上游清单里同一个地址挂两个名字是常见写法。
+     */
+    fun filterNew(
+        parsed: List<Source>,
+        existingUrls: Set<String>,
+    ): Pair<List<Source>, Int> {
+        val seen = existingUrls.mapTo(mutableSetOf()) { it.trim() }
+        val fresh = mutableListOf<Source>()
+        var skipped = 0
+        for (source in parsed) {
+            if (seen.add(source.url.trim())) fresh += source else skipped++
+        }
+        return fresh to skipped
+    }
+
     /** 从 `{` 处读一个完整对象，返回 (对象体, 下一个可扫描位置)。 */
     private fun readObject(text: String, start: Int): Pair<String, Int> {
         var depth = 0

@@ -23,6 +23,11 @@ data class RefreshOutcome(
     val channelCount: Int,
     val skippedLines: Int,
     val stats: ChannelWriteStats,
+    /**
+     * 顺带挂节目单的结果（LIVE-27）。null 表示这次没什么可说的 ——
+     * 源没声明节目单、或已配着同一份，都不该占用状态行。
+     */
+    val epgNote: String? = null,
 )
 
 /** 刷新失败的原因集合：既有抓取失败，也有「抓到了但不是播放列表」。 */
@@ -60,6 +65,11 @@ class SourceRefresher(
     private val writer: ChannelWriter,
     private val http: HttpClient,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * 订阅源自带节目单地址时的自动挂载（LIVE-27）。可空：单测与不关心 EPG 的装配路径
+     * 不必凭空造一个节目单仓库出来。
+     */
+    private val epgBinder: EpgAutoBinder? = null,
 ) {
     suspend fun refresh(sourceId: Long): RefreshResult {
         val source = sources.find(sourceId) ?: return RefreshResult.Failed(sourceId, RefreshFailure.SOURCE_MISSING)
@@ -134,6 +144,10 @@ class SourceRefresher(
         val stats = writer.replaceForSource(source.id, merged)
         sources.markRefreshed(source.id, clock(), noteFor(merged.size, fromNetwork))
 
+        // 节目单挂载放在频道落库**之后**：它要再抓一次网络（几 MB），
+        // 排在前面会让「台列表已经能用」这件事被一个次要步骤拖住。
+        val epgNote = epgBinder?.bind(parsed.epgUrls)?.note
+
         return RefreshResult.Done(
             RefreshOutcome(
                 sourceId = source.id,
@@ -142,6 +156,7 @@ class SourceRefresher(
                 channelCount = merged.size,
                 skippedLines = parsed.skippedLines,
                 stats = stats,
+                epgNote = epgNote,
             ),
         )
     }

@@ -144,4 +144,57 @@ class SourceJsonTest {
         val decoded = SourceJson.decode(json)
         assertEquals(SourceFormat.MOONTV, decoded[0].format)
     }
+
+    // ---- 导入去重（SET-03）----
+
+    @Test
+    fun `导入时跳过已存在地址`() {
+        val parsed =
+            listOf(
+                sampleSource().copy(url = "https://example.com/a.txt"),
+                sampleSource().copy(url = "https://example.com/b.txt"),
+            )
+
+        val (fresh, skipped) = SourceJson.filterNew(parsed, setOf("https://example.com/a.txt"))
+
+        assertEquals(1, fresh.size)
+        assertEquals("https://example.com/b.txt", fresh[0].url)
+        assertEquals(1, skipped)
+    }
+
+    @Test
+    fun `文件内部重复的地址只留第一个`() {
+        val parsed =
+            listOf(
+                sampleSource().copy(name = "甲", url = "https://example.com/same.txt"),
+                sampleSource().copy(name = "乙", url = "https://example.com/same.txt"),
+            )
+
+        val (fresh, skipped) = SourceJson.filterNew(parsed, emptySet())
+
+        // 同一个地址挂两个名字是上游清单的常见写法，但本地只该有一条源
+        assertEquals(1, fresh.size)
+        assertEquals("甲", fresh[0].name)
+        assertEquals(1, skipped)
+    }
+
+    @Test
+    fun `地址两端的空白不影响判重`() {
+        val parsed = listOf(sampleSource().copy(url = "  https://example.com/a.txt  "))
+
+        val (fresh, skipped) = SourceJson.filterNew(parsed, setOf("https://example.com/a.txt"))
+
+        assertTrue(fresh.isEmpty())
+        assertEquals(1, skipped)
+    }
+
+    @Test
+    fun `没有重复时全部保留`() {
+        val parsed = listOf(sampleSource().copy(url = "https://example.com/a.txt"))
+
+        val (fresh, skipped) = SourceJson.filterNew(parsed, emptySet())
+
+        assertEquals(1, fresh.size)
+        assertEquals(0, skipped)
+    }
 }

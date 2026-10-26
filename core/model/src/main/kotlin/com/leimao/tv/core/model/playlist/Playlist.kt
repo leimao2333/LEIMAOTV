@@ -42,11 +42,16 @@ data class ParsedChannel(
  *
  * [skippedLines] 不是「错误数」，而是「看起来像频道但没能成为频道」的行数：
  * 导入报告里显示它，用户才能判断是文件本来如此，还是自己的源被截断了。
+ *
+ * [epgUrls] 是 M3U 头部声明的节目单地址（`x-tvg-url` / `url-tvg`，LIVE-27）。
+ * 聚合类订阅常把它写在 `#EXTM3U` 同一行，播放器不用用户再手工配一次节目单；
+ * TXT 没有头部，所以恒为空。
  */
 data class ParsedPlaylist(
     val channels: List<ParsedChannel>,
     val skippedLines: Int,
     val format: PlaylistFormat,
+    val epgUrls: List<String> = emptyList(),
 ) {
     val isEmpty: Boolean get() = channels.isEmpty()
 }

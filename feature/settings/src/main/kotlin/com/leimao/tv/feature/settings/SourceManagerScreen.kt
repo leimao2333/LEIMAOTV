@@ -39,11 +39,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.leimao.tv.core.data.BackupImportResult
 import com.leimao.tv.core.data.EpgFailure
 import com.leimao.tv.core.data.EpgImportResult
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.RefreshFailure
 import com.leimao.tv.core.data.RefreshResult
+import com.leimao.tv.core.data.SourceBackupImporter
 import com.leimao.tv.core.data.SourceHealthStore
 import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.VodCatalogRefresher
@@ -52,6 +54,7 @@ import com.leimao.tv.core.database.repository.EpgImportSummary
 import com.leimao.tv.core.database.repository.EpgRepository
 import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
+import com.leimao.tv.core.database.repository.SourceImportSummary
 import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.designsystem.focus.FocusableCard
@@ -93,6 +96,13 @@ fun SourceManagerScreen(
     /** 源健康检查（LIVE-09）。可空；为 null 时不显示「健康检查」按钮 */
     healthChecker: com.leimao.tv.core.data.SourceHealthChecker? = null,
     /**
+     * 从地址导入源备份（SET-10）。可空：为 null 时不显示这个入口。
+     *
+     * 电视上没有好用的文件管理器，别人给的清单往往就是一个 URL —— 只能选本地文件等于
+     * 让用户先想办法把 JSON 落到盒子里。
+     */
+    backupImporter: SourceBackupImporter? = null,
+    /**
      * 健康检查结果的会话内缓存（SET-09）。
      *
      * 默认在页面内建一个：预览与测试不必造依赖。真正跑应用时由 `AppContainer` 传进来 ——
@@ -108,6 +118,7 @@ fun SourceManagerScreen(
     var busy by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var addingEpg by remember { mutableStateOf(false) }
+    var importingBackup by remember { mutableStateOf(false) }
     var epgSummary by remember { mutableStateOf<EpgImportSummary?>(null) }
     var epgSourceUrl by remember { mutableStateOf<String?>(null) }
 
@@ -176,8 +187,11 @@ fun SourceManagerScreen(
                 }
                 status =
                     runCatching {
-                        val count = sourceRepository.importJson(text)
-                        "已从备份导入 $count 个源"
+                        val summary = sourceRepository.importJson(text)
+                        // 导入完顺手刷一遍新增的直播源（SET-03）：不刷的话卡片上全是
+                        // 「还没有频道」，用户还得逐条点刷新才知道这份备份到底能不能用
+                        val results = summary.addedLiveIds.map { id -> refresher.refresh(id) }
+                        describeImport(summary, results)
                     }.getOrElse { e ->
                         "导入失败：${e.message ?: "不是有效的源备份文件"}"
                     }
@@ -324,6 +338,11 @@ fun SourceManagerScreen(
                     }
                     FocusableCard(onClick = { pickJson.launch(arrayOf("application/json", "*/*")) }) {
                         Text(text = "导入备份", style = TvText.current.label)
+                    }
+                    if (backupImporter != null) {
+                        FocusableCard(onClick = { importingBackup = true }) {
+                            Text(text = "从地址导入备份", style = TvText.current.label)
+                        }
                     }
                 }
 
@@ -472,6 +491,30 @@ fun SourceManagerScreen(
                     busy = false
                     reload()
                     if (result is EpgImportResult.Done) onSourcesChanged()
+                }
+            },
+        )
+    }
+
+    if (importingBackup) {
+        ImportBackupDialog(
+            onDismiss = { importingBackup = false },
+            onConfirm = { url ->
+                importingBackup = false
+                val importer = backupImporter ?: return@ImportBackupDialog
+                scope.launch {
+                    busy = true
+                    when (val result = importer.importFrom(url)) {
+                        is BackupImportResult.Done -> {
+                            val results = result.summary.addedLiveIds.map { id -> refresher.refresh(id) }
+                            status = describeImport(result.summary, results)
+                            reload()
+                            onSourcesChanged()
+                        }
+
+                        is BackupImportResult.Failed -> status = "导入失败：${result.detail}"
+                    }
+                    busy = false
                 }
             },
         )
@@ -739,9 +782,14 @@ private val WARN_COLOR = Color(0xFFFFB300)
 /** 结果 → 一句人话。成功的显示改了什么，失败的显示为什么。 */
 internal fun describe(result: RefreshResult): String =
     when (result) {
-        is RefreshResult.Done ->
-            "「${result.outcome.sourceName}」已更新：${result.outcome.channelCount} 个频道" +
-                if (result.outcome.skippedLines > 0) "（跳过 ${result.outcome.skippedLines} 行）" else ""
+        is RefreshResult.Done -> {
+            val base =
+                "「${result.outcome.sourceName}」已更新：${result.outcome.channelCount} 个频道" +
+                    if (result.outcome.skippedLines > 0) "（跳过 ${result.outcome.skippedLines} 行）" else ""
+            // 订阅自己声明了节目单地址时顺带说一句（LIVE-27）：不提示的话，
+            // 用户不知道播放页里的节目单是哪来的，也不知道该怎么换
+            result.outcome.epgNote?.let { "$base · $it" } ?: base
+        }
 
         is RefreshResult.Failed ->
             when (result.reason) {
@@ -789,6 +837,22 @@ private fun summarize(results: List<RefreshResult>): String {
     val failed = results.size - done.size
     return "刷新完成：${done.size} 个源成功、$failed 个失败，共 $channels 个频道"
 }
+
+/**
+ * 导入结果 → 一句人话（SET-03 / SET-10）。
+ *
+ * 两条导入路径（本地文件、地址）共用这一句：同一份备份从哪儿来不影响用户想看到什么 ——
+ * 进来几个、跳过几个（说明导入是幂等的）、新增的源刷成什么样。
+ */
+internal fun describeImport(
+    summary: SourceImportSummary,
+    results: List<RefreshResult>,
+): String =
+    buildString {
+        append("已从备份导入 ${summary.added} 个源")
+        if (summary.skipped > 0) append("（${summary.skipped} 个地址已存在，跳过）")
+        if (results.isNotEmpty()) append("；").append(summarize(results))
+    }
 
 /**
  * 健康检查结果 → 一句人话（LIVE-09）。

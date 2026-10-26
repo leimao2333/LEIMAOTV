@@ -19,6 +19,7 @@ import com.leimao.tv.core.model.playlist.UNGROUPED
 internal object M3uParser {
     fun parse(text: String): ParsedPlaylist {
         val channels = mutableListOf<ParsedChannel>()
+        val epgUrls = mutableListOf<String>()
         var skipped = 0
         var pending: PendingChannel? = null
 
@@ -26,6 +27,12 @@ internal object M3uParser {
             val line = raw.trim()
             when {
                 line.isEmpty() -> Unit
+
+                line.startsWith(TAG_EXTM3U, ignoreCase = true) -> {
+                    // 头部除了版本号还可能带节目单地址（LIVE-27）。只认一次：
+                    // 规范里 `#EXTM3U` 只出现在首行，后面再出现的都是脏数据
+                    if (epgUrls.isEmpty()) epgUrls += parseEpgUrls(line)
+                }
 
                 line.startsWith(TAG_EXTINF, ignoreCase = true) -> {
                     // 上一条 `#EXTINF` 还没等到地址就又来一条：上一行作废并计数，
@@ -48,7 +55,7 @@ internal object M3uParser {
                     }
                 }
 
-                // `#EXTM3U` / `#EXTVLCOPT` / `#KODIPROP` / 普通注释：对频道清单没有信息量
+                // `#EXTVLCOPT` / `#KODIPROP` / 普通注释：对频道清单没有信息量
                 line.startsWith("#") -> Unit
 
                 // 没有 EXTINF 兜着的裸地址：拿不到频道名，收进来只会变成「未命名频道」噪声
@@ -68,7 +75,31 @@ internal object M3uParser {
         // 文件结束还挂着一条没有地址的 EXTINF
         if (pending != null) skipped++
 
-        return ParsedPlaylist(channels = channels, skippedLines = skipped, format = PlaylistFormat.M3U)
+        return ParsedPlaylist(
+            channels = channels,
+            skippedLines = skipped,
+            format = PlaylistFormat.M3U,
+            epgUrls = epgUrls.toList(),
+        )
+    }
+
+    /**
+     * `#EXTM3U x-tvg-url="https://…"` 里的节目单地址（LIVE-27）。
+     *
+     * 三种写法都见过：`x-tvg-url`（Kodi / TiviMate / APTV 的事实标准）、`url-tvg`、
+     * `tvg-url`。值可以是**逗号分隔的多个地址**（聚合源常见），所以按逗号拆开去重。
+     * 只收 http(s)：`file://` 与相对路径在订阅场景下没有意义，收进来只会让
+     * 「自动挂节目单」拿着一个必然抓不到的地址去报错。
+     */
+    private fun parseEpgUrls(line: String): List<String> {
+        // 用长度切片而不是 substringAfter('#')：地址里本身就有 `://`
+        val attributes = parseAttributes(line.substring(TAG_EXTM3U.length))
+        val raw = EPG_URL_ATTRS.firstNotNullOfOrNull { attributes[it] } ?: return emptyList()
+        return raw
+            .split(',')
+            .map { it.trim() }
+            .filter { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
+            .distinct()
     }
 
     private fun parseExtInf(line: String): PendingChannel {
@@ -167,9 +198,13 @@ internal object M3uParser {
             )
     }
 
+    private const val TAG_EXTM3U = "#EXTM3U"
     private const val TAG_EXTINF = "#EXTINF"
     private const val TAG_EXTGRP = "#EXTGRP"
     private const val FALLBACK_NAME = "未命名频道"
+
+    /** 节目单地址的三种属性写法，按「见的次数」排序，取第一个非空的 */
+    private val EPG_URL_ATTRS = listOf("x-tvg-url", "url-tvg", "tvg-url")
 
     /** 模板占位符的前缀：`${start}` / `${end}` / `${utc}` 都长这样 */
     private const val CATCHUP_PLACEHOLDER = "\${"

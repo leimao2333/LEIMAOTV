@@ -4,6 +4,7 @@ import com.leimao.tv.core.database.repository.MediaRepository
 import com.leimao.tv.core.database.repository.MediaTitle
 import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
+import com.leimao.tv.core.database.repository.SourceImportSummary
 import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.model.ContentType
@@ -64,7 +65,14 @@ internal class FakeSourceRepository(
 
     override suspend fun exportJson(): String = ""
 
-    override suspend fun importJson(json: String): Int = 0
+    /** 导入返回什么由测试指定：默认「一个都没进来」，要报错就设 [importError] */
+    var importSummary: SourceImportSummary = SourceImportSummary(0, 0)
+    var importError: Exception? = null
+
+    override suspend fun importJson(json: String): SourceImportSummary {
+        importError?.let { throw it }
+        return importSummary
+    }
 }
 
 internal class FakeMediaRepository : MediaRepository {

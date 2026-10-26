@@ -2,10 +2,12 @@ package com.leimao.tv
 
 import android.content.Context
 import android.os.Build
+import com.leimao.tv.core.data.EpgAutoBinder
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.LineScheduler
 import com.leimao.tv.core.data.PinyinTable
 import com.leimao.tv.core.data.SearchRepository
+import com.leimao.tv.core.data.SourceBackupImporter
 import com.leimao.tv.core.data.SourceHealthChecker
 import com.leimao.tv.core.data.SourceHealthStore
 import com.leimao.tv.core.data.SourceRefresher
@@ -148,13 +150,29 @@ class AppContainer(context: Context) {
 
     private val channelWriter: ChannelWriter = RoomChannelWriter(database)
 
+    /** 节目单（LIVE-20）：整份导入、只读查询当前/下一档 */
+    val epgRepository: EpgRepository = EpgRepository(database.epgDao(), database.epgSourceDao())
+
+    val epgImporter: EpgImporter = EpgImporter(epgRepository, httpClient)
+
+    /**
+     * 订阅源自带节目单地址时自动挂上（LIVE-27）。
+     *
+     * 放在 [sourceRefresher] 之前声明：容器的属性按书写顺序初始化，后声明的在这里还是 null。
+     */
+    private val epgAutoBinder: EpgAutoBinder = EpgAutoBinder(epgRepository, epgImporter)
+
     /** 「抓取 → 解析 → 合并 → 落库」的唯一入口（源管理页手动刷新 / 启动刷新都走它） */
     val sourceRefresher: SourceRefresher =
         SourceRefresher(
             sources = sourceRepository,
             writer = channelWriter,
             http = httpClient,
+            epgBinder = epgAutoBinder,
         )
+
+    /** 从地址导入源备份（SET-10）：电视上没有好用的文件管理器，清单往往就是一个 URL */
+    val sourceBackupImporter: SourceBackupImporter = SourceBackupImporter(httpClient, sourceRepository)
 
     /** 影视条目缓存（VOD-03）。首页只读它，不等网络 */
     val mediaRepository: MediaRepository = RoomMediaRepository(database)
@@ -208,11 +226,6 @@ class AppContainer(context: Context) {
     val vodFavoriteRepository: VodFavoriteRepository = RoomVodFavoriteRepository(database)
 
     val startupFacts: StartupFactsReader = RoomStartupFactsReader(database)
-
-    /** 节目单（LIVE-20）：整份导入、只读查询当前/下一档 */
-    val epgRepository: EpgRepository = EpgRepository(database.epgDao(), database.epgSourceDao())
-
-    val epgImporter: EpgImporter = EpgImporter(epgRepository, httpClient)
 
     val startupResolver = StartupResolver(settings, startupFacts)
 

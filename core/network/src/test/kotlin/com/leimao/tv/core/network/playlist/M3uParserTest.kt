@@ -219,4 +219,65 @@ class M3uParserTest {
 
         assertNull(Playlists.parse(text).channels.single().catchup)
     }
+
+    // ---- 头部节目单地址（LIVE-27）----
+
+    @Test
+    fun `头部 x-tvg-url 解析出节目单地址`() {
+        val text =
+            """
+            #EXTM3U x-tvg-url="https://example.com/epg.xml.gz"
+            #EXTINF:-1,Demo
+            https://example.com/a.m3u8
+            """.trimIndent()
+
+        assertEquals(listOf("https://example.com/epg.xml.gz"), Playlists.parse(text).epgUrls)
+    }
+
+    @Test
+    fun `多个节目单地址按逗号拆开并去重`() {
+        val text =
+            """
+            #EXTM3U x-tvg-url="https://example.com/a.xml, https://example.com/b.xml ,https://example.com/a.xml"
+            #EXTINF:-1,Demo
+            https://example.com/live.m3u8
+            """.trimIndent()
+
+        assertEquals(
+            listOf("https://example.com/a.xml", "https://example.com/b.xml"),
+            Playlists.parse(text).epgUrls,
+        )
+    }
+
+    @Test
+    fun `url-tvg 写法同样认`() {
+        val text =
+            """
+            #EXTM3U url-tvg="https://example.com/epg.xml"
+            #EXTINF:-1,Demo
+            https://example.com/a.m3u8
+            """.trimIndent()
+
+        assertEquals(listOf("https://example.com/epg.xml"), Playlists.parse(text).epgUrls)
+    }
+
+    @Test
+    fun `非 http 的节目单地址丢弃`() {
+        val text =
+            """
+            #EXTM3U x-tvg-url="file:///sdcard/epg.xml,./local.xml"
+            #EXTINF:-1,Demo
+            https://example.com/a.m3u8
+            """.trimIndent()
+
+        // 收进来只会让「自动挂节目单」拿着一个必然抓不到的地址去报错
+        assertTrue(Playlists.parse(text).epgUrls.isEmpty())
+    }
+
+    @Test
+    fun `没有头部属性时节目单地址为空`() {
+        val text = "#EXTM3U\n#EXTINF:-1,Demo\nhttps://example.com/a.m3u8"
+
+        assertTrue(Playlists.parse(text).epgUrls.isEmpty())
+    }
 }

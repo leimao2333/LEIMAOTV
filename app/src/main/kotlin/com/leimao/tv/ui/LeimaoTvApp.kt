@@ -976,6 +976,7 @@ private fun SourceManagerRoute(
         vodRefresher = container.vodCatalogRefresher,
         healthChecker = container.sourceHealthChecker,
         healthStore = container.sourceHealthStore,
+        backupImporter = container.sourceBackupImporter,
         onBack =
             if (isFirstRun) {
                 // 无源引导页按返回 = 退出确认（§6.6 降级 2：没有可播内容，不设主页中转）

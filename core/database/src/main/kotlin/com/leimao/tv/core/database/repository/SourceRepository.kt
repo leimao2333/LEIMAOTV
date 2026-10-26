@@ -39,9 +39,23 @@ interface SourceRepository {
     /** 把全部源（含停用）序列化成 JSON，供导出备份（SET-03） */
     suspend fun exportJson(): String
 
-    /** 从导出的 JSON 恢复源，追加到现有列表末尾（不覆盖、不按 id 对齐） */
-    suspend fun importJson(json: String): Int
+    /**
+     * 从导出的 JSON 恢复源，追加到现有列表末尾（不覆盖、不按 id 对齐）。
+     *
+     * 已存在同地址的源会被跳过（[SourceImportSummary.skipped]），所以反复导入同一份
+     * 备份不会叠加。返回新源的 id 是为了让调用方**导入后立刻刷一遍** ——
+     * 不刷的话 7 条源全是「还没有频道」，用户还得逐条点刷新。
+     */
+    suspend fun importJson(json: String): SourceImportSummary
 }
+
+/** 一次备份导入的结果（SET-03）：进来几个、跳过几个、新增的直播源是哪几个 */
+data class SourceImportSummary(
+    val added: Int,
+    val skipped: Int,
+    /** 新增的直播源 id。影视源不在其中：它走另一条刷新链路（VOD-03） */
+    val addedLiveIds: List<Long> = emptyList(),
+)
 
 class RoomSourceRepository(
     private val database: LeimaoDatabase,
@@ -116,29 +130,37 @@ class RoomSourceRepository(
 
     override suspend fun exportJson(): String = SourceJson.encode(dao.listAll().map { it.toSource() })
 
-    override suspend fun importJson(json: String): Int {
+    override suspend fun importJson(json: String): SourceImportSummary {
         val parsed = SourceJson.decode(json)
-        var count = 0
-        var order = dao.maxSortOrder() + 1
-        for (src in parsed) {
-            dao.insert(
-                SourceEntity(
-                    type = src.type,
-                    name = src.name,
-                    url = src.url,
-                    userAgent = src.userAgent?.takeIf { it.isNotBlank() },
-                    referer = src.referer?.takeIf { it.isNotBlank() },
-                    basicUser = src.basicUser?.takeIf { it.isNotBlank() },
-                    basicPass = src.basicPass?.takeIf { it.isNotBlank() },
-                    enabled = src.enabled,
-                    sortOrder = order,
-                    format = src.format,
-                ),
+        val (fresh, skipped) =
+            SourceJson.filterNew(
+                parsed = parsed,
+                existingUrls = dao.listAll().mapTo(mutableSetOf()) { it.url },
             )
+
+        var order = dao.maxSortOrder() + 1
+        val addedLiveIds = mutableListOf<Long>()
+        for (src in fresh) {
+            val id =
+                dao.insert(
+                    SourceEntity(
+                        type = src.type,
+                        name = src.name,
+                        url = src.url,
+                        userAgent = src.userAgent?.takeIf { it.isNotBlank() },
+                        referer = src.referer?.takeIf { it.isNotBlank() },
+                        basicUser = src.basicUser?.takeIf { it.isNotBlank() },
+                        basicPass = src.basicPass?.takeIf { it.isNotBlank() },
+                        enabled = src.enabled,
+                        sortOrder = order,
+                        format = src.format,
+                    ),
+                )
             order += 1
-            count += 1
+            // 停用的源不刷：它多半是「已知不可用、先留着备查」的那一条，刷它只是白等一次超时
+            if (src.type == SourceType.LIVE && src.enabled) addedLiveIds += id
         }
-        return count
+        return SourceImportSummary(added = fresh.size, skipped = skipped, addedLiveIds = addedLiveIds)
     }
 }
 

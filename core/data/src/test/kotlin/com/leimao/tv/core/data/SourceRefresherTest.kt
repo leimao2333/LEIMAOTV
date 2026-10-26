@@ -4,6 +4,7 @@ import com.leimao.tv.core.database.repository.ChannelWriteStats
 import com.leimao.tv.core.database.repository.ChannelWriter
 import com.leimao.tv.core.database.repository.NewSource
 import com.leimao.tv.core.database.repository.Source
+import com.leimao.tv.core.database.repository.SourceImportSummary
 import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.model.playlist.MergedChannel
 import com.leimao.tv.core.network.FetchErrorKind
@@ -229,6 +230,6 @@ class SourceRefresherTest {
 
         override suspend fun exportJson(): String = ""
 
-        override suspend fun importJson(json: String): Int = 0
+        override suspend fun importJson(json: String): SourceImportSummary = SourceImportSummary(0, 0)
     }
 }

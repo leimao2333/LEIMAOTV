@@ -556,10 +556,13 @@
   - [x] 本轮 5 条模拟器走查（2026-10-26，debug 包）：源管理页多出「从地址导入备份」入口
         （`docs/verify/v044_import_entry.png`）、对话框标题/说明/输入框/按钮排版正常
         （`docs/verify/v044_import_dialog.png`）
-  - [ ] LIVE-27 / SET-10 的**完整链路**未在模拟器跑完：真实地址导入（7 条源 + 自动刷新）
-        与「刷新后自动挂节目单」需要在能连上上游网络的环境里验；本机只有一条失效的本地测试源，
-        且 adb 的 `input tap` 坐标系与截图分辨率对不上（override 1920×1080、截图 1080×608），
-        点不中按钮。逻辑层单测（`EpgAutoBinderTest` / `SourceBackupImporterTest` / `HttpBodyTest`）已绿
+  - [x] **LIVE-27 / LIVE-28 / SET-03 / SET-10 的完整链路已跑通**（2026-10-26，debug 包，2400×1080）：
+        从地址导入聚合订阅 → 8 个源（其中 1 条影视源启用、1 条备选停用）→ 5 个直播源刷新成功共
+        4168 个频道；**节目单自动挂上**（123 个频道 · 37526 档，来源是订阅 M3U 头部声明的
+        `x-tvg-url`，且是 `.xml.gz` —— LIVE-27 与 LIVE-28 一起验到）；影视源卡片在列表末尾
+        （`docs/verify/v044_import_result.png` / `v044_vod_cards.png`）。
+        上一轮「点不中按钮」的真因是坐标：`input tap` 用逻辑坐标（2400×1080），
+        而 `screencap` 的图被缩放过（1080×486），换算要乘 2.22
   - [ ] PLAY-11 的真机验证需要一条能连上的 rtsp 源（本轮收录的那条只在四川电信宽带内可达）
   - [x] **发版链路复核（2026-10-26，v0.4.3.1）**：`Release v0.4.3.1` 由流水线自己建好，
         三份包 + 三份 `.sha256` 全在（arm64 主名 / v7a / universal），`/releases/latest` 指向它；

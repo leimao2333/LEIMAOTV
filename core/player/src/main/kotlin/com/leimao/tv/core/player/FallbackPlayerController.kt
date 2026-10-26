@@ -24,6 +24,10 @@ import kotlinx.coroutines.launch
  * 为什么兜底只触发一次：VLC 也失败就认输。两个内核各试一轮所有线路已经足够穷尽
  * 「这个源能不能播」，再来回切只会把用户钉在错误页上更久。
  *
+ * 另有一条**反方向**的规则（PLAY-11）：地址是 `rtsp://` / `rtmp://` 时直接让软解先上。
+ * 这类地址（IPTV 单播源的主要形态）Media3 侧没有对应的数据源，按默认顺序只会先白等
+ * 一轮「播放失败」；顺序反过来，用户感觉到的差别是换台快了两秒。
+ *
  * 画面出口：当前活跃内核决定 `createSurfaceView` 返回什么。切内核后，上层在下次重组时
  * 重新取一次 view 即可（[VlcPlayerController.createSurfaceView] 会复用同一个 SurfaceView）。
  */
@@ -69,12 +73,27 @@ class FallbackPlayerController(
 
     override fun play(request: PlaybackRequest) {
         currentRequest = request
-        fallbackUsed = false
-        active = primary
-        primary.play(request)
-        _state.value = primary.state.value
-        _tracks.value = primary.tracks.value
+        // rtsp / rtmp 直接交给软解内核（PLAY-11）：Media3 侧没引 RTSP 数据源，
+        // 拿它去试只会白等一轮「播放失败」再切内核。电信/联通的 IPTV 单播源
+        // 基本只有 rtsp，这个等待在换台时是能感觉到的。
+        val preferFallback = requiresSoftwareKernel(request.url)
+        fallbackUsed = preferFallback
+
+        val next = if (preferFallback) fallback else primary
+        val previous = active
+        active = next
+        // 换内核前把另一个停掉：两个内核同时活着就是两路声音。
+        // 从 rtsp 台（VLC）切回 http 台（Media3）时必然踩到。
+        if (previous !== next) previous.stop()
+
+        next.play(request)
+        _state.value = next.state.value
+        _tracks.value = next.tracks.value
     }
+
+    /** 只有软解内核能播的协议。判据只看协议头，不看后缀：`rtsp://…/x.smil` 没有可用的后缀。 */
+    private fun requiresSoftwareKernel(url: String): Boolean =
+        url.startsWith("rtsp://", ignoreCase = true) || url.startsWith("rtmp://", ignoreCase = true)
 
     override fun retry() {
         active.retry()

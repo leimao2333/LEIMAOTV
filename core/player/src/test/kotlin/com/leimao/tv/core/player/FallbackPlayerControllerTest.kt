@@ -181,4 +181,63 @@ class FallbackPlayerControllerTest {
         // 活跃内核仍是 primary，switchLine 由它处理（这里 ScriptedPlayer 恒返回 false）
         assertEquals(false, sut.switchLine(1))
     }
+
+    // ---- rtsp / rtmp 直接走软解（PLAY-11）----
+
+    private fun rtspRequest() =
+        PlaybackRequest(
+            item = PlaybackItem.Channel(channelId = 2L),
+            url = "rtsp://example.com/live/1.smil",
+            lines = listOf("rtsp://example.com/live/1.smil"),
+        )
+
+    @Test
+    fun `rtsp 地址直接交给软解内核`() {
+        val primary = ScriptedPlayer()
+        val fallback = ScriptedPlayer()
+        val sut = FallbackPlayerController(primary, fallback)
+
+        sut.play(rtspRequest())
+
+        // Media3 侧没有 RTSP 数据源，让它先试一轮只是白等
+        assertEquals(0, primary.playCount)
+        assertEquals(1, fallback.playCount)
+        assertEquals("rtsp://example.com/live/1.smil", fallback.lastRequest?.url)
+    }
+
+    @Test
+    fun `rtsp 软解失败后不再回头试硬解`() {
+        val primary = ScriptedPlayer()
+        val fallback = ScriptedPlayer()
+        val sut = FallbackPlayerController(primary, fallback)
+
+        sut.play(rtspRequest())
+        fallback.state.value =
+            PlaybackState.Failed(
+                url = "rtsp://example.com/live/1.smil",
+                item = rtspRequest().item,
+                reason = "播不了",
+                lineIndex = 0,
+                lineCount = 1,
+            )
+
+        // 两个内核来回切只会把用户钉在错误页上更久；硬解本来也播不了 rtsp
+        assertEquals(0, primary.playCount)
+        assertTrue(sut.state.value is PlaybackState.Failed)
+    }
+
+    @Test
+    fun `从 rtsp 台切回 http 台会停掉软解内核`() {
+        val primary = ScriptedPlayer()
+        val fallback = ScriptedPlayer()
+        val sut = FallbackPlayerController(primary, fallback)
+
+        sut.play(rtspRequest())
+        sut.play(request)
+
+        // 两个内核同时活着就是两路声音：换台时另一个必须停
+        assertEquals(PlaybackState.Idle, fallback.state.value)
+        assertEquals(1, primary.playCount)
+        assertTrue(primary.lastRequest === request)
+    }
 }

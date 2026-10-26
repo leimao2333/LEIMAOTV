@@ -55,6 +55,8 @@ data class SourceImportSummary(
     val skipped: Int,
     /** 新增的直播源 id。影视源不在其中：它走另一条刷新链路（VOD-03） */
     val addedLiveIds: List<Long> = emptyList(),
+    /** 备份里带的远程偏好（LIVE-08）。null = 这份备份没写 settings 段，本地设置不动 */
+    val settings: RemoteSettings? = null,
 )
 
 class RoomSourceRepository(
@@ -160,7 +162,14 @@ class RoomSourceRepository(
             // 停用的源不刷：它多半是「已知不可用、先留着备查」的那一条，刷它只是白等一次超时
             if (src.type == SourceType.LIVE && src.enabled) addedLiveIds += id
         }
-        return SourceImportSummary(added = fresh.size, skipped = skipped, addedLiveIds = addedLiveIds)
+        return SourceImportSummary(
+            added = fresh.size,
+            skipped = skipped,
+            addedLiveIds = addedLiveIds,
+            // 偏好只在**导入成功**之后才落地：解析失败时用户看到的应该是一条错误，
+            // 而不是「源没进来但主题变了」
+            settings = SourceJson.decodeSettings(json),
+        )
     }
 }
 

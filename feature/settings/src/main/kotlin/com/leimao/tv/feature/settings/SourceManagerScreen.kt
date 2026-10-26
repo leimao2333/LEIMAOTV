@@ -187,7 +187,15 @@ fun SourceManagerScreen(
                 }
                 status =
                     runCatching {
-                        val summary = sourceRepository.importJson(text)
+                        // 走 importer 而不是直接调仓储：备份里可能带 settings 段（LIVE-08），
+                        // 两条入口（文件 / 地址）必须都能把它落地
+                        val summary =
+                            backupImporter?.importText(text)?.let { result ->
+                                when (result) {
+                                    is BackupImportResult.Done -> result.summary
+                                    is BackupImportResult.Failed -> throw IllegalArgumentException(result.detail)
+                                }
+                            } ?: sourceRepository.importJson(text)
                         // 导入完顺手刷一遍新增的直播源（SET-03）：不刷的话卡片上全是
                         // 「还没有频道」，用户还得逐条点刷新才知道这份备份到底能不能用
                         val results = summary.addedLiveIds.map { id -> refresher.refresh(id) }
@@ -873,6 +881,8 @@ internal fun describeImport(
         append("已从备份导入 ${summary.added} 个源")
         if (summary.skipped > 0) append("（${summary.skipped} 个地址已存在，跳过）")
         if (results.isNotEmpty()) append("；").append(summarize(results))
+        // 备份里带了远程偏好（LIVE-08）就说一句：设置被远程改过，用户有权知道
+        summary.settings?.let { append("；已应用远程偏好：${it.describe()}") }
     }
 
 /**

@@ -1,6 +1,8 @@
 package com.leimao.tv.core.data
 
+import com.leimao.tv.core.database.repository.RemoteSettings
 import com.leimao.tv.core.database.repository.SourceImportSummary
+import com.leimao.tv.core.model.appearance.ThemeMode
 import com.leimao.tv.core.network.FetchErrorKind
 import com.leimao.tv.core.network.FetchOutcome
 import com.leimao.tv.core.network.HttpClient
@@ -60,6 +62,44 @@ class SourceBackupImporterTest {
             assertTrue((result as BackupImportResult.Failed).detail.contains("sources"))
         }
 
+    @Test
+    fun `备份里的 settings 会被交给应用层落地`() =
+        runTest {
+            // 解析本身由 SourceJsonTest 钉；这里验的是「导入器把 summary.settings 交出去」
+            sources.importSummary =
+                SourceImportSummary(added = 1, skipped = 0, settings = RemoteSettings(12, ThemeMode.DARK))
+            var applied: RemoteSettings? = null
+            val importer =
+                SourceBackupImporter(
+                    http = TextHttp(FetchOutcome.Success(BACKUP_WITH_SETTINGS)),
+                    sources = sources,
+                    applySettings = { applied = it },
+                )
+
+            importer.importFrom("https://example.com/sources.json")
+
+            assertEquals(12, applied?.refreshHours)
+            assertEquals(ThemeMode.DARK, applied?.theme)
+        }
+
+    @Test
+    fun `没有 settings 段时不打扰设置`() =
+        runTest {
+            var called = false
+            val importer =
+                SourceBackupImporter(
+                    http = TextHttp(FetchOutcome.Success(BACKUP)),
+                    sources = sources,
+                    applySettings = { called = true },
+                )
+
+            importer.importFrom("https://example.com/sources.json")
+
+            // 解析出来是 null 也照样回调一次：应用层拿到 null 直接返回，
+            // 语义上「这次没有偏好要改」，比「悄悄不回调」更好排查
+            assertTrue(called)
+        }
+
     private class TextHttp(
         private val outcome: FetchOutcome,
     ) : HttpClient {
@@ -74,6 +114,14 @@ class SourceBackupImporterTest {
         val BACKUP =
             """
             {"version":1,"sources":[
+              {"type":"LIVE","name":"示例源","url":"https://example.com/a.m3u"}
+            ]}
+            """.trimIndent()
+
+        /** 带远程偏好（LIVE-08）的备份 */
+        val BACKUP_WITH_SETTINGS =
+            """
+            {"version":1,"settings":{"refreshHours":12,"theme":"DARK"},"sources":[
               {"type":"LIVE","name":"示例源","url":"https://example.com/a.m3u"}
             ]}
             """.trimIndent()

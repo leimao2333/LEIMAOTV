@@ -52,6 +52,7 @@ import com.leimao.tv.core.version.AppVersion
 import com.leimao.tv.data.ApkInstaller
 import com.leimao.tv.data.CacheManager
 import com.leimao.tv.data.DataStoreSettingsStore
+import com.leimao.tv.data.RemoteSettingsApplier
 import com.leimao.tv.data.SettingsStore
 import com.leimao.tv.startup.StartupResolver
 import kotlinx.coroutines.CoroutineScope
@@ -171,8 +172,16 @@ class AppContainer(context: Context) {
             epgBinder = epgAutoBinder,
         )
 
+    /** 备份里的远程偏好（LIVE-08）：解析在 core，落地在这里（DataStore 只有 app 层认识） */
+    private val remoteSettingsApplier: RemoteSettingsApplier = RemoteSettingsApplier(settings)
+
     /** 从地址导入源备份（SET-10）：电视上没有好用的文件管理器，清单往往就是一个 URL */
-    val sourceBackupImporter: SourceBackupImporter = SourceBackupImporter(httpClient, sourceRepository)
+    val sourceBackupImporter: SourceBackupImporter =
+        SourceBackupImporter(
+            http = httpClient,
+            sources = sourceRepository,
+            applySettings = { remote -> remoteSettingsApplier.apply(remote) },
+        )
 
     /** 影视条目缓存（VOD-03）。首页只读它，不等网络 */
     val mediaRepository: MediaRepository = RoomMediaRepository(database)

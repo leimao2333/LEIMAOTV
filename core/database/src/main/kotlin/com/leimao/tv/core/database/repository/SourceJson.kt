@@ -1,5 +1,34 @@
 package com.leimao.tv.core.database.repository
 
+import com.leimao.tv.core.model.appearance.FontScale
+import com.leimao.tv.core.model.appearance.ThemeMode
+
+/**
+ * 备份文件里可选的 `settings` 段（LIVE-08 远程配置）。
+ *
+ * 只收**三类安全项**：刷新周期、主题、字号。这三项改了最多是「看着不一样」，
+ * 不会把用户锁在门外；网络代理、认证口令之类一律不收 —— 一个远程 JSON 不该能改走流量的路径。
+ *
+ * 每个字段都是「null = 这次不动它」，且取值不合法时按 null 处理：
+ * 远程配置写错一个值，不该把本地设置改成半截状态（失败不影响本地配置）。
+ */
+data class RemoteSettings(
+    /** 0 = 关闭定时刷新；6 / 12 / 24 = 小时。其它值一律忽略 */
+    val refreshHours: Int? = null,
+    val theme: ThemeMode? = null,
+    val fontScale: FontScale? = null,
+) {
+    val isEmpty: Boolean get() = refreshHours == null && theme == null && fontScale == null
+
+    /** 给状态行用的一句话，例如「刷新 12h · 深色 · 大」 */
+    fun describe(): String =
+        listOfNotNull(
+            refreshHours?.let { if (it == 0) "关闭自动刷新" else "刷新 ${it}h" },
+            theme?.label,
+            fontScale?.label,
+        ).joinToString(" · ")
+}
+
 /**
  * 订阅源的 JSON 编解码（SET-03 导入导出）。
  *
@@ -83,6 +112,36 @@ internal object SourceJson {
         }
         return fresh to skipped
     }
+
+    /**
+     * 解析可选的 `settings` 段（LIVE-08）。
+     *
+     * 没有这一段返回 null —— 普通备份文件（只有 sources）照样能导入，
+     * 远程配置是**附加能力**而不是新格式。
+     */
+    fun decodeSettings(json: String): RemoteSettings? {
+        val keyIdx = json.indexOf("\"settings\"")
+        if (keyIdx < 0) return null
+        val objStart = json.indexOf('{', keyIdx)
+        if (objStart < 0) return null
+        val obj = readObject(json, objStart).first
+
+        val hours =
+            valueOf(obj, "refreshHours")?.trim()?.toIntOrNull()?.takeIf { it in REMOTE_REFRESH_HOURS }
+        val theme =
+            valueOf(obj, "theme")?.trim()?.uppercase()?.let { raw ->
+                ThemeMode.entries.firstOrNull { it.name == raw }
+            }
+        val scale =
+            valueOf(obj, "fontScale")?.trim()?.uppercase()?.let { raw ->
+                FontScale.entries.firstOrNull { it.name == raw }
+            }
+        val settings = RemoteSettings(refreshHours = hours, theme = theme, fontScale = scale)
+        return settings.takeIf { !it.isEmpty }
+    }
+
+    /** 允许远程改的刷新周期：0（关闭）与 6 / 12 / 24。与设置页的档位一一对应 */
+    private val REMOTE_REFRESH_HOURS = setOf(0, 6, 12, 24)
 
     /** 从 `{` 处读一个完整对象，返回 (对象体, 下一个可扫描位置)。 */
     private fun readObject(text: String, start: Int): Pair<String, Int> {

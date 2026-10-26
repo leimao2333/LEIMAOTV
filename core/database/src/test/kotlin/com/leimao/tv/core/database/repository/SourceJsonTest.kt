@@ -1,6 +1,9 @@
 package com.leimao.tv.core.database.repository
 
+import com.leimao.tv.core.model.appearance.FontScale
+import com.leimao.tv.core.model.appearance.ThemeMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -196,5 +199,55 @@ class SourceJsonTest {
 
         assertEquals(1, fresh.size)
         assertEquals(0, skipped)
+    }
+
+    // ---- 远程偏好（LIVE-08）----
+
+    @Test
+    fun `备份里的 settings 段被解析出来`() {
+        val json =
+            """
+            {"version":1,"settings":{"refreshHours":12,"theme":"dark","fontScale":"LARGE"},
+             "sources":[{"type":"LIVE","name":"台","url":"https://example.com/a.m3u"}]}
+            """.trimIndent()
+
+        val settings = SourceJson.decodeSettings(json)!!
+
+        assertEquals(12, settings.refreshHours)
+        // 小写也认：远程配置是手写的，不该强求大小写
+        assertEquals(ThemeMode.DARK, settings.theme)
+        assertEquals(FontScale.LARGE, settings.fontScale)
+        assertEquals("刷新 12h · 深色 · 大", settings.describe())
+    }
+
+    @Test
+    fun `没有 settings 段返回 null`() {
+        val json = """{"version":1,"sources":[{"type":"LIVE","name":"台","url":"https://example.com/a.m3u"}]}"""
+
+        // 普通备份文件照样能用 —— 远程配置是附加能力，不是新格式
+        assertNull(SourceJson.decodeSettings(json))
+    }
+
+    @Test
+    fun `非法取值按不修改处理`() {
+        val json =
+            """
+            {"version":1,"settings":{"refreshHours":7,"theme":"PURPLE","fontScale":"巨大"},"sources":[]}
+            """.trimIndent()
+
+        // 三项全非法 → 整段等于没写，本地设置一个都不动
+        assertNull(SourceJson.decodeSettings(json))
+    }
+
+    @Test
+    fun `只写一项时只改那一项`() {
+        val json = """{"version":1,"settings":{"refreshHours":0},"sources":[]}"""
+
+        val settings = SourceJson.decodeSettings(json)!!
+
+        assertEquals(0, settings.refreshHours)
+        assertNull(settings.theme)
+        assertNull(settings.fontScale)
+        assertEquals("关闭自动刷新", settings.describe())
     }
 }

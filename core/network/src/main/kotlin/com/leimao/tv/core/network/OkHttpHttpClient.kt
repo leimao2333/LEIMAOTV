@@ -47,7 +47,18 @@ class OkHttpHttpClient(
                             httpStatus = response.code,
                         )
                     }
-                    val text = response.body?.string().orEmpty()
+                    val body = response.body
+                    val text =
+                        if (body == null) {
+                            ""
+                        } else {
+                            // 不用 body.string()：它只按响应头里的 charset 解码，不认「正文本身是
+                            // gzip 文件」这种情况（.xml.gz 节目单就是这样发的）。见 HttpBody 注释。
+                            HttpBody.decode(
+                                bytes = body.bytes(),
+                                charset = body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8,
+                            )
+                        }
                     if (text.isBlank()) {
                         FetchOutcome.Failure(FetchErrorKind.EMPTY)
                     } else {

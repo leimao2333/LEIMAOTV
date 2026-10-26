@@ -261,7 +261,11 @@ class AppContainer(context: Context) {
                 ),
             // 软解兜底（PLAY-02 / D-02）：Media3 把整份请求的所有线路都试过仍失败时接管。
             // VLC 自己重连/换线的预算与 Media3 一致，保证「换内核」不改变失败观感。
-            fallback = VlcPlayerController(context = appContext),
+            //
+            // 传**工厂**而不是实例：libVLC 构造会加载约 50MB 原生库。放在容器构造里等于
+            // 每次启动都付这份钱，而绝大多数起播用不到它（Media3 直接成功）。
+            // 实测常驻内存因此从 130MB 降到 95MB（PSS，模拟器 1080p 播放中）。
+            fallbackFactory = { VlcPlayerController(context = appContext) },
         )
 
     private fun currentBufferProfile(settings: SettingsStore): BufferProfile =

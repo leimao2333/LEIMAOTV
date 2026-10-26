@@ -40,13 +40,15 @@ class LeimaoTvApplication :
     }
 
     private fun scheduleSourceRefresh() {
-        // onCreate 里同步读一次 DataStore 首值拿刷新周期：只读一个轻量 key、只跑一次，
-        // 代价可忽略；读失败（异常）由 getOrElse 兜回默认档。
-        val interval =
-            runCatching {
-                kotlinx.coroutines.runBlocking { container.settings.refreshInterval.first() }
-            }.getOrElse { RefreshInterval.DEFAULT }
-        SourceRefreshWorker.schedule(this, interval)
+        // 读刷新周期是一次磁盘 IO，**不能**放在 onCreate 的同步路径上（RULES §7：主线程禁止
+        // 任何磁盘操作，冷启动预算也只有 2s）。改成后台读、读完再注册定时任务：
+        // 定时刷新早注册晚注册一秒无所谓，冷启动那 2s 才是硬指标。
+        container.applicationScope.launch {
+            val interval =
+                runCatching { container.settings.refreshInterval.first() }
+                    .getOrElse { RefreshInterval.DEFAULT }
+            SourceRefreshWorker.schedule(this@LeimaoTvApplication, interval)
+        }
     }
 
     private fun kickOffInitialRefresh() {

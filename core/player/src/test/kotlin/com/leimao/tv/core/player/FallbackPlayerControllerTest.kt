@@ -85,7 +85,7 @@ class FallbackPlayerControllerTest {
     fun `主内核没失败时状态透传`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         sut.play(request)
         primary.state.value =
@@ -100,7 +100,7 @@ class FallbackPlayerControllerTest {
     fun `主内核失败后同一个请求转给兜底内核`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         sut.play(request)
         primary.state.value =
@@ -121,7 +121,7 @@ class FallbackPlayerControllerTest {
     fun `兜底内核失败不再回切`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         sut.play(request)
         primary.state.value =
@@ -153,7 +153,7 @@ class FallbackPlayerControllerTest {
     fun `每个新请求都重置兜底开关`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         // 第一次请求走完降级
         sut.play(request)
@@ -176,7 +176,7 @@ class FallbackPlayerControllerTest {
     fun `switchLine 转发给当前活跃内核`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
         sut.play(request)
         // 活跃内核仍是 primary，switchLine 由它处理（这里 ScriptedPlayer 恒返回 false）
         assertEquals(false, sut.switchLine(1))
@@ -195,7 +195,7 @@ class FallbackPlayerControllerTest {
     fun `rtsp 地址直接交给软解内核`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         sut.play(rtspRequest())
 
@@ -209,7 +209,7 @@ class FallbackPlayerControllerTest {
     fun `rtsp 软解失败后不再回头试硬解`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         sut.play(rtspRequest())
         fallback.state.value =
@@ -230,7 +230,7 @@ class FallbackPlayerControllerTest {
     fun `从 rtsp 台切回 http 台会停掉软解内核`() {
         val primary = ScriptedPlayer()
         val fallback = ScriptedPlayer()
-        val sut = FallbackPlayerController(primary, fallback)
+        val sut = FallbackPlayerController(primary) { fallback }
 
         sut.play(rtspRequest())
         sut.play(request)

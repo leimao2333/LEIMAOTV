@@ -58,38 +58,38 @@ import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
 
 /**
- * 影视首页（VOD-03）。
+ * 影视首页（VOD-03 / VOD-14）。
  *
- * 版式对齐主流长视频首页（腾讯视频那一套）：**通栏大图 → 我的内容 → 榜单标题 → 海报网格**。
- * 相比老版「一行行横向滑动」，改成网格是因为首页要回答的是「有什么可看」，
- * 而一屏只能放一行半的时候，横向滑动一次只换来 4 张新海报，网格滚一次是 8~10 张。
+ * ## 版式：只有上下滚
  *
- * 页面分两层，不是随手分的：
+ * 整页是**一条竖向流**：通栏 Hero → 继续观看 → 区块标题 → 海报网格（一直往下翻）。
+ * 没有横向滑动的行 —— 电视上没有触屏，横滑要按十几次右键才看到第 6 张，
+ * 而竖着滚一次就是一整屏新内容。
  *
- * - **固定层**（不滚动）：栏目切换 + 换一换 + 年份/地区/标签。这三个都是「换一整套内容」的
- *   开关，滚到第三屏还想切类型时不该先滚回顶部；
- * - **滚动层**：Hero 轮播 + 继续观看 + 收藏 + 看过的 + 网格 + 每源一行。
+ * ## 推荐是独立栏目
  *
- * 筛选值**不用行内下拉**（老实现是 `FilterBar`）：下拉面板画在筛选行自己的 Box 里，
- * 而它下面的滚动列表是**后声明的兄弟节点**，会盖在面板上面 —— 打开筛选看到的是一排海报压着半截菜单。
- * 这里改成「整页遮罩 + 居中取值面板」（见 [VodFilterSheet]），面板是页面根节点的最后一个孩子，
- * 永远在最上层，也不再受滚动视口裁切。
+ * 顶部第一个栏目是「推荐」，与电影/电视剧/动漫…并列，**不再混进各类型里**：
+ * 以前「为你推荐」是每个类型下面都挂一行，用户切到电影想看片，第一眼却是一堆跨类型的内容 ——
+ * 等于把一个栏目塞进了另一个栏目。
  *
- * 筛选生效时**隐藏「为你推荐」与「每源一行」**：那两块是不分年份/地区的全景，
- * 混在筛选结果里会让人以为筛选没生效。
+ * ## 翻页
+ *
+ * 类型栏目滚到底会通过 `onLoadMore` 继续要下一页（见 [VodPager]），一直翻到源里没内容为止；
+ * 推荐栏目是编好的短列表，不翻页。
  */
 @Composable
 fun VodHomeScreen(
     state: VodHomeState,
     hero: List<HeroItem>,
     onHeroOpen: (HeroItem) -> Unit,
+    onSelectRecommend: () -> Unit,
     onSelectType: (ContentType) -> Unit,
     onSelectYear: (Int?) -> Unit,
     onSelectArea: (String?) -> Unit,
     onSelectTag: (String?) -> Unit,
     onSelectMedia: (VodSummary) -> Unit,
     onResume: (VodContinueItem) -> Unit,
-    onOpenHistory: (VodContinueItem) -> Unit,
+    onLoadMore: () -> Unit,
     onOpenSourceManager: () -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
@@ -97,13 +97,11 @@ fun VodHomeScreen(
     val firstTab = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
-    // 「换一换」只是把本地这批往前转一页，不重新请求：首页的数据是半小时缓存，
-    // 真去拉一次远端要等好几秒，而用户按这个键的期待是「立刻换一批看看」
+    // 「换一换」只是把本地这批往前转一页，不重新请求
     var shuffle by rememberSaveable { mutableStateOf(0) }
-    // 换类型就回到第一页：转了 5 次之后切到电影，第一屏不该是「第 6 页的电影」
-    LaunchedEffect(state.selectedType) { shuffle = 0 }
+    // 换栏目就回到第一页：转了 5 次之后切到电影，第一屏不该是「第 6 页的电影」
+    LaunchedEffect(state.selectedType, state.recommend) { shuffle = 0 }
 
-    // 首帧还没布局完时 requestFocus 会打空，等一帧再要焦点（与全局菜单同一套做法）
     LaunchedEffect(autoFocus) {
         if (!autoFocus) return@LaunchedEffect
         withFrameNanos { }
@@ -114,20 +112,11 @@ fun VodHomeScreen(
         remember(state.years, state.areas, state.tags, state.selectedYear, state.selectedArea, state.selectedTag) {
             buildList {
                 if (state.years.isNotEmpty()) {
-                    add(
-                        VodFilter(
-                            key = FILTER_YEAR,
-                            label = "年份",
-                            values = state.years.map { it.toString() },
-                            selected = state.selectedYear?.toString(),
-                        ),
-                    )
+                    add(VodFilter(FILTER_YEAR, "年份", state.years.map { it.toString() }, state.selectedYear?.toString()))
                 }
                 if (state.areas.isNotEmpty()) {
                     add(VodFilter(FILTER_AREA, "地区", state.areas, state.selectedArea))
                 }
-                // 标签维度仅在标签池非空时出现：空池放个「标签」触发器点进去是空的，
-                // 比不放更让人怀疑坏了
                 if (state.tags.isNotEmpty()) {
                     add(VodFilter(FILTER_TAG, "标签", state.tags, state.selectedTag))
                 }
@@ -137,11 +126,7 @@ fun VodHomeScreen(
     var openFilterKey by rememberSaveable { mutableStateOf<String?>(null) }
     val openFilter = filters.firstOrNull { it.key == openFilterKey }
 
-    // 面板关掉之后要把焦点送回**刚点的那颗 chip**。
-    //
-    // 面板打开期间底层是不组合的（焦点锁的要求），整棵内容树被销毁又重建 ——
-    // 不主动接回来，焦点会退到左侧导航的第一项，用户每次筛完都得再按一次右键才能回内容区
-    // （模拟器实测）。这里记住「刚才是哪个维度」，重建后把焦点放回它身上。
+    // 面板打开期间底层不组合（焦点锁），关掉后要把焦点送回刚点的那颗 chip
     val filterFocus = remember { FocusRequester() }
     var restoreFilterKey by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(openFilterKey, restoreFilterKey) {
@@ -166,8 +151,8 @@ fun VodHomeScreen(
                     onAction = onOpenSourceManager,
                 )
 
-            // 面板打开时不组合底层：树内弹层没有窗口边界，靠「后面没有可聚焦的东西」
-            // 才是唯一可靠的焦点锁（见 TvModal 的注释）
+            // 面板打开时不组合底层：树内弹层没有窗口边界，
+            // 靠「后面没有可聚焦的东西」才是唯一可靠的焦点锁
             openFilter != null ->
                 VodFilterSheet(
                     filter = openFilter,
@@ -185,10 +170,13 @@ fun VodHomeScreen(
             else ->
                 Column(modifier = Modifier.fillMaxSize()) {
                     VodTopBar(
+                        recommend = state.recommend,
                         selectedType = state.selectedType,
+                        onSelectRecommend = onSelectRecommend,
                         onSelectType = onSelectType,
                         onShuffle = { shuffle++ },
-                        filters = filters,
+                        // 推荐是编好的短列表，没有年份/地区/标签可筛
+                        filters = if (state.recommend) emptyList() else filters,
                         onOpenFilter = { openFilterKey = it.key },
                         firstTabFocus = firstTab,
                         restoreKey = restoreFilterKey,
@@ -198,11 +186,15 @@ fun VodHomeScreen(
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val columns = columnsFor(maxWidth)
                         val cardWidth = (maxWidth - POSTER_SPACING * (columns - 1)) / columns
-                        // 一页 = 一屏能看到的行数。转一页比转一张像「换了一批」，
-                        // 转一张只会让人以为列表没动
-                        val ordered =
-                            remember(state.items, shuffle, columns) {
-                                rotateBy(state.items, shuffle * columns * GRID_ROWS_PER_PAGE)
+
+                        val feed =
+                            if (state.recommend) {
+                                state.recommendItems
+                            } else {
+                                // 一页 = 一屏能看到的行数。转一页比转一张像「换了一批」
+                                remember(state.allItems, shuffle, columns) {
+                                    rotateBy(state.allItems, shuffle * columns * GRID_ROWS_PER_PAGE)
+                                }
                             }
 
                         LazyColumn(
@@ -211,7 +203,41 @@ fun VodHomeScreen(
                             contentPadding = PaddingValues(bottom = 28.dp),
                             verticalArrangement = Arrangement.spacedBy(18.dp),
                         ) {
-                            if (state.blank) {
+                            if (hero.isNotEmpty()) {
+                                item("hero") { HomeHero(items = hero, onOpen = onHeroOpen) }
+                            }
+
+                            // 继续观看只在「推荐」里出现：它是「我的东西」，不属于某个类型的榜单。
+                            // 用海报卡 + 底部进度条，不另做一套 16:9 横卡 —— 一页里只该有一种卡
+                            if (state.recommend && state.continueWatching.isNotEmpty()) {
+                                item("continue-title") { SectionTitle(title = "继续观看") }
+                                items(
+                                    items = state.continueWatching.chunked(columns),
+                                    key = { row -> "continue-${row.first().progress.sourceKey}" },
+                                ) { row ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(POSTER_SPACING)) {
+                                        row.forEach { item ->
+                                            PosterCard(
+                                                item = item.asSummary(),
+                                                cardWidth = cardWidth,
+                                                progress = item.fraction,
+                                                badge = item.episodeLabel,
+                                                subtitle = "已看到 ${formatTime(item.progress.positionMs)}",
+                                                onClick = { onResume(item) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            item("feed-title") {
+                                SectionTitle(
+                                    title = if (state.recommend) "为你推荐" else state.selectedType.displayName,
+                                    hint = if (state.loading) "正在更新…" else state.note,
+                                )
+                            }
+
+                            if (feed.isEmpty()) {
                                 item("blank") {
                                     HintBlock(
                                         title = if (state.loading) "正在载入影视内容…" else "这个栏目暂时没有内容",
@@ -219,85 +245,42 @@ fun VodHomeScreen(
                                             if (state.loading) {
                                                 null
                                             } else {
-                                                state.note ?: "换一个类型看看，或者到源管理里检查影视源是否可用。"
+                                                state.note ?: "换一个栏目看看，或者到源管理里检查影视源是否可用。"
                                             },
                                         actionText = null,
                                         onAction = null,
                                     )
                                 }
-                            } else {
-                                if (hero.isNotEmpty()) {
-                                    item("hero") { HomeHero(items = hero, onOpen = onHeroOpen) }
-                                }
-                                // 继续观看不受筛选影响：切年份/地区是想找新片，
-                                // 与「我昨天看到第 12 集」无关
-                                if (state.continueWatching.isNotEmpty()) {
-                                    item("continue") {
-                                        WatchedRow(
-                                            title = "继续观看",
-                                            items = state.continueWatching,
-                                            finished = false,
-                                            onOpen = onResume,
-                                        )
-                                    }
-                                }
-                                if (state.favorites.isNotEmpty()) {
-                                    item("favorites") {
-                                        MediaRow(
-                                            title = "我的收藏",
-                                            items = state.favorites.map { it.toSummary() },
-                                            onSelect = onSelectMedia,
-                                        )
-                                    }
-                                }
-                                if (state.history.isNotEmpty()) {
-                                    item("history") {
-                                        WatchedRow(
-                                            title = "看过的",
-                                            items = state.history,
-                                            finished = true,
-                                            onOpen = onOpenHistory,
-                                        )
-                                    }
-                                }
+                            }
 
-                                item("grid-title") {
-                                    SectionTitle(
-                                        title = "重磅热播",
-                                        hint = if (state.loading) "正在更新…" else state.note,
+                            items(
+                                items = feed.chunked(columns),
+                                key = { row -> "row-${row.first().rowKey()}" },
+                            ) { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(POSTER_SPACING)) {
+                                    row.forEach { media ->
+                                        PosterCard(
+                                            item = media,
+                                            cardWidth = cardWidth,
+                                            onClick = { onSelectMedia(media) },
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 翻页哨兵：滚到它就说明用户看到底了，顺手要下一页
+                            if (!state.recommend && !state.filtering) {
+                                item("load-more") {
+                                    LoadMoreFooter(
+                                        loading = state.loadingMore,
+                                        noMore = state.noMore,
+                                        failed = state.loadMoreFailed,
+                                        // 内容变了就重新判一次「还要不要下一页」：
+                                        // 只靠「组合一次」的话，追加的一页没把脚挤出屏幕时会卡住不翻
+                                        itemCount = feed.size,
+                                        onRetry = onLoadMore,
+                                        onVisible = onLoadMore,
                                     )
-                                }
-
-                                items(
-                                    items = ordered.chunked(columns),
-                                    key = { row -> "row-${row.first().rowKey()}" },
-                                ) { row ->
-                                    Row(horizontalArrangement = Arrangement.spacedBy(POSTER_SPACING)) {
-                                        row.forEach { media ->
-                                            PosterCard(
-                                                item = media,
-                                                cardWidth = cardWidth,
-                                                onClick = { onSelectMedia(media) },
-                                            )
-                                        }
-                                    }
-                                }
-
-                                if (!state.filtering) {
-                                    if (state.recent.isNotEmpty()) {
-                                        item("recent") {
-                                            MediaRow(title = "为你推荐", items = state.recent, onSelect = onSelectMedia)
-                                        }
-                                    }
-                                    state.sourceRows.forEach { row ->
-                                        item("source-${row.sourceId}") {
-                                            MediaRow(
-                                                title = row.sourceName,
-                                                items = row.items,
-                                                onSelect = onSelectMedia,
-                                            )
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -312,20 +295,21 @@ fun VodHomeScreen(
 // --------------------------------------------------------------------------- //
 
 /**
- * 页面顶部的固定条：栏目切换 + 换一换 + 三个筛选触发器。
+ * 页面顶部的固定条：栏目（推荐 + 八个类型）+ 换一换 + 筛选触发器。
  *
- * 栏目用横向 LazyRow 而不是等分：八个栏目在 600dp 宽的内容区里放得下，
- * 但用户装了自定义字体/放大了字号就放不下 —— 能左右滑比被裁掉一个「纪录片」好。
+ * 「推荐」与类型**同构**（同一个 [TypeTab]），因为它就是一个栏目，
+ * 不是某种「全局开关」—— 长得不一样会让人以为它和别的栏目不是一回事。
  */
 @Composable
 private fun VodTopBar(
+    recommend: Boolean,
     selectedType: ContentType,
+    onSelectRecommend: () -> Unit,
     onSelectType: (ContentType) -> Unit,
     onShuffle: () -> Unit,
     filters: List<VodFilter>,
     onOpenFilter: (VodFilter) -> Unit,
     firstTabFocus: FocusRequester,
-    /** 刚关掉面板的那个维度：重建后焦点要回到它身上 */
     restoreKey: String?,
     restoreFocus: FocusRequester,
 ) {
@@ -335,26 +319,37 @@ private fun VodTopBar(
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                item("recommend") {
+                    TypeTab(
+                        text = "推荐",
+                        selected = recommend,
+                        onClick = onSelectRecommend,
+                        focusRequester = if (recommend) firstTabFocus else null,
+                    )
+                }
                 items(VOD_HOME_TYPES, key = { it.name }) { type ->
                     TypeTab(
                         text = type.displayName,
-                        selected = type == selectedType,
+                        selected = !recommend && type == selectedType,
                         onClick = { onSelectType(type) },
-                        focusRequester = if (type == selectedType) firstTabFocus else null,
+                        focusRequester = if (!recommend && type == selectedType) firstTabFocus else null,
                     )
                 }
             }
             Spacer(modifier = Modifier.width(10.dp))
-            FocusableCard(
-                onClick = onShuffle,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Text(
-                    text = "换一换",
-                    style = TvText.current.label,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            // 换一换只对类型栏目有意义：推荐是编好的短列表，转它没有意义
+            if (!recommend) {
+                FocusableCard(
+                    onClick = onShuffle,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        text = "换一换",
+                        style = TvText.current.label,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
         }
 
@@ -377,12 +372,8 @@ private fun VodTopBar(
 /**
  * 栏目 tab。
  *
- * 选中态用**底色 + 主色文字**，未选中透明：参考图上选中的那一项就是「亮起来的一块」。
- * 焦点态仍由 [FocusableCard] 统一画描边 —— 两者叠加时不会互相盖住，因为底色是容器画的、
- * 描边是外层画的（这正是 `containerColor` 参数存在的理由）。
- *
- * 内边距压到 10dp：八个栏目 + 换一换在 600dp 宽的内容区里要放得下，
- * 用 14dp 时「纪录片」会被裁成「纪录」（模拟器实测）。
+ * 选中态用**底色 + 主色文字**，未选中透明：选中的那一项就是「亮起来的一块」。
+ * 内边距压到 10dp：九个栏目 + 换一换要放得下（用 14dp 时「纪录片」会被裁成「纪录」）。
  */
 @Composable
 private fun TypeTab(
@@ -455,12 +446,9 @@ private fun FilterChip(
 /**
  * 筛选取值面板。
  *
- * 为什么是整页遮罩而不是行内下拉：见 [VodHomeScreen] 的注释（面板会被下面的列表盖住）。
- * 值用 [FlowRow] 平铺：年份、地区这类选项都是短词，平铺后一眼能看全，
- * 比竖着滚一个二十项的长列表少按很多次方向键。
- *
- * BACK 在这一层用 `onPreviewKeyEvent` 收掉：面板没有独立窗口，不拦的话 BACK 会一路
- * 传到主页的「退出确认」，变成「关个筛选弹出退出对话框」。
+ * 为什么是整页遮罩而不是行内下拉：面板画在筛选行自己的 Box 里时，
+ * 下面后声明的滚动列表会盖在它上面 —— 打开筛选看到的是一排海报压着半截菜单。
+ * 放在页面根节点的最后，永远在最上层，也不受滚动视口裁切。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -506,8 +494,6 @@ private fun VodFilterSheet(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 选项多的维度（年份能有二十年）要能滚：固定高度 + 内部滚动，
-            // 不让它把面板撑破后被静默裁掉
             Column(
                 modifier =
                     Modifier
@@ -578,14 +564,14 @@ private fun ValueChip(
 }
 
 // --------------------------------------------------------------------------- //
-// 滚动层：标题 / 海报网格 / 横排
+// 滚动层：标题 / 海报 / 翻页脚
 // --------------------------------------------------------------------------- //
 
 /** 一个区块标题，右边可以挂一句提示（加载中 / 源抓取失败的原因） */
 @Composable
 private fun SectionTitle(
     title: String,
-    hint: String?,
+    hint: String? = null,
 ) {
     Row(verticalAlignment = Alignment.Bottom) {
         Text(
@@ -608,29 +594,33 @@ private fun SectionTitle(
 }
 
 /**
- * 网格里的一个海报（参考图的卡片结构，从上到下）：
+ * 网格里的一个海报：
  *
  * ```
  * ┌──────────────┐
- * │         更新中│  ← 右上角状态角标
+ * │ 第3集    更新中│  ← 左上角集号 / 右上角状态角标
  * │              │
  * │ 更新至104集   │  ← 左下角更新备注（压一层渐变，保证可读）
+ * ├──────────────┤  ← 看了一半的片子在这里画进度条
  * └──────────────┘
  * 片名
  * 2024 · 中国大陆
  * ```
  *
- * 角标和备注都压在图上而不是排在图下：图下那块地方只够一行标题 + 一行副信息，
- * 再塞「更新至第 104 集」会把片名挤成省略号 —— 而片名才是用户认片的第一依据。
- *
- * 卡片底色传 `Transparent`：参考图里海报是直接浮在页面底色上的，
- * 每张卡再垫一块 `surfaceVariant` 会变成一排灰砖。
+ * 角标与备注压在图上而不是排在图下：图下那块只够一行标题 + 一行副信息，
+ * 再塞「更新至第 104 集」会把片名挤成省略号 —— 而片名才是认片的第一依据。
  */
 @Composable
 private fun PosterCard(
     item: VodSummary,
     cardWidth: Dp,
     onClick: () -> Unit,
+    /** 观看进度（0~1）；null = 不画。继续观看的卡片用 */
+    progress: Float? = null,
+    /** 左上角额外角标（如「第 3 集」）；null = 不画 */
+    badge: String? = null,
+    /** 覆盖副信息（继续观看要写「已看到 12:34」而不是年份/地区） */
+    subtitle: String? = null,
 ) {
     val shape = LocalTvFocusVisuals.current.shape
     FocusableCard(
@@ -654,8 +644,7 @@ private fun PosterCard(
                     modifier = Modifier.fillMaxSize(),
                 )
 
-                // 底部渐变压暗：源里的封面经常是浅底（雪景、白墙），
-                // 不压一层的话白字备注直接看不见
+                // 底部渐变压暗：源里的封面经常是浅底，不压一层的话白字直接看不见
                 Box(
                     modifier =
                         Modifier
@@ -663,9 +652,7 @@ private fun PosterCard(
                             .fillMaxWidth()
                             .height(48.dp)
                             .background(
-                                Brush.verticalGradient(
-                                    listOf(Color.Transparent, Color(0xCC000000)),
-                                ),
+                                Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))),
                             ),
                 )
 
@@ -674,6 +661,14 @@ private fun PosterCard(
                         text = tag.text,
                         color = tag.color,
                         modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                    )
+                }
+
+                if (badge != null) {
+                    CornerBadge(
+                        text = badge,
+                        color = Color(0xCC000000),
+                        modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
                     )
                 }
 
@@ -690,6 +685,25 @@ private fun PosterCard(
                                 .padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
                     )
                 }
+
+                if (progress != null) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .background(Color(0x66FFFFFF)),
+                    ) {
+                        Box(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.primary),
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -701,7 +715,7 @@ private fun PosterCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = subtitleOf(item),
+                text = subtitle ?: subtitleOf(item),
                 style = TvText.current.hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -711,7 +725,7 @@ private fun PosterCard(
     }
 }
 
-/** 右上角的小角标（「更新中」/「全集」） */
+/** 角标（「更新中」/「全集」/集号） */
 @Composable
 private fun CornerBadge(
     text: String,
@@ -735,160 +749,63 @@ private fun CornerBadge(
 }
 
 /**
- * 一排海报（继续观看/收藏/最近更新这类横向区块）。
+ * 翻页脚（VOD-14）。
  *
- * 空数据直接不渲染标题 —— 免得出现「最近更新」四个字下面一片空白，让人以为加载失败。
+ * 它同时是**触发器**：被组合出来就说明用户已经滚到底了，直接要下一页 ——
+ * 电视上没有浏览器那套滚动监听，用「滚到底部时它被组合出来」当信号最可靠。
+ *
+ * 三种状态都要说清楚，否则用户不知道是「在加载」「到底了」还是「出错了」。
  */
 @Composable
-private fun MediaRow(
-    title: String,
-    items: List<VodSummary>,
-    onSelect: (VodSummary) -> Unit,
+private fun LoadMoreFooter(
+    loading: Boolean,
+    noMore: Boolean,
+    failed: Boolean,
+    /** 当前已有多少条：它变了说明新的一页已经并进来，可以再判一次要不要继续翻 */
+    itemCount: Int,
+    onRetry: () -> Unit,
+    onVisible: () -> Unit,
 ) {
-    if (items.isEmpty()) return
-    Column {
-        Text(
-            text = title,
-            style = TvText.current.title,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        // 行尾不露半张卡（用户实测反馈）：按可用宽度算出整数张数，每张宽度均摊。
-        // 少半张卡难看，比「固定宽度 + 滚动暗示」重要。
-        BoxWithConstraints {
-            val spacing = POSTER_SPACING
-            val count = columnsFor(maxWidth)
-            val cardWidth = (maxWidth - spacing * (count - 1)) / count
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                // key 必须稳定：刷新时焦点才不会跳到第一张（RULES §7）
-                items(items, key = { it.rowKey() }) { item ->
-                    PosterCard(item = item, cardWidth = cardWidth, onClick = { onSelect(item) })
-                }
-            }
-        }
+    LaunchedEffect(itemCount) {
+        // 组合即触发。加载中/已到底时调用方自己会忽略，这里不用再判断
+        if (!noMore && !failed) onVisible()
     }
-}
 
-/**
- * 「继续观看」/「看过的」一行（VOD-06 / VOD-07）。
- *
- * 两个列表用同一个组件：卡片长得一样（16:9 + 集号 + 标题），差别只在「点进去干什么」
- * 和右下角那句说明。给看完的内容再写一套卡片，只会让两行的圆角与字号慢慢长歪。
- *
- * 卡片用横向 16:9 而不是海报的 2:3：这一行的主角是「看到哪儿了」，进度条要有足够长度
- * 才读得出来；而且横版卡片下面的标题区更宽，长片名不至于全被省略号吃掉。
- */
-@Composable
-private fun WatchedRow(
-    title: String,
-    items: List<VodContinueItem>,
-    finished: Boolean,
-    onOpen: (VodContinueItem) -> Unit,
-) {
-    Column {
-        Text(
-            text = title,
-            style = TvText.current.title,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(items, key = { "${it.progress.sourceId}-${it.progress.sourceKey}" }) { item ->
-                WatchedCard(item = item, finished = finished, onClick = { onOpen(item) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun WatchedCard(
-    item: VodContinueItem,
-    finished: Boolean,
-    onClick: () -> Unit,
-) {
-    FocusableCard(
-        onClick = onClick,
-        contentPadding = PaddingValues(0.dp),
-        containerColor = Color.Transparent,
-        modifier = Modifier.width(CONTINUE_WIDTH),
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Column {
-            Box(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .height(CONTINUE_HEIGHT)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                RemoteImage(
-                    url = item.poster,
-                    fallbackText = item.title,
-                    modifier = Modifier.fillMaxSize(),
-                )
-
-                // 集号压在左上角：用户扫这一行时先确认「是不是我看到那一集的地方」。
-                // 看完的片子写「已看完」而不是集号 —— 集号只对「接着看」有意义
-                Box(
-                    modifier =
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .padding(6.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xCC000000))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                ) {
+        when {
+            failed ->
+                FocusableCard(onClick = onRetry) {
                     Text(
-                        text = if (finished) "已看完" else item.episodeLabel,
-                        style = TvText.current.hint,
-                        color = Color.White,
-                        maxLines = 1,
+                        text = "没加载出来，按 OK 重试",
+                        style = TvText.current.body,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
 
-                // 进度条贴底：不占额外高度，也不与集号抢位置。
-                // 看完的不画：一条永远满格的进度条只会让人以为「还能接着看」
-                if (!finished) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .align(Alignment.BottomStart)
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .background(Color(0x66FFFFFF)),
-                    ) {
-                        Box(
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth(item.fraction)
-                                    .fillMaxHeight()
-                                    .background(MaterialTheme.colorScheme.primary),
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = item.title,
-                style = TvText.current.body,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            // 已看到 12:34 比「已看 27%」有用：前者能对上进度条，后者还得自己算
-            Text(
-                text =
-                    if (finished) {
-                        "已看完 · ${item.episodeLabel}"
-                    } else {
-                        "${item.episodeLabel} · 已看到 ${formatTime(item.progress.positionMs)}"
-                    },
-                style = TvText.current.hint,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            noMore ->
+                Text(
+                    text = "没有更多了",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+            loading ->
+                Text(
+                    text = "正在加载更多…",
+                    style = TvText.current.body,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+            // 还没轮到它时也给一句：列表末尾不会因为状态切换而跳动
+            else ->
+                Text(
+                    text = "继续往下翻…",
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
         }
     }
 }
@@ -902,9 +819,9 @@ private fun HintBlock(
     onAction: (() -> Unit)?,
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(vertical = 40.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             text = title,
@@ -913,7 +830,6 @@ private fun HintBlock(
             textAlign = TextAlign.Center,
         )
         if (!detail.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = detail,
                 style = TvText.current.body,
@@ -922,7 +838,7 @@ private fun HintBlock(
             )
         }
         if (actionText != null && onAction != null) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             FocusableCard(onClick = onAction) {
                 Text(
                     text = actionText,
@@ -947,13 +863,24 @@ private data class VodFilter(
 )
 
 /**
+ * 继续观看 → 海报卡。
+ *
+ * `type` 只能填一个占位值：进度表里没存类型，而卡片的副信息由调用方用
+ * `subtitle` 覆盖（「已看到 12:34」），所以这个字段不会显示出来。
+ */
+private fun VodContinueItem.asSummary(): VodSummary =
+    VodSummary(
+        sourceId = progress.sourceId,
+        sourceKey = progress.sourceKey,
+        name = title,
+        type = ContentType.MOVIE,
+        pic = poster,
+    )
+
+/**
  * 按可用宽度算一行放几张海报。
  *
- * 为什么是「算」而不是写死：电视盒子从 720p 到 4K、导航栏还会自动收起，
- * 内容区宽度能在 600~780dp 之间变。写死 4 张的话，收起导航后右边会空出一条。
- *
- * 结果不小于 [MIN_COLUMNS]：再窄也别退化成两张 —— 一张海报 250dp 宽时，
- * 一屏只能看到两张，逛起来像在翻相册。
+ * 结果不小于 [MIN_COLUMNS]：再窄也别退化成两张 —— 一屏只能看到两张时，逛起来像在翻相册。
  */
 internal fun columnsFor(
     availableWidth: Dp,
@@ -982,7 +909,7 @@ internal fun <T> rotateBy(
     return items.drop(normalized) + items.take(normalized)
 }
 
-/** 跨源唯一标识：不同源的 `sourceKey` 会撞，必须带上 sourceId（见 VodSummary 的注释） */
+/** 跨源唯一标识：不同源的 `sourceKey` 会撞，必须带上 sourceId */
 private fun VodSummary.rowKey(): String = "$sourceId-$sourceKey"
 
 /** 卡片副信息：年份 · 地区，都没有时退回类型名（不留一行空白） */
@@ -1032,20 +959,12 @@ private const val POSTER_ASPECT = 1.5f
 /** 「换一换」一次跳过几行：一屏能看到的行数 */
 private const val GRID_ROWS_PER_PAGE = 2
 
-/** 继续观看卡：16:9 */
-private val CONTINUE_WIDTH = 244.dp
-
-private val CONTINUE_HEIGHT = 138.dp
-
 /** 取值面板宽度 */
 private val SHEET_WIDTH = 720.dp
 
 /**
- * 角标配色。
- *
- * 这两个颜色不跟主题走：它们压在**用户源里的图片**上，主题色在浅色模式下是深蓝，
- * 放在海报角上会跟「已下架」的观感混起来。红橙=正在更新、蓝=已完结，
- * 与主流平台的约定一致（用户不用学）。
+ * 角标配色。不跟主题走：它们压在用户源里的图片上，
+ * 红橙=正在更新、蓝=已完结，与主流平台的约定一致。
  */
 private val BADGE_UPDATE = Color(0xFFFF6A00)
 

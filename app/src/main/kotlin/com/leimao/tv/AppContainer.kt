@@ -15,6 +15,7 @@ import com.leimao.tv.core.data.SourceRefresher
 import com.leimao.tv.core.data.UpdateChecker
 import com.leimao.tv.core.data.VodCatalogRefresher
 import com.leimao.tv.core.data.VodDetailLoader
+import com.leimao.tv.core.data.VodPager
 import com.leimao.tv.core.database.LeimaoDatabase
 import com.leimao.tv.core.database.repository.ChannelLineQualityRepository
 import com.leimao.tv.core.database.repository.ChannelRepository
@@ -54,6 +55,7 @@ import com.leimao.tv.core.version.AppVersion
 import com.leimao.tv.data.ApkInstaller
 import com.leimao.tv.data.CacheManager
 import com.leimao.tv.data.DataStoreSettingsStore
+import com.leimao.tv.data.ImageHeadersInterceptor
 import com.leimao.tv.data.RemoteSettingsApplier
 import com.leimao.tv.data.SettingsStore
 import com.leimao.tv.startup.StartupResolver
@@ -112,6 +114,18 @@ class AppContainer(context: Context) {
      * 非 GitHub 地址候选列表只有它自己，等于没有额外开销。
      */
     val httpClient: HttpClient = MirrorHttpClient(OkHttpHttpClient(okHttpClient))
+
+    /**
+     * 图片专用 client（VOD-14）：在共享 client 基础上补 UA + Referer。
+     *
+     * `newBuilder()` 共用连接池与线程池，所以「全应用一个 OkHttp」的前提没变；
+     * 只多一个拦截器，给封面请求补上防盗链需要的两个头。
+     */
+    val imageHttpClient: OkHttpClient =
+        okHttpClient
+            .newBuilder()
+            .addInterceptor(ImageHeadersInterceptor())
+            .build()
 
     /**
      * 检查更新（SET-07）：读 GitHub 的 Latest Release 并与当前版本比。
@@ -202,6 +216,19 @@ class AppContainer(context: Context) {
             media = mediaRepository,
             http = httpClient,
             maxConcurrency = networkSettings.concurrency.refreshPermits,
+        )
+
+    /**
+     * 影视首页「往下翻」的翻页器（VOD-14）。
+     *
+     * 与 [vodCatalogRefresher] 分开：那个负责「把橱窗填满并落库」，
+     * 这个负责「用户划到底时继续要下一页」，且**不写库**（见 VodPager 的注释）。
+     */
+    val vodPager: VodPager =
+        VodPager(
+            sources = sourceRepository,
+            http = httpClient,
+            maxConcurrency = networkSettings.concurrency.permits,
         )
 
     /** 单片详情（VOD-04）：`(sourceId, sourceKey)` → 源 → 适配器 → 详情。不落库 */

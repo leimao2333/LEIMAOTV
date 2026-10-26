@@ -63,7 +63,7 @@ class LeimaoTvApplication :
         ImageLoader.Builder(this)
             // 走 AppContainer 的 OkHttp：用户配了代理 / 超时后，海报请求与接口同路。
             // 不接的话 Coil 用自己的默认 client，隔离网络下海报全都拉不到（2026-10-24 实测）
-            .okHttpClient(container.okHttpClient)
+            .okHttpClient(container.imageHttpClient)
             .memoryCache {
                 MemoryCache.Builder(this)
                     // 台标解码后约 40×40dp，256 个足够覆盖一屏来回滚动

@@ -687,8 +687,20 @@ private fun PlayerTopBar(state: PlayerUiState, numberBuffer: String) {
     val channel = state.channel
 
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-        // 第一层：台名
+        // 第一层：编号 + 台名
+        //
+        // 编号必须显示在 HUD 上：数字键换台的前提是用户**知道**这个台是几号。
+        // 只把编号藏在列表里，等于让他先回列表看一眼再回播放页按键。
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            channel?.let {
+                Text(
+                    text = it.number.toString().padStart(3, '0'),
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+            }
             Text(
                 text = channel?.name ?: if (state.loadingChannels) "正在载入频道" else "暂无可播放的频道",
                 style = TvText.current.title,

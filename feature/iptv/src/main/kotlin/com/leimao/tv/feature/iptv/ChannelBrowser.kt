@@ -67,13 +67,19 @@ fun ChannelBrowser(
     // 只是数据来源不同：真实分组来自全集切片，它是 history 表的一份倒序查询。
     val allGroups =
         remember(groups, recentChannels) {
+            // 编号以「六个分类里的那一份」为准（LIVE-30）：最近观看 / 收藏的频道来自
+            // 历史表与收藏表，带的是入库时的旧编号，不换过来就会出现
+            // 「同一个台在最近观看里是 1078、在央视频道里是 021」——按号换台直接失灵
+            val canonical = groups.flatMap { it.channels }.associateBy { it.id }
             val recent =
                 if (recentChannels.isEmpty()) {
                     emptyList()
                 } else {
-                    listOf(ChannelGroup(RECENT_GROUP_NAME, recentChannels))
+                    listOf(ChannelGroup(RECENT_GROUP_NAME, recentChannels.map { canonical[it.id] ?: it }))
                 }
-            recent + groups
+            (recent + groups).map { group ->
+                group.copy(channels = group.channels.map { canonical[it.id] ?: it })
+            }
         }
 
     if (allGroups.isEmpty()) {

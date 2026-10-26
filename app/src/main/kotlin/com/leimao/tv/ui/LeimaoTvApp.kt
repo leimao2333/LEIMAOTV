@@ -537,23 +537,47 @@ private fun HomeRoute(
     // ---- 影视首页（VOD-03）----
     // 类型 / 年份 / 地区三个「用户选择」用 rememberSaveable：进详情页再返回时不该被重置
     var vodState by remember { mutableStateOf(VodHomeState()) }
+    // 「推荐」是独立栏目（VOD-14）：默认落在它上面，用户一进影视板块先看到挑好的内容
+    var vodRecommend by rememberSaveable { mutableStateOf(true) }
     var vodTypeName by rememberSaveable { mutableStateOf(ContentType.MOVIE.name) }
     var vodYear by rememberSaveable { mutableStateOf<Int?>(null) }
     var vodArea by rememberSaveable { mutableStateOf<String?>(null) }
     var vodTag by rememberSaveable { mutableStateOf<String?>(null) }
     // 后台刷新完成一次就 +1，用来驱动下面的重新读库
     var vodRevision by remember { mutableStateOf(0) }
+
+    // ---- 往下翻（VOD-14）----
+    // 翻出来的页**不进库**：只服务当前这次浏览。进库会让刷新与翻页互相覆盖，
+    // 快照也会越滚越大，下次冷启动读一堆用户早就划过去的内容
+    var vodMore by remember { mutableStateOf<List<VodSummary>>(emptyList()) }
+    var vodPage by remember { mutableIntStateOf(1) }
+    var vodLoadingMore by remember { mutableStateOf(false) }
+    var vodNoMore by remember { mutableStateOf(false) }
+    var vodLoadMoreFailed by remember { mutableStateOf(false) }
     val vodType = ContentType.entries.firstOrNull { it.name == vodTypeName } ?: ContentType.MOVIE
 
     // 点导航「电视剧」要真的切到电视剧，而不是停在电影
     LaunchedEffect(section) {
+        if (section == HomeSection.RECOMMEND) {
+            vodRecommend = true
+            return@LaunchedEffect
+        }
         val mapped = section.toVodType() ?: return@LaunchedEffect
+        vodRecommend = false
         if (mapped.name != vodTypeName) {
             vodTypeName = mapped.name
             vodYear = null
             vodArea = null
             vodTag = null
         }
+    }
+
+    // 换栏目 / 换筛选就回到第一页：不重置的话「切到电影」会带着上一栏翻出来的第 7 页
+    LaunchedEffect(vodRecommend, vodTypeName, vodYear, vodArea, vodTag) {
+        vodMore = emptyList()
+        vodPage = 1
+        vodNoMore = false
+        vodLoadMoreFailed = false
     }
 
     // 进影视板块时按缓存时效决定要不要回源：一个源就是「分类 + 每类首页」七八个请求，
@@ -572,6 +596,35 @@ private fun HomeRoute(
     LaunchedEffect(mode, vodTypeName, vodYear, vodArea, vodTag, vodRevision) {
         if (mode != AppMode.VOD) return@LaunchedEffect
         vodState = loadVodHomeState(container, vodType, vodYear, vodArea, vodTag)
+    }
+
+    /**
+     * 往下翻一页。
+     *
+     * 三重防抖：正在翻、已经到底、上一页刚失败（等用户点重试）都不再触发 ——
+     * 翻页脚是「滚到就请求」，没有这层判断会在底部反复打请求。
+     */
+    val loadMoreVod: () -> Unit = {
+        if (!vodRecommend && !vodLoadingMore && !vodNoMore && !vodLoadMoreFailed) {
+            vodLoadingMore = true
+            scope.launch {
+                val next = vodPage + 1
+                val result = container.vodPager.page(vodType, next)
+                when {
+                    result.allFailed && result.items.isEmpty() -> vodLoadMoreFailed = true
+                    result.items.isEmpty() -> vodNoMore = true
+                    else -> {
+                        vodPage = next
+                        // 跨页去重：源翻页时偶尔会重复吐出边界条目
+                        val seen = (vodState.items + vodMore).map { it.sourceId to it.sourceKey }.toSet()
+                        vodMore = vodMore + result.items.filterNot { (it.sourceId to it.sourceKey) in seen }
+                        // 这一页没凑满说明后面也没了，别让用户再白等一轮
+                        if (result.items.isEmpty()) vodNoMore = true
+                    }
+                }
+                vodLoadingMore = false
+            }
+        }
     }
 
     // ---- 首页 Hero 区（HOME-04）----
@@ -640,10 +693,24 @@ private fun HomeRoute(
         channels = channels,
         favoriteIds = favoriteIds,
         recentChannels = recentChannels,
-        vodState = vodState,
+        vodState =
+            vodState.copy(
+                recommend = vodRecommend,
+                moreItems = vodMore,
+                loadingMore = vodLoadingMore,
+                noMore = vodNoMore,
+                loadMoreFailed = vodLoadMoreFailed,
+            ),
         vodActions =
             VodHomeActions(
+                onSelectRecommend = {
+                    vodRecommend = true
+                    // 导航高亮跟着走：不然左边还亮着「电影」，右边已经是推荐栏目
+                    pickedSectionName = HomeSection.RECOMMEND.name
+                    scope.launch { container.settings.setLastSection(HomeSection.RECOMMEND.name) }
+                },
                 onSelectType = { type ->
+                    vodRecommend = false
                     vodTypeName = type.name
                     vodYear = null
                     vodArea = null
@@ -663,13 +730,7 @@ private fun HomeRoute(
                 // 直接进播放页而不是先回详情页：用户点的就是「接着看」，
                 // 中间插一页详情等于让他再确认一次自己刚做过的决定
                 onResume = resumeVod,
-                // 看过的（VOD-07）点进去是**详情页**而不是直接起播：
-                // 那一集已经看完了，用户点它多半是「再看一遍」，从哪一集开始由他决定
-                onOpenHistory = { item ->
-                    navController.navigate(
-                        TvRoute.vodDetail(item.progress.sourceId, item.progress.sourceKey),
-                    )
-                },
+                onLoadMore = loadMoreVod,
             ),
         hero = hero,
         onHeroOpen = { item ->

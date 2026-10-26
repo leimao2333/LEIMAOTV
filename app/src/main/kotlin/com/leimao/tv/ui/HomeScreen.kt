@@ -48,6 +48,7 @@ import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
+import com.leimao.tv.feature.iptv.CANONICAL_GROUPS
 import com.leimao.tv.feature.iptv.ChannelBrowser
 import com.leimao.tv.feature.iptv.ChannelGroup
 import com.leimao.tv.feature.iptv.ChannelLogo
@@ -77,6 +78,14 @@ enum class HomeSection(
     val visibleIn: Set<AppMode>,
 ) {
     LIVE("直播", AppMode.LIVE, setOf(AppMode.LIVE)),
+
+    /**
+     * 推荐（VOD-14）：影视板块的**第一个栏目**。
+     *
+     * 单独立一项而不是把推荐混进电影/电视剧：推荐是跨类型挑出来的内容，
+     * 混在某个类型里等于把一个栏目塞进另一个栏目。
+     */
+    RECOMMEND("推荐", AppMode.VOD, setOf(AppMode.VOD)),
     MOVIE("电影", AppMode.VOD, setOf(AppMode.VOD)),
     SERIES("电视剧", AppMode.VOD, setOf(AppMode.VOD)),
     ANIME("动漫", AppMode.VOD, setOf(AppMode.VOD)),
@@ -96,6 +105,8 @@ enum class HomeSection(
 /** 导航项 → 影视类型。没有对应导航项的（搜索/设置/直播）返回 null。 */
 internal fun HomeSection.toVodType(): ContentType? =
     when (this) {
+        // 推荐不是某一种类型，它自己就是一个栏目
+        HomeSection.RECOMMEND -> null
         HomeSection.MOVIE -> ContentType.MOVIE
         HomeSection.SERIES -> ContentType.TV_SERIES
         HomeSection.ANIME -> ContentType.ANIME
@@ -116,6 +127,8 @@ internal fun ContentType.toHomeSection(): HomeSection? =
  * 而它们本来就是同一块内容区的配套回调，打包后调用处也不容易漏传。
  */
 data class VodHomeActions(
+    /** 切到「推荐」栏目（VOD-14） */
+    val onSelectRecommend: () -> Unit,
     val onSelectType: (ContentType) -> Unit,
     val onSelectYear: (Int?) -> Unit,
     val onSelectArea: (String?) -> Unit,
@@ -123,8 +136,8 @@ data class VodHomeActions(
     val onSelectTag: (String?) -> Unit,
     val onSelectMedia: (VodSummary) -> Unit,
     val onResume: (VodContinueItem) -> Unit,
-    /** 点「看过的」里的一张（VOD-07）：进详情页，而不是从上次的位置接着播 */
-    val onOpenHistory: (VodContinueItem) -> Unit,
+    /** 往下翻一页（VOD-14）：滚到底部时由页面触发 */
+    val onLoadMore: () -> Unit,
 )
 
 /**
@@ -412,13 +425,14 @@ private fun ContentArea(
                 state = vodState,
                 hero = hero,
                 onHeroOpen = onHeroOpen,
+                onSelectRecommend = vodActions.onSelectRecommend,
                 onSelectType = vodActions.onSelectType,
                 onSelectYear = vodActions.onSelectYear,
                 onSelectArea = vodActions.onSelectArea,
                 onSelectTag = vodActions.onSelectTag,
                 onSelectMedia = vodActions.onSelectMedia,
                 onResume = vodActions.onResume,
-                onOpenHistory = vodActions.onOpenHistory,
+                onLoadMore = vodActions.onLoadMore,
                 onOpenSourceManager = onOpenSourceManager,
                 autoFocus = false,
             )
@@ -463,7 +477,9 @@ private fun LiveSectionContent(
                 if (channels.isEmpty()) {
                     "还没有频道。去「源管理」添加一个订阅地址，或在调试包里首次启动自动种一条演示源。"
                 } else {
-                    "共 ${channels.size} 个频道 · ${channels.map { it.groupName }.distinct().size} 个分组"
+                    // 分组数按**分类**算（LIVE-29 之后固定六类），不是上游组名个数：
+                    // 源里的 104 个组名对用户没有意义，写出来只会让人以为分组乱了
+                    "共 ${channels.size} 个频道 · ${CANONICAL_GROUPS.size} 个分类"
                 },
             style = TvText.current.hint,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -490,6 +506,9 @@ private fun LiveSectionContent(
 
         if (channels.isNotEmpty()) {
             ChannelBrowser(
+                // 目录 = 最近观看（ChannelBrowser 插在最前）+ 收藏频道 + 六个固定分类。
+                // 收藏单独成组而不是只靠 ★：用户收藏台就是为了「固定几个台来回看」，
+                // 让他每次都在几千条里找带星的那几个，等于没做这个功能。
                 groups =
                     remember(channels, favoriteChannels) {
                         buildList {

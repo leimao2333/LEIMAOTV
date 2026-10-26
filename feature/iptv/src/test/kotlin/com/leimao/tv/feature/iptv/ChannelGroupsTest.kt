@@ -28,12 +28,12 @@ class ChannelGroupsTest {
         )
 
     @Test
-    fun `分组保持传入顺序`() {
+    fun `按固定分类归并，组内保持传入顺序`() {
+        // LIVE-29 之后不再用上游组名当分组名：认不出的一律进「其他频道」
         val groups = groupChannels(channels)
 
-        assertEquals(listOf("分组甲", "分组乙"), groups.map { it.name })
-        assertEquals(listOf(1L, 3L), groups[0].channels.map { it.id })
-        assertEquals(listOf(2L), groups[1].channels.map { it.id })
+        assertEquals(listOf("其他频道"), groups.map { it.name })
+        assertEquals(listOf(1L, 2L, 3L), groups[0].channels.map { it.id })
     }
 
     @Test
@@ -110,10 +110,10 @@ class ChannelGroupsTest {
         assertEquals(emptyList<ChannelGroup>(), filterGroups(groups, "不存在"))
     }
 
-    // ---------- 分组归一化：地方台归省（SEARCH-06 之后补的分组整理） ----------
+    // ---------- 固定分类（LIVE-29）：上游组名只当判定依据 ----------
 
     @Test
-    fun `地方频道按市县归入对应省频道`() {
+    fun `地方台无论原来在哪个组都归省份地方`() {
         val result =
             groupChannels(
                 listOf(
@@ -123,26 +123,24 @@ class ChannelGroupsTest {
                 ),
             )
 
-        val byName = result.associateBy { it.name }
-        assertEquals(listOf(1L), byName["浙江频道"]?.channels?.map { it.id })
-        assertEquals(listOf(2L), byName["黑龙江频道"]?.channels?.map { it.id })
-        assertEquals(listOf(3L), byName["四川频道"]?.channels?.map { it.id })
-        assertEquals(null, byName["地方频道"])
+        assertEquals(listOf("省份地方"), result.map { it.name })
+        assertEquals(listOf(1L, 2L, 3L), result[0].channels.map { it.id })
     }
 
     @Test
-    fun `识别不出的地方台归其他地方台而不是硬塞`() {
+    fun `认不出的台进其他频道而不是被丢掉`() {
         val result =
             groupChannels(
                 listOf(channel(1, "中国蓝新闻", "地方频道", 1)),
             )
 
-        assertEquals(listOf("其他地方台"), result.map { it.name })
+        // 「中国蓝」反查不到省市，但组名带「地方」→ 省份地方
+        assertEquals(listOf("省份地方"), result.map { it.name })
         assertEquals(listOf(1L), result[0].channels.map { it.id })
     }
 
     @Test
-    fun `非地方频道的分组原样保留`() {
+    fun `上游组名被重建成固定分类`() {
         val result =
             groupChannels(
                 listOf(
@@ -151,6 +149,6 @@ class ChannelGroupsTest {
                 ),
             )
 
-        assertEquals(listOf("央视频道", "卫视频道"), result.map { it.name })
+        assertEquals(listOf("央视频道", "省份地方"), result.map { it.name })
     }
 }

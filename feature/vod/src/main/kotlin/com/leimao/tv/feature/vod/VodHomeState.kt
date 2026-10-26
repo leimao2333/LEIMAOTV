@@ -39,6 +39,13 @@ data class VodSourceRow(
  * 这样首页的可预览性、可测性都不受数据库影响（与直播板块同一套做法）。
  */
 data class VodHomeState(
+    /**
+     * 当前是不是「推荐」栏目（VOD-14）。
+     *
+     * 推荐是**独立栏目**，与电影/电视剧并列，而不是挂在每个类型下面的一行 ——
+     * 用户切到电影就是想看片，第一眼却是一堆跨类型内容，等于把一个栏目塞进另一个栏目。
+     */
+    val recommend: Boolean = false,
     val selectedType: ContentType = ContentType.MOVIE,
     /** 当前类型下出现过的年份，倒序；为空表示没数据，不显示年份筛选 */
     val years: List<Int> = emptyList(),
@@ -76,7 +83,29 @@ data class VodHomeState(
     val hasSource: Boolean = true,
     /** 需要直接告诉用户的一句话（抓取失败的原因等） */
     val note: String? = null,
+    /** 往下翻追加的页（VOD-14）。不写库，只服务当前页面 */
+    val moreItems: List<VodSummary> = emptyList(),
+    val loadingMore: Boolean = false,
+    /** 已经翻到底（源里没内容了） */
+    val noMore: Boolean = false,
+    /** 上一页翻失败了（网络/格式），脚上给「重试」而不是「没有更多了」 */
+    val loadMoreFailed: Boolean = false,
 ) {
+    /** 类型栏目的全部内容 = 本地快照 + 翻出来的页 */
+    val allItems: List<VodSummary>
+        get() = if (moreItems.isEmpty()) items else items + moreItems
+
+    /**
+     * 推荐栏目的内容。
+     *
+     * 用「全库最近更新」而不是当前类型：推荐的语义就是「跨类型挑给你」。
+     * 与继续观看去重 —— 同一部片不该在首页出现两次。
+     */
+    val recommendItems: List<VodSummary>
+        get() {
+            val watching = continueWatching.map { it.progress.sourceId to it.progress.sourceKey }.toSet()
+            return recent.filterNot { (it.sourceId to it.sourceKey) in watching }
+        }
     val filtering: Boolean
         get() = selectedYear != null || selectedArea != null || selectedTag != null
 

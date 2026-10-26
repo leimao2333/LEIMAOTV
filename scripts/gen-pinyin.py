@@ -1,14 +1,19 @@
-"""生成「汉字 → 拼音首字母」紧凑表（供频道名拼音简写搜索用）。
+"""生成「汉字 → 拼音」紧凑表（供频道名拼音搜索用，全拼 / 简写 / 混拼都吃）。
 
 数据来源：mozillazg/pinyin-data（MIT 许可）的 `pinyin.txt`
   https://github.com/mozillazg/pinyin-data
-格式：`U+4E00: yī,chā  # 一`；同一条里多个读音用逗号分隔，这里只取**第一个**（最常用）。
+格式：`U+4E00: yī,chā  # 一`；同一条里多个读音用逗号分隔。
+
+**多音字要全留**（上限 4 个）：只留第一个的话，「重庆」只有 `zhongqing` 能搜到，
+而用户几乎只会打 `chongqing` —— 这是拼音搜索最典型的失败。上限 4 是因为
+超过 4 个读音的字极少（`呵` 这类），全留会让表膨胀且收益为零。
 
 产出：`app/src/main/assets/pinyin_table.txt`
-  一行一个字：`字拼音`（无分隔符，汉字后面直接跟无声调小写拼音），例如
-  `一yi`、`湖hu`、`南nan`。首字母由运行时取拼音首字符得到，所以**一份表同时支持
-  全拼（hunanweishi）与简写（hnws）**两种输入 — 这是 26 键键盘能打中文拼音的前提。
-  只收 BMP 内的汉字，约 2.7 万条 ≈ 240KB（APK 压缩后几十 KB）。
+  一行一个字：`字读音1,读音2`（汉字后面直接跟无声调小写拼音，多个读音用逗号分隔），例如
+  `一yi`、`湖hu`、`重zhong,chong`。首字母由运行时取每个读音的首字符得到，所以
+  **一份表同时支持全拼（hunanweishi）、简写（hnws）与混拼（hunws）**三种输入 ——
+  这是 26 键键盘能打中文拼音的前提。
+  只收 BMP 内的汉字，约 2.7 万条 ≈ 300KB（APK 压缩后几十 KB）。
 
 用法：
     python scripts/gen-pinyin.py                    # 自动下载 pinyin.txt
@@ -37,6 +42,10 @@ def tone_less(reading: str) -> str:
     return letters_only
 
 
+# 一个字最多留几个读音。4 是经验值：再多的字不到百个，而表会明显变大
+MAX_READINGS = 4
+
+
 def build(src_path: Path) -> tuple[str, int]:
     pairs: list[str] = []
     seen: set[str] = set()
@@ -45,17 +54,23 @@ def build(src_path: Path) -> tuple[str, int]:
         if not m:
             continue
         code = int(m.group(1), 16)
-        if code > 0xFFFF:          # 只收 BMP：运行时按「两字符一组」解析
-            continue
-        readings = m.group(2).split(",")
-        syllable = tone_less(readings[0])
-        if not syllable:
+        if code > 0xFFFF:          # 只收 BMP：运行时按「一个汉字 + 若干读音」解析
             continue
         ch = chr(code)
         if ch in seen:
             continue
+
+        readings: list[str] = []
+        for reading in m.group(2).split(","):
+            syllable = tone_less(reading)
+            # 去重且保序：同一个字的「zhong」「zhong」重复出现时只留一个
+            if syllable and syllable not in readings:
+                readings.append(syllable)
+        if not readings:
+            continue
+
         seen.add(ch)
-        pairs.append(ch + syllable + "\n")
+        pairs.append(ch + ",".join(readings[:MAX_READINGS]) + "\n")
     return "".join(pairs), len(pairs)
 
 

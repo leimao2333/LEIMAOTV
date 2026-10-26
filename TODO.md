@@ -536,9 +536,12 @@
         从 Release **回下载主包**算 sha256 与附件清单逐字符一致；把下载到的包装进模拟器，
         `versionCode=40301 / versionName=0.4.3.1`，过合规页 → 落到源管理 → 打开「添加订阅地址」
         弹层与输入框都正常（R8 混淆后的界面无异常，截图 `docs/verify/release_0431_*.png`）
-  - [ ] **release 包的播放链路未验**：模拟器 adb 在本轮反复 offline，加源到出帧那一步没跑完。
-        debug 包的播放/回看链路已实测过，release 包差的只是「R8 后 libVLC 的 JNI 是否正常」
-        —— 下次设备稳定时补一次（加本地源 → 出帧 → 回看入口）
+  - [x] **release 包的播放链路已验（2026-10-26）**：同一个从 Release 下载的包，加本地源 →
+        刷新出 2 个频道 → 起播 CCTV-13 **正常出帧** → 控制条里「回看」按钮在
+        （R8 混淆后 libVLC 的 JNI、catchup 解析、焦点链都正常，截图 `release_0431_playing.png`）。
+        途中踩到的坑不在应用侧：`adb` 用的是 PATH 里的 WinGet 版本，与模拟器不兼容 ——
+        `adb devices` 长期 offline、`screencap` 输出被缩放到 1008×567、`input` 时好时坏；
+        换成 SDK 自带的 `platform-tools/adb.exe`（37.0.1）后一切正常。**以后脚本化实测固定用 SDK 的 adb**
   - [ ] v0.4.3.0 的 tag 留在远端但流水线失败（测试编译错误），没有 Release；
         v0.4.3.1 是它的修订版，功能相同。是否需要删掉那条失败的 tag，等有结论再定
 

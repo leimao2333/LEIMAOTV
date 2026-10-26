@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      调试包专用的「手机桌面入口」。
+
+      主 Manifest 里 MainActivity 只声明了 LEANBACK_LAUNCHER —— 那是电视启动器认的 category，
+      手机桌面 / 应用抽屉只认 LAUNCHER。所以把 debug 包装到手机上时，`pm list packages` 能看到它，
+      但桌面上没有图标、点不到（2026-10-26 真机实测）。
+
+      只写在 src/debug 而不是主 Manifest，是为了守住 RULES §1「release 不做手机端入口」：
+      release 包依旧只出现在电视的启动器里，不会被当成手机应用分发。
+
+      两条 intent-filter 是**并存**关系而不是覆盖：电视盒子照样从 LEANBACK 入口进，
+      手机从 LAUNCHER 入口进，同一个 Activity。
+    -->
+    <application>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

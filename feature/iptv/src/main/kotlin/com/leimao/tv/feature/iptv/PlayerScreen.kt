@@ -47,7 +47,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.leimao.tv.core.designsystem.components.BufferingOverlay
 import com.leimao.tv.core.designsystem.components.TvTextField
+import com.leimao.tv.core.designsystem.components.rememberBufferingVisible
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
@@ -56,6 +58,7 @@ import com.leimao.tv.core.model.catchup.Catchup
 import com.leimao.tv.core.model.catchup.CatchupEntry
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.buildEpgTimeline
+import com.leimao.tv.core.player.LoadStats
 import com.leimao.tv.core.player.PlaybackItem
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.PlaybackTrack
@@ -154,7 +157,32 @@ data class PlayerUiState(
     val catchupEntries: List<CatchupEntry> = emptyList(),
     /** 正在回看哪一档：null = 看直播。非空时 HUD 顶上加一行说明，控制条多一个「回直播」 */
     val catchupPlaying: CatchupEntry? = null,
+    /**
+     * 加载统计（PLAY-12）：黑屏那几秒到底在干什么。
+     *
+     * 由 app 层从 `PlayerController.loadStats` 收集后传进来 —— feature 模块不碰内核。
+     */
+    val loadStats: LoadStats = LoadStats.None,
 ) {
+    /**
+     * 该不该显示加载浮层。
+     *
+     * 两种情况：**还没起播**（Preparing）与**起播后在缓冲**（buffering）。
+     * 只看 buffering 不够：起播瞬间内核还没进入 BUFFERING，那段时间同样是黑屏。
+     * 失败态不显示 —— 那时该看的是错误面板，再叠一层转圈只会让人以为还在加载。
+     */
+    val showLoading: Boolean
+        get() = playback is PlaybackState.Preparing || (playback is PlaybackState.Playing && loadStats.buffering)
+
+    /**
+     * 浮层标题：**按「有没有收到数据」判断**，而不是按播放状态。
+     *
+     * 弱源会在 READY/BUFFERING 之间来回抖，按状态判断会让标题一秒变好几次；
+     * 而「一个字节都没来」与「来过又断了」本来就是两种处境，这个判据既稳定又更准。
+     */
+    val loadingTitle: String
+        get() = if (loadStats.bytesLoaded <= 0L) "正在连接…" else "正在缓冲…"
+
     val audioTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.AUDIO }
 
     val textTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.TEXT }
@@ -422,6 +450,15 @@ fun PlayerScreen(
                 },
     ) {
         VideoSurface(surfaceHost = surfaceHost)
+
+        // 加载浮层（PLAY-12）：黑屏期间必须说清楚「在等什么」。
+        // 不铺满、不压暗 —— 缓冲好的一瞬间画面直接露出来，不用先黑一下再亮
+        BufferingOverlay(
+            visible = rememberBufferingVisible(state.showLoading),
+            title = state.loadingTitle,
+            detail = state.loadStats.summary(),
+            modifier = Modifier.align(Alignment.Center),
+        )
 
         // 文字压在画面上必须有自己的衬底：真实源的画面又亮又白（台标、公告页），
         // 白字直接叠上去等于看不见。上下各压一层渐变，中间完全透明，不挡画面。

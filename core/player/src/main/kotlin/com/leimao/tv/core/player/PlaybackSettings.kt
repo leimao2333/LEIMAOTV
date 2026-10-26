@@ -76,6 +76,9 @@ enum class BufferProfile(
         minBufferMs = 5_000,
         maxBufferMs = 20_000,
         bufferForPlaybackMs = 500,
+        // 卡住之后恢复的门槛要低：源里不少线路是 10 Mbps 的 1080p，
+        // 把「恢复前要攒多久」调大，在慢线路上等于把一次卡顿拖成十几秒
+        // （实测 2.5s 的门槛 → 每次卡 11 秒，回到 1s 才合理）
         bufferAfterRebufferMs = 1_000,
     ),
     ANTI_JITTER(

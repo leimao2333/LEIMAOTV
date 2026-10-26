@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.leimao.tv.core.designsystem.components.BufferingOverlay
+import com.leimao.tv.core.designsystem.components.rememberBufferingVisible
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.player.PlaybackSpeed
@@ -215,8 +217,15 @@ fun VodPlayerScreen(
             )
         }
 
-        if (state.preparing) {
-            CenterHint(text = state.note ?: "正在准备这一集…")
+        // 加载浮层（PLAY-12）：准备 / 连接 / 缓冲三种黑屏，各自说清楚在等什么，
+        // 并带上「已加载多少、多快、什么分辨率」—— 一个字节都没来时那行字就是排查入口
+        if (state.showLoading) {
+            BufferingOverlay(
+                visible = rememberBufferingVisible(state.showLoading),
+                title = state.loadingTitle,
+                detail = state.note ?: state.loadStats.summary(),
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
 
         if (failed != null) {

@@ -42,7 +42,17 @@ data class BasicAuth(val username: String, val password: String) {
  * 把这些折成一句「加载失败」，等于把排查成本转移给用户。
  */
 sealed interface FetchOutcome {
-    data class Success(val text: String) : FetchOutcome
+    data class Success(
+        val text: String,
+        /**
+         * 这次是**通过镜像**拿到的（主机名），直连成功时为 null。
+         *
+         * 单独留一个字段是为了让 UI 能说一句「直连超时，已走镜像」：
+         * 不说的话，用户会以为自己的网络其实能直连 GitHub，下次遇到别的地址失败时
+         * 完全不知道问题出在「路不通」还是「地址错了」。
+         */
+        val viaMirror: String? = null,
+    ) : FetchOutcome
 
     data class Failure(
         val kind: FetchErrorKind,

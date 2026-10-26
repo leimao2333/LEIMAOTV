@@ -1,6 +1,8 @@
 package com.leimao.tv.core.player
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import android.view.View
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -54,6 +56,32 @@ class Media3PlayerController(
     override val tracks: StateFlow<List<PlaybackTrack>> = _tracks.asStateFlow()
 
     /**
+     * 加载统计（PLAY-12）：黑屏那几秒到底在干什么。
+     *
+     * 数据来自两处：字节数/分辨率/解码器由 [LoadStatsTracker] 在 AnalyticsListener 里累加，
+     * 缓冲位置与 BUFFERING 标志由 [statsTicker] 每 500ms 读一次播放器。
+     * 不放进 AnalyticsListener 里算，是因为 `bufferedPosition` 不是事件，只能在轮询里读。
+     */
+    private val _loadStats = MutableStateFlow(LoadStats.None)
+    override val loadStats: StateFlow<LoadStats> = _loadStats.asStateFlow()
+
+    private val loadTracker = LoadStatsTracker(_loadStats)
+
+    // ---- 反复缓冲的自动换线（PLAY-13）----
+
+    /** 这一次起播是否已经出过画面。出画之前的 BUFFERING 是「起播」，不是「卡」 */
+    private var renderedOnce = false
+
+    /** 最近几次「卡住」的时刻（elapsedRealtime）。只保留窗口内的 */
+    private val rebuffers = ArrayDeque<Long>()
+
+    /** 本轮已经自动换过几次线：几条线都不行时不能无限跳 */
+    private var autoSwitchCount = 0
+
+    /** 自动换线后的静默期：这之前的 BUFFERING 是我们自己造成的，不计入统计 */
+    private var suppressRebufferUntil = 0L
+
+    /**
      * 轨道 id → (track group, 组内第几条)。
      *
      * UI 只认 [PlaybackTrack.id]，真正的定位靠这张表 —— 见 `PlaybackTrack` 的注释。
@@ -96,6 +124,7 @@ class Media3PlayerController(
     private var watchdog: Job? = null
 
     init {
+        startStatsTicker()
         videoPlayer.addListener(
             object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -105,7 +134,8 @@ class Media3PlayerController(
                         // 只认 BUFFERING：STATE_IDLE 会在出错后紧跟着回调一次，
                         // 如果把它也当成 Preparing，刚刚设好的 Failed 会被立刻覆盖，
                         // 用户看到的就是「一直转圈、永远不报错」
-                        Player.STATE_BUFFERING ->
+                        Player.STATE_BUFFERING -> {
+                            noteRebuffer()
                             _state.value =
                                 PlaybackState.Preparing(
                                     url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
@@ -113,9 +143,11 @@ class Media3PlayerController(
                                     lineIndex = lineIndex,
                                     lineCount = lines.size,
                                 )
+                        }
 
                         Player.STATE_READY -> {
                             stopWatchdog()
+                            renderedOnce = true
                             _state.value =
                                 PlaybackState.Playing(
                                     url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
@@ -163,6 +195,14 @@ class Media3PlayerController(
         retriesLeft = retryLimit
         resumeFromMs = request.startPositionMs
         firstStart = true
+        // 换台/换集要把上一轮的字节数与分辨率清掉：不清的话新画面黑屏时，
+        // 浮层上还挂着上一路流的「已加载 12MB · 1920×1080」，比不显示更误导
+        loadTracker.reset()
+        _loadStats.value = LoadStats.None
+        renderedOnce = false
+        rebuffers.clear()
+        autoSwitchCount = 0
+        suppressRebufferUntil = 0L
         startCurrentLine()
     }
 
@@ -393,6 +433,81 @@ class Media3PlayerController(
             )
     }
 
+    /**
+     * 每 [STATS_TICK_MS] 读一次「缓冲位置 + 是否在缓冲」，并把字节数换算成速率。
+     *
+     * 为什么不把这些也放进 AnalyticsListener：`bufferedPosition` 不是事件，是状态 ——
+     * 只能在轮询里读。速率也必须按「两次读数的差值」算，事件里只有累计值。
+     *
+     * 500ms 是「数字看起来在动」与「别为了一行字频繁唤醒」之间的折中。
+     * 值没变时 StateFlow 会自动去重（data class equals），不会白白触发重组。
+     */
+
+    private fun startStatsTicker() {
+        scope.launch {
+            var lastBytes = 0L
+            var lastAt = SystemClock.elapsedRealtime()
+            while (true) {
+                delay(STATS_TICK_MS)
+                val now = SystemClock.elapsedRealtime()
+                val elapsed = (now - lastAt).coerceAtLeast(1L)
+                val current = _loadStats.value
+                val speed = (current.bytesLoaded - lastBytes).coerceAtLeast(0L) * 1000L / elapsed
+                lastBytes = current.bytesLoaded
+                lastAt = now
+
+                val buffered =
+                    (videoPlayer.bufferedPosition - videoPlayer.currentPosition).coerceAtLeast(0L)
+                _loadStats.value =
+                    current.copy(
+                        buffering = videoPlayer.playbackState == Player.STATE_BUFFERING,
+                        bufferedMs = buffered,
+                        bytesPerSecond = speed,
+                    )
+            }
+        }
+    }
+
+    /**
+     * 「动不动就卡」的自动处置（PLAY-13）。
+     *
+     * 真机实测（2026-10-26）：某路 CCTV 高清流 30 秒内进了 7 次 BUFFERING ——
+     * 画面走走停停，但**一次错误都没有**，所以既有的重连/换线降级链完全不会触发
+     * （那条链只在 `onPlayerError` 上跑）。用户看到的就是「动不动就卡」，而 App 无动于衷。
+     *
+     * 判据：**出画之后**、[REBUFFER_WINDOW_MS] 内卡了 [REBUFFER_LIMIT] 次 → 认定这条线路
+     * 供不上，换下一条。只换 [AUTO_SWITCH_LIMIT] 次就停手：几条线路都慢是网络的问题，
+     * 再跳只会让画面反复重来，比卡着更难受。
+     *
+     * 起播时的那次 BUFFERING 不算（[renderedOnce]）：那时候本来就还没画面。
+     */
+    private fun noteRebuffer() {
+        if (!renderedOnce) return
+        val now = SystemClock.elapsedRealtime()
+        // 静默期：刚因为「卡」换过线，重新起播的这段缓冲不是新的证据
+        if (now < suppressRebufferUntil) return
+
+        rebuffers.addLast(now)
+        while (rebuffers.isNotEmpty() && now - rebuffers.first() > REBUFFER_WINDOW_MS) {
+            rebuffers.removeFirst()
+        }
+        if (rebuffers.size < REBUFFER_LIMIT) return
+
+        val lines = request?.normalizedLines ?: return
+        if (lines.size <= 1) return
+        if (autoSwitchCount >= AUTO_SWITCH_LIMIT) return
+
+        autoSwitchCount++
+        rebuffers.clear()
+        suppressRebufferUntil = now + REBUFFER_SILENCE_MS
+        Log.d(
+            PlaybackDiagnostics.TAG,
+            "连续 ${REBUFFER_LIMIT} 次缓冲，判定这条线路供不上 → 换下一条（第 $autoSwitchCount 次）",
+        )
+        // 从状态回调里直接 prepare 会重入播放器，挪到下一个循环再换
+        scope.launch { switchLine(delta = 1) }
+    }
+
     private fun buildPlayer(): ExoPlayer =
         ExoPlayer.Builder(context)
             .setRenderersFactory(
@@ -404,11 +519,35 @@ class Media3PlayerController(
             .setLoadControl(bufferProfile.loadControl())
             .build()
             // 诊断日志：解码器是硬解还是软解、分辨率帧率、丢帧数 —— 用户说「卡」时先看这个
-            .apply { addAnalyticsListener(PlaybackDiagnostics()) }
+            .apply {
+                addAnalyticsListener(PlaybackDiagnostics())
+                // 同一批事件里顺手攒出「已加载多少字节」，喂给加载浮层（PLAY-12）
+                addAnalyticsListener(loadTracker)
+            }
 
     companion object {
         /** 单条线路上连续重连的次数上限；再失败就该换线了（PLAY-08） */
         const val PLAYBACK_RETRY_LIMIT = 3
+
+        /** 加载统计的轮询间隔（PLAY-12）。见 startStatsTicker 的说明 */
+        private const val STATS_TICK_MS = 500L
+
+        /** 判定「这条线路供不上」的观察窗口（PLAY-13） */
+        private const val REBUFFER_WINDOW_MS = 30_000L
+
+        /** 窗口内卡几次算「供不上」。3 次是「明显不对」的最小值，1~2 次可能只是抖动 */
+        private const val REBUFFER_LIMIT = 3
+
+        /**
+         * 一轮播放里最多自动换几次线。
+         *
+         * 3 而不是 2：聚合源里同一个台常有 4~6 条线路，只试 2 条就放弃，
+         * 很容易停在同样慢的那几条上（实测 CCTV-8 有 5 条线路，质量差别很大）。
+         */
+        private const val AUTO_SWITCH_LIMIT = 3
+
+        /** 换线后的静默期：这段时间的缓冲不计入统计 */
+        private const val REBUFFER_SILENCE_MS = 8_000L
 
         /** 错误码到人话的映射：UI 上直接显示，用户才知道该换线还是该检查网络 */
         fun describe(error: PlaybackException): String =

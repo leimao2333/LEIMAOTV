@@ -25,14 +25,17 @@ import com.leimao.tv.core.network.vod.VodFailure
 import com.leimao.tv.core.network.vod.VodFetchResult
 import com.leimao.tv.core.network.vod.VodSourceAdapter
 import com.leimao.tv.core.network.vod.VodSourceRef
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -134,6 +137,9 @@ class SearchRepository(
                 }
             }
         }
+            // 拼音匹配是纯 CPU（几千个名字 × 每个字母几种读音），跑在主线程就是「一打字就卡」。
+            // flowOn 让整个 channelFlow 在 Default 上跑，UI 只负责收帧
+            .flowOn(Dispatchers.Default)
 
     /**
      * 拼音简写补一轮（SEARCH-06）。
@@ -174,39 +180,41 @@ class SearchRepository(
         query: String,
         scope: SearchScope,
         limit: Int = SUGGEST_LIMIT,
-    ): List<String> {
-        val keyword = normalizeSearchQuery(query)
-        if (keyword.isEmpty()) return emptyList()
+    ): List<String> =
+        // 与 search 同理：候选要扫全库台名与片名，必须离开主线程
+        withContext(Dispatchers.Default) {
+            val keyword = normalizeSearchQuery(query)
+            if (keyword.isEmpty()) return@withContext emptyList()
 
-        val out = LinkedHashSet<String>()
-        // 末尾「正在打的拼音」：中文输入法是分段的 —— 选了「我」再打 `ai`，输入框是 `我ai`，
-        // 真正要出候选的是 `ai` 这一段。拿整串去查拼音永远查不到（打第二个字没提示的根因）
-        val segment = trailingPinyinSegment(query)
+            val out = LinkedHashSet<String>()
+            // 末尾「正在打的拼音」：中文输入法是分段的 —— 选了「我」再打 `ai`，输入框是 `我ai`，
+            // 真正要出候选的是 `ai` 这一段。拿整串去查拼音永远查不到（打第二个字没提示的根因）
+            val segment = trailingPinyinSegment(query)
 
-        if (keyword.all { it.code < 128 && it.isLetterOrDigit() }) {
-            // 先给**输入法候选**：用户打 `wo` 想看的是「我」，不是「哪个台名带 wo」
-            ime.candidates(keyword, limit).forEach { if (out.size < limit) out.add(it) }
+            if (keyword.all { it.code < 128 && it.isLetterOrDigit() }) {
+                // 先给**输入法候选**：用户打 `wo` 想看的是「我」，不是「哪个台名带 wo」
+                ime.candidates(keyword, limit).forEach { if (out.size < limit) out.add(it) }
 
-            // 再补名字命中：打 `hnws` 时输入法给不出词，这里出「湖南卫视」
-            if (out.size < limit) {
-                channelNameCandidates(keyword, limit, out)
+                // 再补名字命中：打 `hnws` 时输入法给不出词，这里出「湖南卫视」
+                if (out.size < limit) {
+                    channelNameCandidates(keyword, limit, out)
+                }
+                if (out.size < limit) {
+                    mediaNameCandidates(keyword, limit, out, scope, allowedTypesFor(scope))
+                }
+            } else if (segment != null) {
+                // 已经有汉字、末尾还在打拼音：只给这一段拼音的候选（`我ai` → 爱/哀/挨…）
+                ime.candidates(segment, limit).forEach { if (out.size < limit) out.add(it) }
+            } else {
+                // 中文查询（系统输入法打出来的）：直接拿名字里含这个词的
+                channels
+                    .search(keyword)
+                    .asSequence()
+                    .map { it.channel.name }
+                    .forEach { if (out.size < limit) out.add(it) }
             }
-            if (out.size < limit) {
-                mediaNameCandidates(keyword, limit, out, scope, allowedTypesFor(scope))
-            }
-        } else if (segment != null) {
-            // 已经有汉字、末尾还在打拼音：只给这一段拼音的候选（`我ai` → 爱/哀/挨…）
-            ime.candidates(segment, limit).forEach { if (out.size < limit) out.add(it) }
-        } else {
-            // 中文查询（系统输入法打出来的）：直接拿名字里含这个词的
-            channels
-                .search(keyword)
-                .asSequence()
-                .map { it.channel.name }
-                .forEach { if (out.size < limit) out.add(it) }
+            out.toList()
         }
-        return out.toList()
-    }
 
     /** 频道名命中 → 候选（拼音全拼 / 简写 / 混拼都算） */
     private suspend fun channelNameCandidates(

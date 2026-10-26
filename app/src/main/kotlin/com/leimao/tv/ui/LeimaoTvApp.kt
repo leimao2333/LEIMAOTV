@@ -721,6 +721,8 @@ private fun PlayerRoute(
     onOpenSourceManager: () -> Unit,
 ) {
     val playback by container.player.state.collectAsStateWithLifecycle()
+    // 黑屏那几秒的加载数据（PLAY-12）：字节数/速率/分辨率，浮层上要显示
+    val loadStats by container.player.loadStats.collectAsStateWithLifecycle()
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var current by remember { mutableStateOf<Channel?>(null) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -788,13 +790,15 @@ private fun PlayerRoute(
         // 留着上一个台的能力，会出现「这个台明明不支持回看却有按钮」
         catchup = config.catchup
         catchupPlaying = null
-        // 智能调度（LIVE-13）：同一频道的多条线路按历史质量排序，失败/卡顿过的靠后、
-        // 快且稳的靠前；没历史时并发探测一次，跳过失效源
+        // 智能调度（LIVE-13）：同一频道的多条线路按历史质量排序，失败/卡顿过的靠后。
+        //
+        // **只用历史，不在起播路径上探测**：旧实现在没有历史时会先并发探测每条线路
+        // （单条 4 秒），第一次看一个台要在黑屏上多等最多 4 秒（真机实测换台 2.7s 才出画）。
+        // 探测的结论只影响「下次先试哪条」，所以挪到 play() 之后的 [learnLines] 里后台跑。
         val orderedLines =
-            container.lineScheduler.orderLines(
+            container.lineScheduler.orderByHistory(
                 channelId = channel.id,
                 lines = config.lines,
-                headers = config.toRequestHeaders(),
             )
         container.player.play(
             PlaybackRequest(
@@ -805,6 +809,17 @@ private fun PlayerRoute(
                 kind = PlaybackKind.LIVE,
             ),
         )
+        // 后台补一份线路质量，喂给**下一次**换台。用 applicationScope：
+        // 用户可能马上就换下一个台，这次探测不该跟着页面一起被取消
+        container.applicationScope.launch {
+            runCatching {
+                container.lineScheduler.learnLines(
+                    channelId = channel.id,
+                    lines = config.lines,
+                    headers = config.toRequestHeaders(),
+                )
+            }
+        }
         // 记住「刚看了这个台」：启动落点优先级 #1 读的就是这条记录（§6.6）
         container.historyRepository.touch(channel.id, System.currentTimeMillis())
         // 最近观看分组要跟着换台更新，否则抽屉里的「最近观看」一直是旧名单
@@ -917,6 +932,7 @@ private fun PlayerRoute(
                 catchup = catchup,
                 catchupEntries = catchupEntries,
                 catchupPlaying = catchupPlaying,
+                loadStats = loadStats,
             ),
         surfaceHost = container.player as? VideoSurfaceHost,
         onSwitchChannel = { delta ->
@@ -1181,6 +1197,8 @@ private fun VodPlayRoute(
     onBack: () -> Unit,
 ) {
     val playback by container.player.state.collectAsStateWithLifecycle()
+    // 黑屏那几秒的加载数据（PLAY-12）：影视页同样要显示「在等什么」
+    val loadStats by container.player.loadStats.collectAsStateWithLifecycle()
     val tracks by container.player.tracks.collectAsStateWithLifecycle()
     val settings by
         container.settings.playbackSettings.collectAsStateWithLifecycle(
@@ -1513,6 +1531,7 @@ private fun VodPlayRoute(
                 note = note,
                 favorited = favorited,
                 tracks = tracks,
+                loadStats = loadStats,
             ),
         actions =
             VodPlayerActions(

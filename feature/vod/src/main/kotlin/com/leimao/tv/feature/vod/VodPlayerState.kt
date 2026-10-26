@@ -1,5 +1,6 @@
 package com.leimao.tv.feature.vod
 
+import com.leimao.tv.core.player.LoadStats
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.PlaybackTrack
 import com.leimao.tv.core.player.TrackKind
@@ -57,7 +58,39 @@ data class VodPlayerUiState(
      * 直播频道几乎总是空表 —— 空表时界面不显示这两个按钮（见 [canPickAudio] / [hasTextTracks]）。
      */
     val tracks: List<PlaybackTrack> = emptyList(),
+    /**
+     * 加载统计（PLAY-12）：黑屏那几秒在干什么（字节数 / 速率 / 分辨率）。
+     *
+     * 由 app 层从 `PlayerController.loadStats` 收集后传进来。
+     */
+    val loadStats: LoadStats = LoadStats.None,
 ) {
+    /**
+     * 该不该显示加载浮层。
+     *
+     * 三种情况：正在准备（拉详情 → 拿地址）、起播中、播放中缓冲。
+     * 失败与播完不显示 —— 那两个状态有自己的面板，再叠一层转圈只会让人以为还在等。
+     */
+    val showLoading: Boolean
+        get() =
+            preparing ||
+                playback is PlaybackState.Preparing ||
+                (playback is PlaybackState.Playing && loadStats.buffering)
+
+    /**
+     * 浮层标题：准备 / 连接 / 缓冲是三件不同的事，别都写成「加载中」。
+     *
+     * 连接与缓冲的分界是**有没有收到数据**，不是播放状态 —— 弱源会在
+     * READY/BUFFERING 之间抖，按状态判断标题会一秒变好几次。
+     */
+    val loadingTitle: String
+        get() =
+            when {
+                preparing -> "正在准备…"
+                loadStats.bytesLoaded <= 0L -> "正在连接…"
+                else -> "正在缓冲…"
+            }
+
     /** 有进度才能画进度条。直播或时长未知时为 false */
     val seekable: Boolean get() = durationMs > 0L
 

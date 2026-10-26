@@ -30,7 +30,13 @@ class SourceBackupImporter(
     suspend fun importFrom(url: String): BackupImportResult {
         val outcome = http.fetch(url)
         if (outcome is FetchOutcome.Failure) return BackupImportResult.Failed(describe(outcome))
-        return importText((outcome as FetchOutcome.Success).text)
+        val success = outcome as FetchOutcome.Success
+        // 直连不通时由 MirrorHttpClient 换了 GitHub 镜像，这里把「走了镜像」带出去，
+        // 让 UI 能解释「为什么这次慢了几秒」
+        return when (val parsed = importText(success.text)) {
+            is BackupImportResult.Done -> parsed.copy(viaMirror = success.viaMirror)
+            is BackupImportResult.Failed -> parsed
+        }
     }
 
     /**
@@ -51,7 +57,9 @@ class SourceBackupImporter(
 
     private fun describe(failure: FetchOutcome.Failure): String =
         when (failure.kind) {
-            FetchErrorKind.TIMEOUT -> "抓取超时：地址没有在规定时间内响应"
+            // 超时是「路不通」里最常见的一种：直连被墙时镜像也可能一起慢。
+            // 与其只说一句「超时」，不如把能动手的那一步写出来（SET-04 的宽松档）
+            FetchErrorKind.TIMEOUT -> "抓取超时：地址没有在规定时间内响应（可在设置里把超时改成「宽松」再试）"
             FetchErrorKind.HTTP -> "抓取失败：${failure.detail ?: "HTTP 错误"}"
             FetchErrorKind.NETWORK -> "网络错误：${failure.detail ?: "不可达"}"
             FetchErrorKind.EMPTY -> "抓到的内容是空的"
@@ -59,7 +67,11 @@ class SourceBackupImporter(
 }
 
 sealed interface BackupImportResult {
-    data class Done(val summary: SourceImportSummary) : BackupImportResult
+    data class Done(
+        val summary: SourceImportSummary,
+        /** 走镜像拿到的（主机名）；直连成功时为 null。见 [FetchOutcome.Success.viaMirror] */
+        val viaMirror: String? = null,
+    ) : BackupImportResult
 
     data class Failed(val detail: String) : BackupImportResult
 }

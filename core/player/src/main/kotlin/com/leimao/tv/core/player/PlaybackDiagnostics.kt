@@ -1,9 +1,15 @@
 package com.leimao.tv.core.player
 
 import android.util.Log
+import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * 播放诊断日志（PLAY-01 / PLAY-02 的排查入口）。
@@ -95,5 +101,51 @@ internal class PlaybackDiagnostics(
 
         fun isSoftware(decoderName: String): Boolean =
             SOFTWARE_MARKERS.any { decoderName.contains(it, ignoreCase = true) }
+    }
+}
+
+/**
+ * 从 AnalyticsListener 里攒出「加载了多少字节、什么分辨率、哪个解码器」（PLAY-12）。
+ *
+ * 与 [PlaybackDiagnostics] 分开而不是塞进去：那个只负责**打日志**（release 会被 R8 整条裁掉），
+ * 这个负责**喂 UI**，两者生命周期不同 —— 混在一起的话，裁日志时容易顺手把 UI 数据也裁掉。
+ */
+internal class LoadStatsTracker(
+    private val sink: MutableStateFlow<LoadStats>,
+) : AnalyticsListener {
+    private var bytes = 0L
+
+    /** 换台/换集时清零：新的一路流从 0 开始算，否则浮层会挂着上一路的数字 */
+    fun reset() {
+        bytes = 0L
+        sink.value = LoadStats.None
+    }
+
+    override fun onLoadCompleted(
+        eventTime: AnalyticsListener.EventTime,
+        loadEventInfo: LoadEventInfo,
+        mediaLoadData: MediaLoadData,
+    ) {
+        // 只累加媒体数据本身：清单/字幕也走这个回调，把它们算进去会让「已加载」虚高
+        if (mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return
+        bytes += loadEventInfo.bytesLoaded
+        sink.update { it.copy(bytesLoaded = bytes) }
+    }
+
+    override fun onVideoInputFormatChanged(
+        eventTime: AnalyticsListener.EventTime,
+        format: Format,
+        decoderReuseEvaluation: DecoderReuseEvaluation?,
+    ) {
+        sink.update { it.copy(width = format.width, height = format.height) }
+    }
+
+    override fun onVideoDecoderInitialized(
+        eventTime: AnalyticsListener.EventTime,
+        decoderName: String,
+        initializedTimestampMs: Long,
+        initializationDurationMs: Long,
+    ) {
+        sink.update { it.copy(decoder = decoderName) }
     }
 }

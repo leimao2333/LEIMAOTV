@@ -42,6 +42,7 @@ import com.leimao.tv.core.model.playlist.MergedChannel
 import com.leimao.tv.core.model.release.DeviceAbi
 import com.leimao.tv.core.network.AppHttp
 import com.leimao.tv.core.network.HttpClient
+import com.leimao.tv.core.network.MirrorHttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
 import com.leimao.tv.core.network.buildNetworkClient
 import com.leimao.tv.core.player.BufferProfile
@@ -103,7 +104,14 @@ class AppContainer(context: Context) {
      */
     val okHttpClient: OkHttpClient = buildNetworkClient(AppHttp.client, networkSettings)
 
-    val httpClient: HttpClient = OkHttpHttpClient(okHttpClient)
+    /**
+     * 抓取链路统一入口。
+     *
+     * 外面套一层 [MirrorHttpClient]：`raw.githubusercontent.com` 在国内经常连不上，
+     * 直连超时后自动换 GitHub 镜像（聚合订阅、更新检查都吃这一层）。
+     * 非 GitHub 地址候选列表只有它自己，等于没有额外开销。
+     */
+    val httpClient: HttpClient = MirrorHttpClient(OkHttpHttpClient(okHttpClient))
 
     /**
      * 检查更新（SET-07）：读 GitHub 的 Latest Release 并与当前版本比。

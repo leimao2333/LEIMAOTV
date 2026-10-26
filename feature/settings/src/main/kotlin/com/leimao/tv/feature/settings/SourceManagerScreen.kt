@@ -62,6 +62,9 @@ import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.network.vod.VodFailure
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -470,8 +473,8 @@ fun SourceManagerScreen(
                     if (type == SourceType.LIVE && importer != null && looksLikeSourceBackupUrl(url)) {
                         when (val result = importer.importFrom(url.trim())) {
                             is BackupImportResult.Done -> {
-                                val results = result.summary.addedLiveIds.map { id -> refresher.refresh(id) }
-                                status = describeImport(result.summary, results)
+                                val results = refreshConcurrently(result.summary.addedLiveIds, refresher)
+                                status = describeImport(result.summary, results, result.viaMirror)
                                 reload()
                                 onSourcesChanged()
                             }
@@ -547,8 +550,8 @@ fun SourceManagerScreen(
                     busy = true
                     when (val result = importer.importFrom(url)) {
                         is BackupImportResult.Done -> {
-                            val results = result.summary.addedLiveIds.map { id -> refresher.refresh(id) }
-                            status = describeImport(result.summary, results)
+                            val results = refreshConcurrently(result.summary.addedLiveIds, refresher)
+                            status = describeImport(result.summary, results, result.viaMirror)
                             reload()
                             onSourcesChanged()
                         }
@@ -888,6 +891,24 @@ private fun summarize(results: List<RefreshResult>): String {
 }
 
 /**
+ * 并发刷新「刚导入的那批直播源」。
+ *
+ * 串行刷 6 条源要一分钟以上：每条都要建连 + 下载整份播放列表，而用户在导入框上
+ * 只看到一句「正在导入…」，体感就是「导入卡死了 / 超时了」（2026-10-26 实测）。
+ * 并发之后总耗时≈最慢的那一条，源与源之间本来就没有先后依赖。
+ *
+ * 失败不抛：单条源抓不到是常态（对方站点挂了），导入本身已经成功，
+ * 结果交给 [describeImport] 汇总成「成功 5 / 失败 1」。
+ */
+private suspend fun refreshConcurrently(
+    ids: List<Long>,
+    refresher: SourceRefresher,
+): List<RefreshResult> =
+    coroutineScope {
+        ids.map { id -> async { refresher.refresh(id) } }.awaitAll()
+    }
+
+/**
  * 导入结果 → 一句人话（SET-03 / SET-10）。
  *
  * 两条导入路径（本地文件、地址）共用这一句：同一份备份从哪儿来不影响用户想看到什么 ——
@@ -896,8 +917,11 @@ private fun summarize(results: List<RefreshResult>): String {
 internal fun describeImport(
     summary: SourceImportSummary,
     results: List<RefreshResult>,
+    viaMirror: String? = null,
 ): String =
     buildString {
+        // 直连 GitHub 超时、改走镜像时先说一句：不然用户会奇怪「为什么这次导入慢了几秒」
+        if (viaMirror != null) append("（直连超时，已走镜像 $viaMirror）")
         append("已从备份导入 ${summary.added} 个源")
         if (summary.skipped > 0) append("（${summary.skipped} 个地址已存在，跳过）")
         if (results.isNotEmpty()) append("；").append(summarize(results))

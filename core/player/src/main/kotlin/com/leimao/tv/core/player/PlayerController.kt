@@ -2,7 +2,9 @@ package com.leimao.tv.core.player
 
 import android.content.Context
 import android.view.View
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 播的是什么。
@@ -169,6 +171,16 @@ interface PlayerController {
     val state: StateFlow<PlaybackState>
 
     /**
+     * 加载统计（PLAY-12）：黑屏那几秒「到底在干什么」。
+     *
+     * 有默认实现，是因为**不是每个内核都能给出这些数**：libVLC 拿不到字节数与缓冲位置，
+     * stub 更是什么都没有。让它们返回 [LoadStats.None] 比强迫每个实现编造数字诚实得多 ——
+     * UI 对「没有数据」这件事本来就必须有兜底（见 `LoadStats.summary`）。
+     */
+    val loadStats: StateFlow<LoadStats>
+        get() = IDLE_LOAD_STATS
+
+    /**
      * 当前流里的音轨 / 字幕轨（PLAY-07）。
      *
      * 空表有两种意思：这条流没有可选轨道（直播大多数如此），或者还没解析到 manifest。
@@ -247,3 +259,12 @@ interface PlayerController {
 interface VideoSurfaceHost {
     fun createSurfaceView(context: Context): View
 }
+
+/**
+ * 所有「给不出加载统计」的内核共用的那一份。
+ *
+ * 不在 getter 里 `MutableStateFlow(LoadStats.None)`：那样每读一次就新建一个 flow，
+ * Compose 的 `collectAsState` 会跟着重新订阅，把「读个属性」变成每帧一次的对象分配。
+ */
+private val IDLE_LOAD_STATS: StateFlow<LoadStats> =
+    MutableStateFlow(LoadStats.None).asStateFlow()

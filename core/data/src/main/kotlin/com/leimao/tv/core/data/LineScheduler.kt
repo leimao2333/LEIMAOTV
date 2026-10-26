@@ -55,6 +55,61 @@ class LineScheduler(
     }
 
     /**
+     * **起播用**的排序：只读历史，一条网络请求都不发。
+     *
+     * 这是换台快慢的分水岭。旧做法（[orderLines]）在没有历史时会先并发探测每条线路，
+     * 单条预算 4 秒 —— 也就是说**第一次**看一个新频道，开播前白等最多 4 秒，
+     * 而这段时间屏幕上什么都没有（2026-10-26 真机实测：换台 2.7 秒才到 READY）。
+     *
+     * 探测本身不是没用，是**不该挡住这一次起播**：它的结论只影响「下次先试哪条」，
+     * 所以交给 [learnLines] 在后台跑，这次的顺序直接用历史（没有历史就保持源里的原序）。
+     */
+    suspend fun orderByHistory(
+        channelId: Long,
+        lines: List<String>,
+    ): List<String> {
+        if (lines.size <= 1) return lines
+        val history = quality.byChannel(channelId)
+        return if (history.isEmpty()) lines else rankByHistory(lines, history)
+    }
+
+    /**
+     * 后台探测并回写线路质量：只为**下一次**换台攒依据，绝不阻塞这一次。
+     *
+     * 只记成功、不记失败，因为探测方式（把 URL 当普通文件拉）对直播流天生不公平：
+     * 裸 TS 流永远不会「下载完」，4 秒一到就被判超时 —— 那是流媒体的正常形态，
+     * 不是坏线路。把这种情况记成失败，会让好线路越用越靠后，比不探测更糟。
+     *
+     * 于是这里只做一件事：**能快速响应（m3u8 之类）的线路记一次成功，排到前面去**；
+     * 其余的保持中性。真正的失败判定留给播放链路（[ChannelLineQualityRepository.recordFailure]），
+     * 那里有真实的结果可依据。
+     */
+    suspend fun learnLines(
+        channelId: Long,
+        lines: List<String>,
+        headers: RequestHeaders = RequestHeaders.NONE,
+    ) {
+        if (lines.size <= 1) return
+        val gate = Semaphore(PROBE_CONCURRENCY)
+        val latencies =
+            coroutineScope {
+                lines.map { url ->
+                    async {
+                        url to
+                            withTimeoutOrNull(PROBE_TIMEOUT_MS) {
+                                gate.withPermit { probe(url, headers) }
+                            }
+                    }
+                }.awaitAll()
+            }
+        val now = System.currentTimeMillis()
+        latencies.forEach { (url, latency) ->
+            // latency == null 说明超时或不可达：两种都不记，理由见上面的注释
+            if (latency != null) quality.recordSuccess(channelId, url, now)
+        }
+    }
+
+    /**
      * 按历史质量排序（纯函数，不碰网络）。
      *
      * 排序键 = 可信度分数（成功 - 失败），同分时「最近用过」的靠前。

@@ -48,6 +48,15 @@ class FallbackPlayerController(
     private val _tracks = MutableStateFlow<List<PlaybackTrack>>(emptyList())
     override val tracks: StateFlow<List<PlaybackTrack>> = _tracks.asStateFlow()
 
+    /**
+     * 加载统计（PLAY-12）在这里**镜像**当前内核的那一份。
+     *
+     * 不做成 `get() = active.loadStats`：切内核时 flow 实例会换掉，而 Compose 已经
+     * 订阅了旧的 —— 不重新订阅就永远收不到新内核的数据（表现是浮层一直停在 0）。
+     */
+    private val _loadStats = MutableStateFlow(LoadStats.None)
+    override val loadStats: StateFlow<LoadStats> = _loadStats.asStateFlow()
+
     /** 当前正在服务的那个内核；切内核就切它 */
     private var active: PlayerController = primary
 
@@ -76,6 +85,11 @@ class FallbackPlayerController(
                     scope.launch {
                         created.state.collect { s -> onFallbackState(s) }
                     }
+                scope.launch {
+                    created.loadStats.collect { stats ->
+                        if (active === created) _loadStats.value = stats
+                    }
+                }
             }
 
     init {
@@ -83,6 +97,11 @@ class FallbackPlayerController(
             scope.launch {
                 primary.state.collect { s -> onPrimaryState(s) }
             }
+        scope.launch {
+            primary.loadStats.collect { stats ->
+                if (active === primary) _loadStats.value = stats
+            }
+        }
     }
 
     override fun createSurfaceView(context: Context): View =

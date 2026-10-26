@@ -1,6 +1,7 @@
 package com.leimao.tv.feature.search
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -196,6 +197,9 @@ fun SearchScreen(
     }
 }
 
+/** 候选词行高：固定占位，避免候选出现/消失时整块键盘跳动 */
+private val CANDIDATE_ROW_HEIGHT = 44.dp
+
 /**
  * 中文候选词（SEARCH-06）。
  *
@@ -203,9 +207,6 @@ fun SearchScreen(
  * 打完 `hnws` 屏幕上一个中文都没有，那这个键盘就等于在盲打。
  * 这里把命中的中文名横排出来，按 OK 直接换成中文词去搜。
  */
-
-/** 候选词行高：固定占位，避免候选出现/消失时整块键盘跳动 */
-private val CANDIDATE_ROW_HEIGHT = 44.dp
 
 @Composable
 private fun CandidateRow(
@@ -260,6 +261,38 @@ private fun SearchField(
 ) {
     var focused by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    if (!showIme) {
+        // 自绘键盘展开时**不渲染 BasicTextField**，只做显示。
+        //
+        // 原因：只读的 BasicTextField 仍然会把方向键拿去移光标 —— 焦点一步也走不出去，
+        // 用户「卡在搜索栏」（2026-10-26 实测）。换成普通可聚焦 Box，方向键照常移交焦点，
+        // 打字走自绘键盘那条路（不经过输入法）
+        Box(
+            modifier =
+                modifier
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { focused = it.isFocused }
+                    .focusable()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                    .focusRing(focused)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = query.ifEmpty { "片名 / 频道名" },
+                style = TvText.current.title,
+                color =
+                    if (query.isEmpty()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                maxLines = 1,
+            )
+        }
+        return
+    }
 
     BasicTextField(
         value = query,

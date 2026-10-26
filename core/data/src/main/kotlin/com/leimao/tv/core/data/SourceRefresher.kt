@@ -40,6 +40,14 @@ enum class RefreshFailure {
     /** 抓到了内容，但一条频道都没解析出来 */
     NO_CHANNELS,
 
+    /**
+     * 抓到的是一份**源备份**（`{ "sources": [...] }`），不是播放列表。
+     *
+     * 单独立一个原因而不是并进 [NO_CHANNELS]：用户贴错地址时，前者能直接告诉他
+     * 「该用哪个入口」，后者只会说「内容不是播放列表」，等于让人自己猜。
+     */
+    BACKUP_JSON,
+
     /** 源已经被删了（并发操作） */
     SOURCE_MISSING,
 }
@@ -132,6 +140,14 @@ class SourceRefresher(
         text: String,
         fromNetwork: Boolean,
     ): RefreshResult {
+        // 先认「源备份」，再解析。顺序不能反：这类 JSON 里既有逗号又有 http 地址，
+        // TXT 解析器会把整行硬拆成一条「名称,地址」，结果是**看起来成功了**、
+        // 实际多出一条永远播不了的频道（实测：`{"version":1,"sources":[…]}` 就是这么过的）
+        if (looksLikeSourceBackup(text)) {
+            sources.markRefreshed(source.id, clock(), NOTE_BACKUP_JSON)
+            return RefreshResult.Failed(source.id, RefreshFailure.BACKUP_JSON)
+        }
+
         val parsed: ParsedPlaylist = Playlists.parse(text)
         if (parsed.isEmpty) {
             // 「抓到了 HTML 错误页」「文件是空的」都会走到这里：这不是网络问题，
@@ -164,6 +180,12 @@ class SourceRefresher(
     private fun noteFor(channelCount: Int, fromNetwork: Boolean): String =
         if (fromNetwork) "$channelCount 个频道" else "$channelCount 个频道（本地文件）"
 
+    /** 内容像不像一份源备份：JSON 对象、有 `sources` 数组、条目里有 `url` */
+    private fun looksLikeSourceBackup(text: String): Boolean {
+        val head = text.trimStart()
+        return head.startsWith("{") && head.contains("\"sources\"") && head.contains("\"url\"")
+    }
+
     private fun describe(failure: FetchOutcome.Failure): String =
         when (failure.kind) {
             FetchErrorKind.TIMEOUT -> NOTE_TIMEOUT
@@ -176,6 +198,7 @@ class SourceRefresher(
         const val NOTE_TIMEOUT = "超时：源没有在规定时间内响应"
         const val NOTE_EMPTY = "抓到的内容是空的"
         const val NOTE_NO_CHANNELS = "解析失败：内容不是 M3U / TXT 播放列表"
+        const val NOTE_BACKUP_JSON = "解析失败：这是源备份（JSON），请用「从地址导入备份」导入"
     }
 }
 

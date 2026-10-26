@@ -14,7 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,9 +43,8 @@ fun ImportBackupDialog(
     onConfirm: (url: String) -> Unit,
 ) {
     var url by rememberSaveable { mutableStateOf("") }
+    // 只用于「地址没填时把焦点送回输入框」；初始焦点靠布局顺序（输入框是第一个可聚焦元素）
     val urlFieldFocus = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) { urlFieldFocus.requestFocus() }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(

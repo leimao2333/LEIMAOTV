@@ -438,16 +438,36 @@ fun SourceManagerScreen(
     if (adding) {
         AddSourceDialog(
             onDismiss = { adding = false },
-            onConfirm = { type, name, url, userAgent, referer, basicUser, basicPass ->
+            onConfirm = { type, url, userAgent, referer, basicUser, basicPass ->
                 adding = false
                 scope.launch {
                     busy = true
+                    // 贴进来的是**源备份**（`.json`）时直接按备份导入（SET-10）。
+                    // 不这么做的话会先建一条源、再去当播放列表解析，最后报「内容不是
+                    // M3U / TXT 播放列表」—— 用户只会以为自己贴错了地址。
+                    val importer = backupImporter
+                    if (type == SourceType.LIVE && importer != null && looksLikeSourceBackupUrl(url)) {
+                        when (val result = importer.importFrom(url.trim())) {
+                            is BackupImportResult.Done -> {
+                                val results = result.summary.addedLiveIds.map { id -> refresher.refresh(id) }
+                                status = describeImport(result.summary, results)
+                                reload()
+                                onSourcesChanged()
+                            }
+
+                            is BackupImportResult.Failed -> status = "导入失败：${result.detail}"
+                        }
+                        busy = false
+                        return@launch
+                    }
+
                     val id =
                         sourceRepository.add(
                             NewSource(
                                 type = type,
-                                // 影视源的默认名与直播分开：源管理页一眼能看出这条是干什么的
-                                name = name.ifBlank { if (type == SourceType.VOD) "影视源" else "订阅源" },
+                                // 名字由地址自动生成（SET-03）：让用户在遥控器上敲一个
+                                // 「订阅源」既费劲又没有信息量，主机名反而一眼能认出是哪条
+                                name = sourceNameFromUrl(url, type),
                                 url = url.trim(),
                                 userAgent = userAgent.takeIf { it.isNotBlank() },
                                 referer = referer.takeIf { it.isNotBlank() },
@@ -798,6 +818,7 @@ internal fun describe(result: RefreshResult): String =
                 RefreshFailure.NETWORK -> "刷新失败：网络不可达（${result.detail ?: "无法连接"}）"
                 RefreshFailure.EMPTY -> "刷新失败：抓到的内容是空的"
                 RefreshFailure.NO_CHANNELS -> "刷新失败：内容不是 M3U / TXT 播放列表"
+                RefreshFailure.BACKUP_JSON -> "这个地址是源备份（JSON），不是播放列表 —— 用「从地址导入备份」导入它"
                 RefreshFailure.SOURCE_MISSING -> "这个源已经不存在了"
             }
     }

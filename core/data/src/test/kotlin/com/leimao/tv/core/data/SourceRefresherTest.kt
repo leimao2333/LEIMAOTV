@@ -57,6 +57,21 @@ class SourceRefresherTest {
         }
 
     @Test
+    fun `贴成源备份时给出专门的失败原因`() =
+        runTest {
+            sources.addSource(Source(id = 1, name = "示例源", url = "https://example.com/sources.json"))
+            val backup =
+                """{"version":1,"sources":[{"type":"LIVE","name":"示例","url":"https://example.com/a.m3u"}]}"""
+
+            val result = refresher(FakeHttp(FetchOutcome.Success(backup))).refresh(1)
+
+            // 「内容不是播放列表」会让人以为自己贴错了地址；这条能直接告诉他该用哪个入口
+            assertEquals(RefreshFailure.BACKUP_JSON, (result as RefreshResult.Failed).reason)
+            assertTrue(sources.noteOf(1)!!.contains("源备份"))
+            assertTrue(writer.calls.isEmpty())
+        }
+
+    @Test
     fun `成功刷新把合并后的频道交给写入层`() =
         runTest {
             sources.addSource(Source(id = 1, name = "示例源", url = "https://example.com/a.m3u"))

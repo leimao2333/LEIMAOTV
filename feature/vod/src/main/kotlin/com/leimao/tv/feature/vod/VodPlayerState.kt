@@ -91,6 +91,16 @@ data class VodPlayerUiState(
                 else -> "正在缓冲…"
             }
 
+    /** 浮层下面那行：有备用线路时先说清正在试第几条，再给加载数据 */
+    val loadingDetail: String
+        get() {
+            val line =
+                (playback as? PlaybackState.Preparing)?.let {
+                    if (it.lineCount > 1) "第 ${it.lineIndex + 1}/${it.lineCount} 条线路" else null
+                }
+            return listOfNotNull(line, loadStats.summary()).joinToString(" · ")
+        }
+
     /** 有进度才能画进度条。直播或时长未知时为 false */
     val seekable: Boolean get() = durationMs > 0L
 

@@ -183,6 +183,22 @@ data class PlayerUiState(
     val loadingTitle: String
         get() = if (loadStats.bytesLoaded <= 0L) "正在连接…" else "正在缓冲…"
 
+    /**
+     * 浮层下面那行数据。
+     *
+     * 有多个线路时先说「第几条」：一条坏线路要等到 15 秒超时才换下一条，
+     * 用户看着同一个转圈十几秒会以为死了 —— 告诉他「正在试第 2/5 条」，
+     * 至少知道它还在往前走。
+     */
+    val loadingDetail: String
+        get() {
+            val line =
+                (playback as? PlaybackState.Preparing)?.let {
+                    if (it.lineCount > 1) "第 ${it.lineIndex + 1}/${it.lineCount} 条线路" else null
+                }
+            return listOfNotNull(line, loadStats.summary()).joinToString(" · ")
+        }
+
     val audioTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.AUDIO }
 
     val textTracks: List<PlaybackTrack> get() = tracks.filter { it.kind == TrackKind.TEXT }
@@ -456,7 +472,7 @@ fun PlayerScreen(
         BufferingOverlay(
             visible = rememberBufferingVisible(state.showLoading),
             title = state.loadingTitle,
-            detail = state.loadStats.summary(),
+            detail = state.loadingDetail,
             modifier = Modifier.align(Alignment.Center),
         )
 

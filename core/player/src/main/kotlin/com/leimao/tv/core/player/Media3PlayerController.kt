@@ -409,6 +409,14 @@ class Media3PlayerController(
         val current = request ?: return
         val lines = current.normalizedLines
 
+        // 「等了 20 秒一个字节都没来」不重试同一条线：同一个地址再等 20 秒也是同样的结果，
+        // 只是把用户多关在转圈里 80 秒（3 次重试 + 本轮）。直接交给下一条线路。
+        // 只有**传输层真的报错**（IO/HTTP）才值得原地重试 —— 那种多半是瞬时抖动。
+        val nothingArrived = _loadStats.value.bytesLoaded <= 0L
+        if (reason == REASON_TIMEOUT && nothingArrived) {
+            retriesLeft = 0
+        }
+
         if (retriesLeft > 0) {
             retriesLeft--
             startCurrentLine()
@@ -664,6 +672,6 @@ class Media3PlayerController(
          * 连接超时 10s 已经用掉一半，留 20s 是为了「慢但能通」的源也有机会出画，
          * 同时保证最坏情况下用户 40 秒内一定能看到失败出口（两条线路各 20s）。
          */
-        private const val LINE_BUDGET_MS = 20_000L
+        private const val LINE_BUDGET_MS = 15_000L
     }
 }

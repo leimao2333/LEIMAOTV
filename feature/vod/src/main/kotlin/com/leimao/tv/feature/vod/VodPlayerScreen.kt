@@ -223,7 +223,7 @@ fun VodPlayerScreen(
             BufferingOverlay(
                 visible = rememberBufferingVisible(state.showLoading),
                 title = state.loadingTitle,
-                detail = state.note ?: state.loadStats.summary(),
+                detail = state.note ?: state.loadingDetail,
                 modifier = Modifier.align(Alignment.Center),
             )
         }

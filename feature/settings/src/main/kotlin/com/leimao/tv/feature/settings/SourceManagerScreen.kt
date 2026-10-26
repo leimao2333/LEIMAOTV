@@ -128,6 +128,15 @@ fun SourceManagerScreen(
     /** 健康状态按 sourceId 索引，来自会话缓存（SET-09） */
     val healthEntries by healthStore.entries.collectAsState()
 
+    /**
+     * 有弹层开着时**不组合底层内容**（SET-12）。
+     *
+     * 树内弹层没有窗口边界，方向键能走到后面的按钮上；锁焦点最可靠的办法不是拦截按键，
+     * 而是「后面根本没有可聚焦的东西」。副作用是遮罩后面看不到列表 —— 可接受：
+     * 弹层本来就该独占注意力，比「焦点跑到看不见的按钮上」好得多。
+     */
+    val modalOpen = adding || addingEpg || importingBackup
+
     val firstActionFocus = remember { FocusRequester() }
 
     suspend fun reload() {
@@ -249,193 +258,197 @@ fun SourceManagerScreen(
             }
         }
 
-    Column(
-        modifier =
-            modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
-    ) {
-        SafeAreaContainer {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Text(
-                    text = if (isFirstRun) "添加第一份订阅源" else "源管理",
-                    style = TvText.current.display,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    // 说清边界：应用不提供任何源，用户得用自己的（RULES §2.3）
-                    text = "本应用不提供任何频道源，请添加你有权访问的订阅地址（M3U / TXT）。",
-                    style = TvText.current.hint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // horizontalScroll：六个按钮在窄屏 / 大字号下放不下一行，不加的话最后一张
-                // 卡片会被挤压换行、撑高整行，把列表顶出屏幕（2026-10-24 模拟器实测抓出）
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    FocusableCard(
-                        onClick = { adding = true },
-                        modifier = Modifier.focusRequester(firstActionFocus),
-                    ) {
-                        Text(text = "添加订阅地址", style = TvText.current.label)
-                    }
-                    FocusableCard(onClick = { pickFile.launch(arrayOf("*/*")) }) {
-                        Text(text = "导入本地文件", style = TvText.current.label)
-                    }
-                    FocusableCard(
-                        onClick = {
-                            // 同样不禁用按钮，只是忙时不重复触发（连按两下会并发刷两轮）
-                            if (!busy) {
-                                scope.launch {
-                                    busy = true
-                                    val results = refresher.refreshAll()
-                                    status = summarize(results)
-                                    busy = false
-                                    reload()
-                                    if (results.any { it is RefreshResult.Done }) onSourcesChanged()
-                                }
-                            }
-                        },
-                    ) {
-                        Text(text = "全部刷新", style = TvText.current.label)
-                    }
-                    if (healthChecker != null) {
-                        FocusableCard(
-                            onClick = {
-                                // 忙时不是「禁用」，而是「按下不做事」：禁用会让焦点从这颗按钮上
-                                // 消失、跳回页面第一个按钮（RULES §6.2 第 2 条：焦点不许丢）。
-                                // 探测本身要几秒，用户很可能连按两下。
-                                if (!busy) {
-                                    scope.launch {
-                                        busy = true
-                                        // 状态行先给出「在查」的明确提示：并发探测也要几秒，
-                                        // 不说明的话用户只会觉得按钮按了没反应
-                                        status = "正在逐条探测可用性…"
-                                        val healths = healthChecker.checkAll()
-                                        // 结论沉淀到卡片上（SET-09）：报告只闪一次的毛病在这里收口
-                                        healthStore.record(healths)
-                                        status = healthSummary(healths)
-                                        busy = false
-                                    }
-                                }
-                            },
-                        ) {
-                            Text(text = "健康检查", style = TvText.current.label)
-                        }
-                    }
-                    if (epgImporter != null) {
-                        FocusableCard(onClick = { pickEpg.launch(arrayOf("*/*")) }) {
-                            Text(text = "导入节目单", style = TvText.current.label)
-                        }
-                    }
-                    if (epgImporter != null) {
-                        FocusableCard(onClick = { addingEpg = true }) {
-                            Text(text = "节目单订阅地址", style = TvText.current.label)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FocusableCard(onClick = { createJson.launch("leimao-sources.json") }) {
-                        Text(text = "导出备份", style = TvText.current.label)
-                    }
-                    FocusableCard(onClick = { pickJson.launch(arrayOf("application/json", "*/*")) }) {
-                        Text(text = "导入备份", style = TvText.current.label)
-                    }
-                    if (backupImporter != null) {
-                        FocusableCard(onClick = { importingBackup = true }) {
-                            Text(text = "从地址导入备份", style = TvText.current.label)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                StatusLine(status = status, busy = busy)
-                epgSummary?.let { summary ->
-                    Text(
-                        text =
-                            if (summary.programmeCount > 0) {
-                                "节目单：${summary.channelCount} 个频道 · ${summary.programmeCount} 档节目"
-                            } else {
-                                "节目单：尚未导入（支持 XMLTV 的 .xml）"
-                            },
-                        style = TvText.current.hint,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                epgSourceUrl?.let { url ->
-                    Text(
-                        text = "节目单订阅：${maskUrl(url)} · 每天自动刷新",
-                        style = TvText.current.hint,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                if (sources.isEmpty() && !busy) {
-                    // weight(1f) 而不是 fillMaxSize：Column 里非 weight 子项会拿满整个父高度，
-                    // 排在头部内容之后就被顶出屏幕外，列表 / 空态整个看不见
-                    Box(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentAlignment = Alignment.Center,
-                    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (!modalOpen) {
+            Column(
+                modifier =
+                    modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background),
+            ) {
+                SafeAreaContainer {
+                    Column(modifier = Modifier.fillMaxSize()) {
                         Text(
-                            text = "还没有订阅源",
-                            style = TvText.current.title,
+                            text = if (isFirstRun) "添加第一份订阅源" else "源管理",
+                            style = TvText.current.display,
+                            color = MaterialTheme.colorScheme.onBackground,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            // 说清边界：应用不提供任何源，用户得用自己的（RULES §2.3）
+                            text = "本应用不提供任何频道源，请添加你有权访问的订阅地址（M3U / TXT）。",
+                            style = TvText.current.hint,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(items = sources, key = { it.id }) { source ->
-                            SourceRow(
-                                source = source,
-                                entryCount = entryCounts[source.id],
-                                health = healthEntries[source.id],
-                                busy = busy,
-                                isFirst = sources.first().id == source.id,
-                                isLast = sources.last().id == source.id,
-                                onRefresh = {
-                                    scope.launch {
-                                        busy = true
-                                        val result = refresher.refresh(source.id)
-                                        status = describe(result)
-                                        busy = false
-                                        reload()
-                                        if (result is RefreshResult.Done) onSourcesChanged()
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // horizontalScroll：六个按钮在窄屏 / 大字号下放不下一行，不加的话最后一张
+                        // 卡片会被挤压换行、撑高整行，把列表顶出屏幕（2026-10-24 模拟器实测抓出）
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            FocusableCard(
+                                onClick = { adding = true },
+                                modifier = Modifier.focusRequester(firstActionFocus),
+                            ) {
+                                Text(text = "添加订阅地址", style = TvText.current.label)
+                            }
+                            FocusableCard(onClick = { pickFile.launch(arrayOf("*/*")) }) {
+                                Text(text = "导入本地文件", style = TvText.current.label)
+                            }
+                            FocusableCard(
+                                onClick = {
+                                    // 同样不禁用按钮，只是忙时不重复触发（连按两下会并发刷两轮）
+                                    if (!busy) {
+                                        scope.launch {
+                                            busy = true
+                                            val results = refresher.refreshAll()
+                                            status = summarize(results)
+                                            busy = false
+                                            reload()
+                                            if (results.any { it is RefreshResult.Done }) onSourcesChanged()
+                                        }
                                     }
                                 },
-                                onMove = { direction ->
-                                    scope.launch {
-                                        sourceRepository.move(source.id, direction)
-                                        reload()
-                                    }
-                                },
-                                onToggle = {
-                                    scope.launch {
-                                        sourceRepository.setEnabled(source.id, !source.enabled)
-                                        reload()
-                                    }
-                                },
-                                onDelete = {
-                                    scope.launch {
-                                        sourceRepository.delete(source.id)
-                                        // 同 id 被复用时不该带着上一条源的体检结论（SET-09）
-                                        healthStore.forget(source.id)
-                                        status = "已删除「${source.name}」及其下的频道"
-                                        reload()
-                                        onSourcesChanged()
-                                    }
-                                },
+                            ) {
+                                Text(text = "全部刷新", style = TvText.current.label)
+                            }
+                            if (healthChecker != null) {
+                                FocusableCard(
+                                    onClick = {
+                                        // 忙时不是「禁用」，而是「按下不做事」：禁用会让焦点从这颗按钮上
+                                        // 消失、跳回页面第一个按钮（RULES §6.2 第 2 条：焦点不许丢）。
+                                        // 探测本身要几秒，用户很可能连按两下。
+                                        if (!busy) {
+                                            scope.launch {
+                                                busy = true
+                                                // 状态行先给出「在查」的明确提示：并发探测也要几秒，
+                                                // 不说明的话用户只会觉得按钮按了没反应
+                                                status = "正在逐条探测可用性…"
+                                                val healths = healthChecker.checkAll()
+                                                // 结论沉淀到卡片上（SET-09）：报告只闪一次的毛病在这里收口
+                                                healthStore.record(healths)
+                                                status = healthSummary(healths)
+                                                busy = false
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Text(text = "健康检查", style = TvText.current.label)
+                                }
+                            }
+                            if (epgImporter != null) {
+                                FocusableCard(onClick = { pickEpg.launch(arrayOf("*/*")) }) {
+                                    Text(text = "导入节目单", style = TvText.current.label)
+                                }
+                            }
+                            if (epgImporter != null) {
+                                FocusableCard(onClick = { addingEpg = true }) {
+                                    Text(text = "节目单订阅地址", style = TvText.current.label)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FocusableCard(onClick = { createJson.launch("leimao-sources.json") }) {
+                                Text(text = "导出备份", style = TvText.current.label)
+                            }
+                            FocusableCard(onClick = { pickJson.launch(arrayOf("application/json", "*/*")) }) {
+                                Text(text = "导入备份", style = TvText.current.label)
+                            }
+                            if (backupImporter != null) {
+                                FocusableCard(onClick = { importingBackup = true }) {
+                                    Text(text = "从地址导入备份", style = TvText.current.label)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        StatusLine(status = status, busy = busy)
+                        epgSummary?.let { summary ->
+                            Text(
+                                text =
+                                    if (summary.programmeCount > 0) {
+                                        "节目单：${summary.channelCount} 个频道 · ${summary.programmeCount} 档节目"
+                                    } else {
+                                        "节目单：尚未导入（支持 XMLTV 的 .xml）"
+                                    },
+                                style = TvText.current.hint,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        epgSourceUrl?.let { url ->
+                            Text(
+                                text = "节目单订阅：${maskUrl(url)} · 每天自动刷新",
+                                style = TvText.current.hint,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (sources.isEmpty() && !busy) {
+                            // weight(1f) 而不是 fillMaxSize：Column 里非 weight 子项会拿满整个父高度，
+                            // 排在头部内容之后就被顶出屏幕外，列表 / 空态整个看不见
+                            Box(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "还没有订阅源",
+                                    style = TvText.current.title,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(items = sources, key = { it.id }) { source ->
+                                    SourceRow(
+                                        source = source,
+                                        entryCount = entryCounts[source.id],
+                                        health = healthEntries[source.id],
+                                        busy = busy,
+                                        isFirst = sources.first().id == source.id,
+                                        isLast = sources.last().id == source.id,
+                                        onRefresh = {
+                                            scope.launch {
+                                                busy = true
+                                                val result = refresher.refresh(source.id)
+                                                status = describe(result)
+                                                busy = false
+                                                reload()
+                                                if (result is RefreshResult.Done) onSourcesChanged()
+                                            }
+                                        },
+                                        onMove = { direction ->
+                                            scope.launch {
+                                                sourceRepository.move(source.id, direction)
+                                                reload()
+                                            }
+                                        },
+                                        onToggle = {
+                                            scope.launch {
+                                                sourceRepository.setEnabled(source.id, !source.enabled)
+                                                reload()
+                                            }
+                                        },
+                                        onDelete = {
+                                            scope.launch {
+                                                sourceRepository.delete(source.id)
+                                                // 同 id 被复用时不该带着上一条源的体检结论（SET-09）
+                                                healthStore.forget(source.id)
+                                                status = "已删除「${source.name}」及其下的频道"
+                                                reload()
+                                                onSourcesChanged()
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -548,8 +561,15 @@ fun SourceManagerScreen(
         )
     }
 
-    // 返回键：首启时退出，其他时候回上一页（由调用方决定，这里只透传）
-    BackHandler { onBack() }
+    // 返回键：有弹层先关弹层（树内弹层没有窗口，BACK 不会自动关它），否则交给调用方
+    BackHandler {
+        when {
+            adding -> adding = false
+            addingEpg -> addingEpg = false
+            importingBackup -> importingBackup = false
+            else -> onBack()
+        }
+    }
 }
 
 @Composable

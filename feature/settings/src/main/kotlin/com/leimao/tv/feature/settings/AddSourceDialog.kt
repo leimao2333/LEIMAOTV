@@ -66,6 +66,14 @@ fun AddSourceDialog(
     // 只用于「地址没填时把焦点送回输入框」；初始焦点靠布局顺序（输入框是第一个可聚焦元素）
     val urlFieldFocus = remember { FocusRequester() }
 
+    // 弹层打开时底层内容整棵被移除，焦点系统要先把焦点「搬」到新树里；
+    // 这个搬迁完成前请求的焦点会被覆盖掉，第一次按键则被用来完成搬迁 ——
+    // 表现就是「打开后第一次按 OK 没反应」。给一小段延时让搬迁落定（实测一帧不够）
+    LaunchedEffect(Unit) {
+        delay(120)
+        urlFieldFocus.requestFocus()
+    }
+
     // 弹层刚出现时，窗口自身的聚焦会吃掉第一次按键（遥控器按 OK 没反应，要按第二次）。
     // 等窗口稳定后再把焦点"坐实"一次，第一次按键就能直接落到输入框上
     LaunchedEffect(Unit) {
@@ -98,7 +106,7 @@ fun AddSourceDialog(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "地址应当是你能合法访问的订阅源。直播填 M3U / M3U8 / TXT；影视填苹果CMS 采集接口。",
+                text = "直播填 M3U / TXT；影视填苹果CMS 采集接口。",
                 style = TvText.current.hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

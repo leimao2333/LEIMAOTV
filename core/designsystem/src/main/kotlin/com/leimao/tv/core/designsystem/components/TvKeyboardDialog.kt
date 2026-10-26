@@ -28,8 +28,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
@@ -75,11 +75,16 @@ fun TvKeyboardDialog(
     // 用 Popup 而不是 Dialog：键盘经常是从「添加源 / 节目单」这些**弹层里**唤起的，
     // Dialog 套 Dialog 时新窗口可能被压在下面（实测：键盘开了但看不见，按键还能打进去）。
     // Popup 挂在调用方所在的窗口里，一定盖在它上面。
-    Popup(
+    Dialog(
         // 返回键收起键盘（不传 onDismissRequest 的话 BACK 什么都不做，用户会被困在键盘里）
         onDismissRequest = onDone,
-        alignment = Alignment.BottomCenter,
-        properties = PopupProperties(focusable = true),
+        properties =
+            DialogProperties(
+                usePlatformDefaultWidth = false,
+                // 电视上没有「点外面关闭」：留着它，打开键盘的那一次按键会把刚出现的键盘关掉，
+                // 表现就是「第一次按 OK 没反应」。只保留返回键关闭
+                dismissOnClickOutside = false,
+            ),
     ) {
         Box(
             modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)),

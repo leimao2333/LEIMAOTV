@@ -93,7 +93,9 @@ fun TvTextField(
                     // 实测只靠 clickable 时 OK 不触发（部分版本/焦点链下会被吞），
                     // 这里显式接一次，重复触发也无害（都是把 editing 置 true）
                     .onKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyUp && event.key in OPEN_KEYS) {
+                        // KeyDown 与 KeyUp 都接：弹层刚出现时，第一次按键的 KeyUp 会被
+                        // 焦点系统吃掉（实测「第一次按 OK 没反应」），只等 KeyUp 就等于漏掉这一下
+                        if (event.key in OPEN_KEYS && event.type in setOf(KeyEventType.KeyDown, KeyEventType.KeyUp)) {
                             editing = true
                             true
                         } else {

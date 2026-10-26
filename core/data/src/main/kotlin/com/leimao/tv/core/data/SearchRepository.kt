@@ -67,6 +67,13 @@ class SearchRepository(
      * `hunan` / `hnws` →「湖南卫视」。没给就退化成只按名字搜。
      */
     private val pinyin: PinyinTable = PinyinTable.EMPTY,
+    /**
+     * 输入法候选（SET-11）：打 `wo` 出「我」。
+     *
+     * 与 [pinyin] 是两件事：那个回答「这个名字像不像你打的拼音」，
+     * 这个回答「你在打哪个字」。候选行先放输入法候选，再放名字命中。
+     */
+    private val ime: PinyinIme = PinyinIme.EMPTY,
 ) {
     /**
      * 发起一次搜索。[scope] 决定搜哪些库、结果要不要过滤：
@@ -172,23 +179,15 @@ class SearchRepository(
 
         val out = LinkedHashSet<String>()
         if (keyword.all { it.code < 128 && it.isLetterOrDigit() }) {
-            // 字母查询：频道名与影视片名都按拼音过一遍（全拼 hunan / 简写 hnws 都命中）
-            channels
-                .enabledWithSource()
-                .asSequence()
-                .filter { pinyin.matches(it.channel.name, keyword) }
-                .map { it.channel.name }
-                .forEach { if (out.size < limit) out.add(it) }
+            // 先给**输入法候选**：用户打 `wo` 想看的是「我」，不是「哪个台名带 wo」
+            ime.candidates(keyword, limit).forEach { if (out.size < limit) out.add(it) }
+
+            // 再补名字命中：打 `hnws` 时输入法给不出词，这里出「湖南卫视」
             if (out.size < limit) {
-                media
-                    .titles()
-                    .asSequence()
-                    // 候选词与结果同守白名单：直播板块提示「短剧搞笑社」却搜不出它，
-                    // 比不提示更误导（2026-10-25 验收实测）
-                    .filter { ContentType.valueOf(it.type) in allowedTypesFor(scope) }
-                    .filter { pinyin.matches(it.text, keyword) }
-                    .map { it.text }
-                    .forEach { if (out.size < limit) out.add(it) }
+                channelNameCandidates(keyword, limit, out)
+            }
+            if (out.size < limit) {
+                mediaNameCandidates(keyword, limit, out, scope, allowedTypesFor(scope))
             }
         } else {
             // 中文查询（系统输入法打出来的）：直接拿名字里含这个词的
@@ -198,15 +197,38 @@ class SearchRepository(
                 .map { it.channel.name }
                 .forEach { if (out.size < limit) out.add(it) }
         }
-        if (out.size < limit) {
-            media
-                .search(keyword)
-                .asSequence()
-                .filter { it.type in allowedTypesFor(scope) }
-                .map { it.name }
-                .forEach { if (out.size < limit) out.add(it) }
-        }
         return out.toList()
+    }
+
+    /** 频道名命中 → 候选（拼音全拼 / 简写 / 混拼都算） */
+    private suspend fun channelNameCandidates(
+        keyword: String,
+        limit: Int,
+        out: MutableSet<String>,
+    ) {
+        channels
+            .enabledWithSource()
+            .asSequence()
+            .filter { pinyin.matches(it.channel.name, keyword) }
+            .map { it.channel.name }
+            .forEach { if (out.size < limit) out.add(it) }
+    }
+
+    /** 影视片名命中 → 候选（与结果同守白名单：提示了却搜不出，比不提示更误导） */
+    private suspend fun mediaNameCandidates(
+        keyword: String,
+        limit: Int,
+        out: MutableSet<String>,
+        scope: SearchScope,
+        allowedTypes: Set<ContentType>,
+    ) {
+        media
+            .titles()
+            .asSequence()
+            .filter { ContentType.valueOf(it.type) in allowedTypes }
+            .filter { pinyin.matches(it.text, keyword) }
+            .map { it.text }
+            .forEach { if (out.size < limit) out.add(it) }
     }
 
     /**

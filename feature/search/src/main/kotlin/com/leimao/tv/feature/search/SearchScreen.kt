@@ -137,14 +137,21 @@ fun SearchScreen(
             overflow = TextOverflow.Ellipsis,
         )
 
+        // 候选词紧贴输入框、在键盘**上面**：短屏（411dp）上放在键盘下面会被挤出可视区，
+        // 用户打完字什么提示都看不到 —— 这正是「写半天没有提示词」的直接原因。
+        //
+        // 高度**固定**：候选来了又走时，键盘不能跟着上下跳 —— 一跳，手指/方向键就落在别的键上
+        // （实测：打 `bh` 有候选、再打一个字没候选，整块键盘弹起一行，后面全按错）。
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(modifier = Modifier.fillMaxWidth().height(CANDIDATE_ROW_HEIGHT)) {
+            if (state.candidates.isNotEmpty()) {
+                CandidateRow(candidates = state.candidates, onSelect = onSelectCandidate)
+            }
+        }
+
         if (keypadVisible) {
             Spacer(modifier = Modifier.height(10.dp))
             TvKeypad(query = state.query, onQueryChange = onQueryChange)
-        }
-
-        if (state.candidates.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            CandidateRow(candidates = state.candidates, onSelect = onSelectCandidate)
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -191,6 +198,10 @@ fun SearchScreen(
  * 打完 `hnws` 屏幕上一个中文都没有，那这个键盘就等于在盲打。
  * 这里把命中的中文名横排出来，按 OK 直接换成中文词去搜。
  */
+
+/** 候选词行高：固定占位，避免候选出现/消失时整块键盘跳动 */
+private val CANDIDATE_ROW_HEIGHT = 44.dp
+
 @Composable
 private fun CandidateRow(
     candidates: List<String>,
@@ -249,6 +260,10 @@ private fun SearchField(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
+        // 自绘键盘展开时设成只读：**可编辑**的 BasicTextField 一获得焦点，系统输入法就会自己弹出来，
+        // 和自绘键盘叠在一起（实测：搜索页一进来 Gboard 就盖住右半屏）。
+        // 只读不影响自绘键盘写入 —— 那条路走的是 onQueryChange，不经过输入法
+        readOnly = !showIme,
         textStyle = TvText.current.title.copy(color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),

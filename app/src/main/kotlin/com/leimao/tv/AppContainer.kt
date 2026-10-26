@@ -5,6 +5,7 @@ import android.os.Build
 import com.leimao.tv.core.data.EpgAutoBinder
 import com.leimao.tv.core.data.EpgImporter
 import com.leimao.tv.core.data.LineScheduler
+import com.leimao.tv.core.data.PinyinIme
 import com.leimao.tv.core.data.PinyinTable
 import com.leimao.tv.core.data.SearchRepository
 import com.leimao.tv.core.data.SourceBackupImporter
@@ -217,6 +218,18 @@ class AppContainer(context: Context) {
         }.getOrElse { PinyinTable.EMPTY }
     }
 
+    /**
+     * 输入法候选表（SET-11）：打 `wo` 出「我」。
+     *
+     * 267KB / 1.5 万个拼音，首次搜索时才解析（懒加载）—— 冷启动路径上不碰它。
+     * 读不到就退化成空表：候选行只是少了输入法建议，搜索本身照常。
+     */
+    private val pinyinIme: PinyinIme by lazy {
+        runCatching {
+            context.assets.open("pinyin_ime.txt").bufferedReader().use { PinyinIme.parse(it.readText()) }
+        }.getOrElse { PinyinIme.EMPTY }
+    }
+
     val searchRepository: SearchRepository =
         SearchRepository(
             channels = channelRepository,
@@ -226,6 +239,7 @@ class AppContainer(context: Context) {
             perSourceTimeoutMs = networkSettings.timeout.searchTimeoutMs,
             maxConcurrency = networkSettings.concurrency.permits,
             pinyin = pinyinTable,
+            ime = pinyinIme,
         )
 
     /** 看片进度（VOD-06）：播放页写、首页与详情页读 */

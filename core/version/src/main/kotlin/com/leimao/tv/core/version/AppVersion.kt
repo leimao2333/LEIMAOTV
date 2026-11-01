@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.0"
+    const val CURRENT_VERSION: String = "0.5.0.1"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.1",
+                date = "2026-11-01",
+                changes =
+                    listOf(
+                        "修：小米 / 海信 / TCL / 当贝这类国产电视和盒子，装完之后桌面里没有「磊毛TV」图标，点不进去（应用其实装上了，只是桌面不显示）",
+                        "原生 Android TV 与国产电视的桌面现在都能看到图标，同一种桌面上仍然只有一个",
+                        "部分电视的桌面上还会显示应用的横幅（名字 + 直播·影视），不再只剩一行字",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.0",
                 date = "2026-10-26",

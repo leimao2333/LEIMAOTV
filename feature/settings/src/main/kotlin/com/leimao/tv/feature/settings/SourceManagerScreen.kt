@@ -1,5 +1,6 @@
 package com.leimao.tv.feature.settings
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -70,6 +71,17 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * 「这台电视没有文件选择器」时写进状态行的话。
+ *
+ * 一句提示要同时做到两件事：说明为什么点了没反应，以及**给出这条电视上确实存在**的替代入口 ——
+ * 只说「不支持」等于把用户堵在原地。
+ */
+private const val NO_PICKER_SOURCES = "这台电视没有文件选择器，选不了本地文件；源可以直接用「添加订阅地址」加，不需要选文件。"
+private const val NO_PICKER_BACKUP = "这台电视没有文件选择器，选不了本地文件；备份可以改用「从地址导入备份」。"
+private const val NO_PICKER_EPG = "这台电视没有文件选择器，选不了本地文件；节目单可以改用「节目单订阅地址」。"
+private const val NO_PICKER_EXPORT = "这台电视没有文件选择器，导不出备份文件。"
 
 /**
  * 源管理（SET-03 / LIVE-03 / LIVE-04）。
@@ -154,71 +166,124 @@ fun SourceManagerScreen(
         if (isFirstRun) firstActionFocus.requestFocus()
     }
 
-    // SAF 选文件：TV 上方向键 + OK 就能完成选择，不需要触摸（LIVE-04）
+    // ── SAF 选文件 ─────────────────────────────────────────────────────────────
+    //
+    // TV 上方向键 + OK 就能完成选择，不需要触摸（LIVE-04）。但**不是每台电视都有文件选择器**：
+    // 小米 / 海信 / TCL 与各类盒子的精简 ROM 常常不带 DocumentUI，这时
+    // `ActivityResultLauncher.launch()` 会在 startActivity 那一步**同步抛
+    // ActivityNotFoundException** —— 没人接住就是「点一下『导入本地文件』整个应用闪退」
+    // （2026-11-01 实测，v0.5.0.0 / v0.5.0.1 都有）。
+    //
+    // 所以每条入口都走 [launchSaf]：先 OpenDocument（能拿到长期读权限，体验最好），
+    // 系统里没有就退到 GetContent（有些盒子的「文件管理」只实现了后者），
+    // 两条都走不通才写一行提示。结果由系统能力决定，不由崩溃决定。
+
+    /** 拉起系统选文件；两条通道都走不通时把原因写在状态行，不把应用带走。 */
+    fun launchSaf(
+        primary: () -> Unit,
+        fallback: () -> Unit,
+        missing: String,
+    ) {
+        // 接 Exception 而不是只接 ActivityNotFoundException：同一个「拉不起来」还有别的形态 ——
+        // 选择器存在但缺权限会抛 SecurityException，ROM 把它标成不导出会是别的运行时异常。
+        // 这些全都是环境差异，不是我们的逻辑错，一律降级成一行提示。
+        try {
+            primary()
+        } catch (e: Exception) {
+            try {
+                fallback()
+            } catch (e2: Exception) {
+                status = missing
+            }
+        }
+    }
+
+    fun importSourceFile(uri: Uri) {
+        scope.launch {
+            busy = true
+            val text =
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    }.getOrNull()
+                }
+            if (text.isNullOrBlank()) {
+                status = "读取文件失败：这个文件打不开或没有内容"
+                busy = false
+                return@launch
+            }
+            val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { "本地文件" } ?: "本地文件"
+            // 兜住整段导入：文本解析、落库、刷新任何一步抛出来都只是「这个文件导不进去」，
+            // 不能让它顺着协程抛到主线程变成闪退
+            val result =
+                runCatching { refresher.importText(name = name, uri = uri.toString(), text = text) }
+                    .getOrElse { e ->
+                        status = "导入失败：${e.message ?: "这个文件不是可识别的源"}（$name）"
+                        busy = false
+                        return@launch
+                    }
+            status = describe(result)
+            busy = false
+            reload()
+            if (result is RefreshResult.Done) onSourcesChanged()
+        }
+    }
+
     val pickFile =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            scope.launch {
-                busy = true
-                val text =
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        }.getOrNull()
-                    }
-                if (text.isNullOrBlank()) {
-                    status = "读取文件失败：这个文件打不开或没有内容"
-                    busy = false
-                    return@launch
-                }
-                val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { "本地文件" } ?: "本地文件"
-                val result = refresher.importText(name = name, uri = uri.toString(), text = text)
-                status = describe(result)
-                busy = false
-                reload()
-                if (result is RefreshResult.Done) onSourcesChanged()
-            }
+            if (uri != null) importSourceFile(uri)
+        }
+    val pickFileCompat =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) importSourceFile(uri)
         }
 
     // 导入源备份（SET-03）：与「导入本地文件」不同，这里读的是我们自己导出的 JSON
+    fun importBackupFile(uri: Uri) {
+        scope.launch {
+            busy = true
+            val text =
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    }.getOrNull()
+                }
+            if (text.isNullOrBlank()) {
+                status = "导入失败：文件打不开或没有内容"
+                busy = false
+                return@launch
+            }
+            status =
+                runCatching {
+                    // 走 importer 而不是直接调仓储：备份里可能带 settings 段（LIVE-08），
+                    // 两条入口（文件 / 地址）必须都能把它落地
+                    val summary =
+                        backupImporter?.importText(text)?.let { result ->
+                            when (result) {
+                                is BackupImportResult.Done -> result.summary
+                                is BackupImportResult.Failed -> throw IllegalArgumentException(result.detail)
+                            }
+                        } ?: sourceRepository.importJson(text)
+                    // 导入完顺手刷一遍新增的直播源（SET-03）：不刷的话卡片上全是
+                    // 「还没有频道」，用户还得逐条点刷新才知道这份备份到底能不能用
+                    val results = summary.addedLiveIds.map { id -> refresher.refresh(id) }
+                    describeImport(summary, results)
+                }.getOrElse { e ->
+                    "导入失败：${e.message ?: "不是有效的源备份文件"}"
+                }
+            busy = false
+            reload()
+            onSourcesChanged()
+        }
+    }
+
     val pickJson =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            scope.launch {
-                busy = true
-                val text =
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        }.getOrNull()
-                    }
-                if (text.isNullOrBlank()) {
-                    status = "导入失败：文件打不开或没有内容"
-                    busy = false
-                    return@launch
-                }
-                status =
-                    runCatching {
-                        // 走 importer 而不是直接调仓储：备份里可能带 settings 段（LIVE-08），
-                        // 两条入口（文件 / 地址）必须都能把它落地
-                        val summary =
-                            backupImporter?.importText(text)?.let { result ->
-                                when (result) {
-                                    is BackupImportResult.Done -> result.summary
-                                    is BackupImportResult.Failed -> throw IllegalArgumentException(result.detail)
-                                }
-                            } ?: sourceRepository.importJson(text)
-                        // 导入完顺手刷一遍新增的直播源（SET-03）：不刷的话卡片上全是
-                        // 「还没有频道」，用户还得逐条点刷新才知道这份备份到底能不能用
-                        val results = summary.addedLiveIds.map { id -> refresher.refresh(id) }
-                        describeImport(summary, results)
-                    }.getOrElse { e ->
-                        "导入失败：${e.message ?: "不是有效的源备份文件"}"
-                    }
-                busy = false
-                reload()
-                onSourcesChanged()
-            }
+            if (uri != null) importBackupFile(uri)
+        }
+    val pickJsonCompat =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) importBackupFile(uri)
         }
 
     // 导出源备份（SET-03）：SAF 创建文件，写到用户选的位置
@@ -244,21 +309,35 @@ fun SourceManagerScreen(
         }
 
     // 节目单（XMLTV）走同一个 SAF 选文件流程：TV 上没有「把文件拖进来」这回事
-    val pickEpg =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            val importer = epgImporter ?: return@rememberLauncherForActivityResult
-            scope.launch {
-                busy = true
-                val result =
+    fun importEpgFile(uri: Uri) {
+        val importer = epgImporter ?: return
+        scope.launch {
+            busy = true
+            // 同上：读文件、解析 XML 都可能抛，落地成一行提示而不是闪退
+            val result =
+                runCatching {
                     importer.importXml {
                         context.contentResolver.openInputStream(uri)
                             ?: throw java.io.IOException("这个文件打不开")
                     }
-                status = describeEpg(result)
-                epgSummary = epgRepository?.summary()
-                busy = false
-            }
+                }.getOrElse { e ->
+                    status = "导入节目单失败：${e.message ?: "这个文件不是有效的 XMLTV"}"
+                    busy = false
+                    return@launch
+                }
+            status = describeEpg(result)
+            epgSummary = epgRepository?.summary()
+            busy = false
+        }
+    }
+
+    val pickEpg =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importEpgFile(uri)
+        }
+    val pickEpgCompat =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) importEpgFile(uri)
         }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -297,7 +376,15 @@ fun SourceManagerScreen(
                             ) {
                                 Text(text = "添加订阅地址", style = TvText.current.label)
                             }
-                            FocusableCard(onClick = { pickFile.launch(arrayOf("*/*")) }) {
+                            FocusableCard(
+                                onClick = {
+                                    launchSaf(
+                                        primary = { pickFile.launch(arrayOf("*/*")) },
+                                        fallback = { pickFileCompat.launch("*/*") },
+                                        missing = NO_PICKER_SOURCES,
+                                    )
+                                },
+                            ) {
                                 Text(text = "导入本地文件", style = TvText.current.label)
                             }
                             FocusableCard(
@@ -342,7 +429,15 @@ fun SourceManagerScreen(
                                 }
                             }
                             if (epgImporter != null) {
-                                FocusableCard(onClick = { pickEpg.launch(arrayOf("*/*")) }) {
+                                FocusableCard(
+                                    onClick = {
+                                        launchSaf(
+                                            primary = { pickEpg.launch(arrayOf("*/*")) },
+                                            fallback = { pickEpgCompat.launch("*/*") },
+                                            missing = NO_PICKER_EPG,
+                                        )
+                                    },
+                                ) {
                                     Text(text = "导入节目单", style = TvText.current.label)
                                 }
                             }
@@ -355,10 +450,27 @@ fun SourceManagerScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            FocusableCard(onClick = { createJson.launch("leimao-sources.json") }) {
+                            FocusableCard(
+                                onClick = {
+                                    // 导出只有一条通道：CreateDocument 没有 GET_CONTENT 那种退路
+                                    try {
+                                        createJson.launch("leimao-sources.json")
+                                    } catch (e: Exception) {
+                                        status = NO_PICKER_EXPORT
+                                    }
+                                },
+                            ) {
                                 Text(text = "导出备份", style = TvText.current.label)
                             }
-                            FocusableCard(onClick = { pickJson.launch(arrayOf("application/json", "*/*")) }) {
+                            FocusableCard(
+                                onClick = {
+                                    launchSaf(
+                                        primary = { pickJson.launch(arrayOf("application/json", "*/*")) },
+                                        fallback = { pickJsonCompat.launch("*/*") },
+                                        missing = NO_PICKER_BACKUP,
+                                    )
+                                },
+                            ) {
                                 Text(text = "导入备份", style = TvText.current.label)
                             }
                             if (backupImporter != null) {

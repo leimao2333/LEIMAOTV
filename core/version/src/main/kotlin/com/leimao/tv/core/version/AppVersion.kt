@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.1"
+    const val CURRENT_VERSION: String = "0.5.0.2"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.2",
+                date = "2026-11-01",
+                changes =
+                    listOf(
+                        "修：点「导入本地文件」会直接闪退 —— 很多电视和盒子没装文件选择器，一点就崩。现在不会崩了，会直接告诉你这台电视选不了文件",
+                        "这类电视上，源改用「添加订阅地址」、备份改用「从地址导入备份」、节目单改用「节目单订阅地址」，都能正常导入",
+                        "部分电视的文件选择器只认另一种打开方式，现在会自动换过去再试一次",
+                        "导入失败时不再闪退，而是在状态行说明原因（文件读不出来 / 内容不是可识别的源）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.1",
                 date = "2026-11-01",

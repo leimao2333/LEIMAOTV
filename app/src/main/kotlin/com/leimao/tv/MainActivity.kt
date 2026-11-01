@@ -5,6 +5,7 @@ import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -86,6 +87,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val container = (application as LeimaoTvApplication).container
         applyStartupWindowBackground(container)
+        // 屏幕常亮（SET-13）必须在 setContent 之前定下来：用户按下开机键→应用起来→
+        // 首帧这段时间里，电视的无操作计时器已经在跑了，晚一步设置就白等一轮超时
+        val keepScreenOnAtStart = applyStartupKeepScreenOn(container)
 
         setContent {
             // 主题与字号只在**这一层**读：设置页改完 DataStore 发新值，整棵树重组，
@@ -99,6 +103,14 @@ class MainActivity : ComponentActivity() {
             // 窗口底色跟着主题走：Compose 画满之前、以及播放页全屏时露出系统窗口的那一瞬，
             // 靠的都是它。不改的话浅色主题下会闪一下深色
             LaunchedEffect(dark) { setWindowBackground(dark) }
+
+            // 屏幕常亮（SET-13）：设置页里改完立刻生效，不用重启（initialValue 用启动时
+            // 同步读到的那份，避免「用户关掉了却先亮一下再灭」）
+            val keepScreenOn by
+                container.settings.keepScreenOn.collectAsStateWithLifecycle(
+                    initialValue = keepScreenOnAtStart,
+                )
+            LaunchedEffect(keepScreenOn) { applyKeepScreenOn(keepScreenOn) }
 
             TvTheme(dark = dark, fontScale = fontScale.scale) {
                 val startup by produceState<StartDestination?>(initialValue = null) {
@@ -151,6 +163,32 @@ class MainActivity : ComponentActivity() {
     private fun setWindowBackground(dark: Boolean) {
         val color = if (dark) TvColors.BackgroundDark else TvColors.BackgroundLight
         window.setBackgroundDrawable(ColorDrawable(color.toArgb()))
+    }
+
+    /**
+     * 屏幕常亮（SET-13）的启动态：同步读一次设置并立刻落到窗口上，返回读到的值。
+     *
+     * 为什么用 `FLAG_KEEP_SCREEN_ON` 而不是 `PowerManager.WakeLock`：这个标记是**窗口级**的，
+     * 窗口一不可见（按 Home、切到别的应用、退到后台）系统自动作废，不存在「忘了释放、
+     * 一夜亮着」的漏电风险；它是让系统**不因无操作而息屏**，不是强行点亮，屏幕该多亮仍是系统说了算。
+     * WakeLock 需要 `WAKE_LOCK` 权限、要自己配对 acquire/release，任何一个提前 return 就会漏 ——
+     * 对一个只为「别在看片时黑屏」的需求，那是不必要的风险。
+     *
+     * 读失败按开启处理：这条路径上「电视黑掉」比「多亮一会儿」严重得多。
+     */
+    private fun applyStartupKeepScreenOn(container: AppContainer): Boolean {
+        val keep =
+            runCatching { runBlocking { container.settings.keepScreenOn.first() } }.getOrDefault(true)
+        applyKeepScreenOn(keep)
+        return keep
+    }
+
+    private fun applyKeepScreenOn(enabled: Boolean) {
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     /**

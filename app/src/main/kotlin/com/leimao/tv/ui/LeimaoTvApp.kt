@@ -204,6 +204,8 @@ fun LeimaoTvApp(
                 BackHandler { navController.popBackStack() }
                 val bootAutostart by
                     container.settings.bootAutostart.collectAsStateWithLifecycle(initialValue = false)
+                val keepScreenOn by
+                    container.settings.keepScreenOn.collectAsStateWithLifecycle(initialValue = true)
                 SettingsScreen(
                     onOpenPlaybackSettings = { navController.navigate(TvRoute.PLAYBACK_SETTINGS) },
                     onOpenAppearanceSettings = {
@@ -220,6 +222,12 @@ fun LeimaoTvApp(
                     onToggleBootAutostart = { enabled ->
                         container.applicationScope.launch {
                             container.settings.setBootAutostart(enabled)
+                        }
+                    },
+                    keepScreenOn = keepScreenOn,
+                    onToggleKeepScreenOn = { enabled ->
+                        container.applicationScope.launch {
+                            container.settings.setKeepScreenOn(enabled)
                         }
                     },
                 )
@@ -522,6 +530,9 @@ private fun HomeRoute(
     // 开机自启动（SET-08）：内嵌设置页开关的数据源
     val bootAutostart by
         container.settings.bootAutostart.collectAsStateWithLifecycle(initialValue = false)
+    // 屏幕常亮（SET-13）：同一份 DataStore，窗口标记由 MainActivity 跟着这个值改
+    val keepScreenOn by
+        container.settings.keepScreenOn.collectAsStateWithLifecycle(initialValue = true)
 
     var channels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -681,6 +692,11 @@ private fun HomeRoute(
         bootAutostart = bootAutostart,
         onToggleBootAutostart = { enabled ->
             container.applicationScope.launch { container.settings.setBootAutostart(enabled) }
+        },
+        // 屏幕常亮（SET-13）：同上，改完 MainActivity 的窗口标记立刻跟着变
+        keepScreenOn = keepScreenOn,
+        onToggleKeepScreenOn = { enabled ->
+            container.applicationScope.launch { container.settings.setKeepScreenOn(enabled) }
         },
         onOpenPlayer = {
             scope.launch {

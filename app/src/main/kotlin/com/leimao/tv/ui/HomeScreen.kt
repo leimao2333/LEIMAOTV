@@ -174,6 +174,9 @@ fun HomeScreen(
     /** 开机自启动（SET-08）当前状态。首页内嵌的设置页与独立设置路由共用同一份真相 */
     bootAutostart: Boolean = false,
     onToggleBootAutostart: (Boolean) -> Unit = {},
+    /** 屏幕常亮（SET-13）当前状态，同样与独立设置路由共用同一份真相 */
+    keepScreenOn: Boolean = true,
+    onToggleKeepScreenOn: (Boolean) -> Unit = {},
     onExit: () -> Unit,
     /** 「搜索」分区的内容，由路由层提供（见 [ContentArea] 里的说明） */
     searchContent: @Composable () -> Unit,
@@ -328,6 +331,8 @@ fun HomeScreen(
                         onOpenRefreshSettings = onOpenRefreshSettings,
                         bootAutostart = bootAutostart,
                         onToggleBootAutostart = onToggleBootAutostart,
+                        keepScreenOn = keepScreenOn,
+                        onToggleKeepScreenOn = onToggleKeepScreenOn,
                         searchContent = searchContent,
                     )
                 }
@@ -369,6 +374,9 @@ private fun ContentArea(
     /** 开机自启动（SET-08），透传给内嵌的设置页 */
     bootAutostart: Boolean = false,
     onToggleBootAutostart: (Boolean) -> Unit = {},
+    /** 屏幕常亮（SET-13），透传给内嵌的设置页 */
+    keepScreenOn: Boolean = true,
+    onToggleKeepScreenOn: (Boolean) -> Unit = {},
     /**
      * 「搜索」分区的内容。
      *
@@ -415,6 +423,8 @@ private fun ContentArea(
                 autoFocus = false,
                 bootAutostart = bootAutostart,
                 onToggleBootAutostart = onToggleBootAutostart,
+                keepScreenOn = keepScreenOn,
+                onToggleKeepScreenOn = onToggleKeepScreenOn,
             )
         // 影视板块的五个栏目（电影/电视剧/动漫/综艺/体育）共用同一个首页，
         // 「当前是哪一类」由 vodState.selectedType 决定 —— 导航点击时在 HomeRoute 里同步过去。

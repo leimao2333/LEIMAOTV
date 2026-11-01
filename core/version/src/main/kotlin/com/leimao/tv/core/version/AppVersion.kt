@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.2"
+    const val CURRENT_VERSION: String = "0.5.0.3"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.3",
+                date = "2026-11-01",
+                changes =
+                    listOf(
+                        "修：电视看着看着自己黑屏 / 锁屏了 —— 应用现在会一直保持常亮，不再被电视的无操作计时器踢进待机",
+                        "设置里新增「屏幕常亮」开关，默认开启；不想一直亮着可以在设置页关掉，交给电视自己的息屏策略",
+                        "按 Home 退出应用后常亮自动作废，不会让电视整夜亮着",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.2",
                 date = "2026-11-01",

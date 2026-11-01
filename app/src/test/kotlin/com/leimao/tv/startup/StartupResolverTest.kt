@@ -127,6 +127,7 @@ class StartupResolverTest {
         private val fontScaleFlow = MutableStateFlow(FontScale.DEFAULT)
         private val networkSettingsFlow = MutableStateFlow(NetworkSettings())
         private val bootAutostartFlow = MutableStateFlow(false)
+        private val keepScreenOnFlow = MutableStateFlow(true)
 
         override val complianceAgreed: Flow<Boolean> = agreedFlow
         override val mode: Flow<AppMode> = modeFlow
@@ -138,6 +139,7 @@ class StartupResolverTest {
         override val fontScale: Flow<FontScale> = fontScaleFlow
         override val networkSettings: Flow<NetworkSettings> = networkSettingsFlow
         override val bootAutostart: Flow<Boolean> = bootAutostartFlow
+        override val keepScreenOn: Flow<Boolean> = keepScreenOnFlow
 
         override suspend fun setComplianceAgreed(agreed: Boolean) {
             agreedFlow.value = agreed
@@ -193,6 +195,10 @@ class StartupResolverTest {
 
         override suspend fun setBootAutostart(enabled: Boolean) {
             bootAutostartFlow.value = enabled
+        }
+
+        override suspend fun setKeepScreenOn(enabled: Boolean) {
+            keepScreenOnFlow.value = enabled
         }
     }
 }

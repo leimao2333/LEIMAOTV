@@ -46,6 +46,9 @@ fun SettingsScreen(
     /** 开机自启动（SET-08）。默认关闭；开关状态由路由层从 DataStore 读进来 */
     bootAutostart: Boolean = false,
     onToggleBootAutostart: (Boolean) -> Unit = {},
+    /** 屏幕常亮（SET-13）。默认开启；开关状态由路由层从 DataStore 读进来 */
+    keepScreenOn: Boolean = true,
+    onToggleKeepScreenOn: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
 ) {
@@ -113,6 +116,20 @@ fun SettingsScreen(
                     "已关闭：开机后不自动打开 · 点一下开启（SET-08）"
                 },
             onClick = { onToggleBootAutostart(!bootAutostart) },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        // 屏幕常亮（SET-13）。默认开：电视上「自己黑掉」会被当成应用挂了 ——
+        // 用户看不到任何报错，只看到画面没了，比崩溃还难自查。
+        // 做成开关是因为也有人的电视摆在客厅当背景音，希望长时间不动就按电视自己的策略待机。
+        SettingRow(
+            title = "屏幕常亮",
+            subtitle =
+                if (keepScreenOn) {
+                    "已开启：在本应用里不会自动黑屏 / 待机 · 点一下关闭"
+                } else {
+                    "已关闭：跟电视自己的息屏设置走，长时间不操作会黑屏 · 点一下开启（SET-13）"
+                },
+            onClick = { onToggleKeepScreenOn(!keepScreenOn) },
         )
 
         Spacer(modifier = Modifier.height(28.dp))

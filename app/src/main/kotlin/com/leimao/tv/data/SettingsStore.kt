@@ -63,6 +63,14 @@ interface SettingsStore {
     /** 开机自启动（SET-08）。默认关闭；只有这个开关开着时 BootReceiver 才会拉起应用 */
     val bootAutostart: Flow<Boolean>
 
+    /**
+     * 屏幕常亮（SET-13）。**默认开启** —— 电视上息屏不是「省电」，是「应用像是挂了」。
+     *
+     * 开关只决定窗口要不要带 `FLAG_KEEP_SCREEN_ON`；窗口一旦不可见（按 Home、切到别的应用），
+     * 该标记自动失效，不会在后台拖着电视不睡。
+     */
+    val keepScreenOn: Flow<Boolean>
+
     suspend fun setComplianceAgreed(agreed: Boolean)
 
     suspend fun setMode(mode: AppMode)
@@ -91,6 +99,9 @@ interface SettingsStore {
     suspend fun setProxy(proxy: ProxyConfig?)
 
     suspend fun setBootAutostart(enabled: Boolean)
+
+    /** 屏幕常亮（SET-13）。改动立即生效，不需要重启应用 */
+    suspend fun setKeepScreenOn(enabled: Boolean)
 }
 
 class DataStoreSettingsStore(private val context: Context) : SettingsStore {
@@ -145,6 +156,11 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
     override val bootAutostart: Flow<Boolean> =
         context.tvSettings.data.map { it[KEY_BOOT_AUTOSTART] ?: false }
 
+    // 默认 true：老用户升级上来也要立刻常亮 —— 「没设过」和「用户主动关掉」必须分开，
+    // 所以默认值写在读的一侧，而不是写进存档
+    override val keepScreenOn: Flow<Boolean> =
+        context.tvSettings.data.map { it[KEY_KEEP_SCREEN_ON] ?: true }
+
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
     }
@@ -169,6 +185,10 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
 
     override suspend fun setBootAutostart(enabled: Boolean) {
         context.tvSettings.edit { it[KEY_BOOT_AUTOSTART] = enabled }
+    }
+
+    override suspend fun setKeepScreenOn(enabled: Boolean) {
+        context.tvSettings.edit { it[KEY_KEEP_SCREEN_ON] = enabled }
     }
 
     override suspend fun setRefreshInterval(interval: RefreshInterval) {
@@ -225,6 +245,7 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         val KEY_SEEK_STEP_MS = longPreferencesKey("seek_step_ms")
         val KEY_PLAYBACK_SPEED = stringPreferencesKey("playback_speed")
         val KEY_BOOT_AUTOSTART = booleanPreferencesKey("boot_autostart")
+        val KEY_KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val KEY_REFRESH_INTERVAL = stringPreferencesKey("refresh_interval")
         val KEY_SEARCH_HISTORY = stringPreferencesKey("search_history")
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")

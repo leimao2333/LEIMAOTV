@@ -6,6 +6,29 @@
 - **规则变更**（RULES.md 的任何修改）必须单独成节，写清「改了什么」与「为什么」。
 - 日志里不得出现任何真实源地址、频道名、站点名（见 RULES.md §2）。
 
+## 未发布（2026-11-01）
+
+**修复**
+
+- **国产电视 / 盒子装完，桌面里找不到这个应用**：`MainActivity` 只声明了 `LEANBACK_LAUNCHER`，
+  而小米 / 海信 / TCL / 当贝这类自带桌面只遍历 `LAUNCHER` —— 包装上了（`pm list packages` 能看到）、
+  冷启动用 adb 也能拉起，但桌面上不建图标位，用户从桌面点不进去。现在两个 category 并存：
+  原生 Android TV 走 Leanback 入口，国产桌面走普通入口，同一个 Activity，桌面上仍只有一个图标。
+  - 2026-10-26 曾在 `src/debug` 里补过一条 `LAUNCHER`，当时只验证了调试包，正式包没覆盖到；
+    这次把补丁下沉到主 Manifest，debug 里那条冗余声明已删除（避免合并后出现重复 intent-filter）。
+  - `android:banner` 同时在 `<activity>` 上声明一份：部分 ROM 的桌面走
+    `PackageManager.getActivityBanner`，只认 `ActivityInfo.banner` 而**不回落**到 application 上那份，
+    缺了就在那些机器上只剩应用名、没有横幅。
+
+**规则变更**（RULES.md §1）
+
+- **改了什么**：在 §1 末尾补一条「关于桌面入口」——`MainActivity` 必须同时声明
+  `LEANBACK_LAUNCHER` 与 `LAUNCHER`，并明确「两个 category 并存不算开手机端入口」；
+  以后谁为了守住「release 不做手机端入口」而删掉 `LAUNCHER`，按回归缺陷处理。
+- **为什么**：目标设备是电视，但「电视桌面」不等于「Leanback 桌面」。国内在用的电视机与盒子
+  绝大多数是厂商自研桌面，只认 `LAUNCHER`；按 Leanback 单入口的标准做法去做，结果是正式包在
+  目标设备上装完就找不到入口。这条边界必须写进规则，否则下一个人还会照旧删掉它。
+
 ## v0.5.0.0（2026-10-26）
 
 **新增**

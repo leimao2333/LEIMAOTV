@@ -2,27 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      调试包专用的「手机桌面入口」。
+      这里曾经是「调试包专用的手机桌面入口」。
 
-      主 Manifest 里 MainActivity 只声明了 LEANBACK_LAUNCHER —— 那是电视启动器认的 category，
-      手机桌面 / 应用抽屉只认 LAUNCHER。所以把 debug 包装到手机上时，`pm list packages` 能看到它，
-      但桌面上没有图标、点不到（2026-10-26 真机实测）。
+      2026-10-26 真机实测发现：主 Manifest 只声明 LEANBACK_LAUNCHER 时，手机桌面 / 应用抽屉
+      看不到这个应用（它们只认 LAUNCHER），于是当时在 debug 里补了一条 LAUNCHER 的 intent-filter。
 
-      只写在 src/debug 而不是主 Manifest，是为了守住 RULES §1「release 不做手机端入口」：
-      release 包依旧只出现在电视的启动器里，不会被当成手机应用分发。
+      2026-11-01 起这条补丁下沉到了主 Manifest：国产电视与盒子的自带桌面同样只扫 LAUNCHER，
+      只修 debug 等于「调试包有图标、正式包装到电视上找不到」。主 Manifest 现在两条 category
+      并存，debug 无需再声明，再写一遍只会在合并后留下一个重复的 intent-filter。
 
-      两条 intent-filter 是**并存**关系而不是覆盖：电视盒子照样从 LEANBACK 入口进，
-      手机从 LAUNCHER 入口进，同一个 Activity。
+      本文件目前不放任何内容，保留文件是为了让下次想加 debug 专属组件时有个显眼的位置 ——
+      别再加 LAUNCHER 入口。
     -->
-    <application>
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
+    <application />
 
 </manifest>

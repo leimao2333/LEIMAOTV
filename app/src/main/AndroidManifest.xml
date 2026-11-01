@@ -33,16 +33,33 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LeimaoTv">
 
+        <!-- activity 上再声明一次 banner：多数桌面读的是 ApplicationInfo.banner（application 上的那份），
+             但部分 ROM 的桌面走 PackageManager.getActivityBanner，只认 ActivityInfo.banner，
+             不回落到 application —— 不声明就在那些机器上只剩名字、没有横幅 -->
         <activity
             android:name=".MainActivity"
+            android:banner="@drawable/tv_banner"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="landscape">
+            <!-- 两条入口必须并存（2026-11-01 修「电视装完桌面里没有图标」）：
+                 原生 Android TV / Google TV 的启动器只认 LEANBACK_LAUNCHER；
+                 国产电视与盒子（小米 / 海信 / TCL / 当贝 / 各类安卓盒子）的自带桌面基本只扫
+                 LAUNCHER —— 只声明 LEANBACK 时，它们压根不会为这个包建桌面项，
+                 `pm list packages` 能看到、桌面上却找不到，也就是「装好了点不进去」。
+
+                 这不算「开手机端入口」：LAUNCHER 只是让非 Leanback 的桌面也能列出它，
+                 目标设备仍然是电视。RULES §1 禁止的是「手机专属交互作为唯一入口」与内容分发，
+                 不是禁止这个 category（2026-10-26 只在 debug 里打的补丁已经证明判断没错，
+                 但那版补丁救不了正式包）。 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <!-- 只声明 LEANBACK_LAUNCHER：目标设备就是电视，不做手机端入口（RULES §1） -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 

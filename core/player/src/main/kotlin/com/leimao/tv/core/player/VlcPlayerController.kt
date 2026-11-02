@@ -2,6 +2,7 @@ package com.leimao.tv.core.player
 
 import android.content.Context
 import android.graphics.Color
+import android.net.Uri
 import android.view.SurfaceView
 import android.view.View
 import kotlinx.coroutines.CoroutineScope
@@ -185,7 +186,7 @@ class VlcPlayerController(
             )
 
         val media =
-            Media(libVlc, url).apply {
+            Media(libVlc, Uri.parse(vlcLocation(url))).apply {
                 // 每个源有自己的 UA / Referer，VLC 用 :http-user-agent 与 :http-referrer 选项
                 current.headers["User-Agent"]?.let { addOption(":http-user-agent=$it") }
                 current.headers["Referer"]?.let { addOption(":http-referrer=$it") }
@@ -291,4 +292,37 @@ class VlcPlayerController(
         /** 与 Media3 内核一致的单线时间预算 */
         private const val LINE_BUDGET_MS = 20_000L
     }
+}
+
+/**
+ * 交给 libVLC 的地址：**必须带 scheme**。
+ *
+ * 这是 libVLC 的 Java 层一个很深的坑：`Media(LibVLC, String)` 与 `Media(LibVLC, Uri)`
+ * 语义不同 —— 前者走 `libvlc_media_new_path`（**本地文件路径**），后者走
+ * `libvlc_media_new_location`（网络地址）。传 String 时哪怕内容就是 `http://…`，
+ * libVLC 也会把它当相对路径，补成绝对路径再转成 `file://` URI：
+ *
+ * ```
+ * 传 "http://host/a.m3u8"
+ *   → cannot open file //http://host/a.m3u8 (No such file or directory)
+ *   → VLC is unable to open the MRL 'file:////http%3A//host%2Fa.m3u8'
+ * ```
+ *
+ * 后果不是「VLC 播不了这一条」，而是**兜底内核整体失效**：Media3 播不动才叫 VLC，
+ * 而 VLC 必然失败，用户看到的永远是「所有线路都试过了」（2026-11-02 模拟器日志实测）。
+ *
+ * 所以这里统一补 scheme：有 `scheme:` 的原样给（http / https / rtsp / rtmp / udp / file），
+ * 没有的按本地文件补 `file://`。返回值交给 `Uri.parse` 再进 `Media`。
+ */
+internal fun vlcLocation(url: String): String {
+    val trimmed = url.trim()
+    if (trimmed.isEmpty()) return trimmed
+    // 除 scheme 外还要认 "file:" —— 本地文件常写成 file:/sdcard/a.mp4（单斜杠也合法）
+    if (trimmed.startsWith("file:", ignoreCase = true)) return trimmed
+    val scheme = trimmed.substringBefore(':', missingDelimiterValue = "")
+    val hasScheme =
+        scheme.isNotEmpty() &&
+            scheme.all { it.isLetterOrDigit() || it == '+' || it == '-' || it == '.' } &&
+            trimmed.getOrNull(scheme.length) == ':'
+    return if (hasScheme) trimmed else "file://$trimmed"
 }

@@ -111,6 +111,26 @@ enum class HomeSection(
 internal fun defaultSection(mode: AppMode): HomeSection =
     if (mode == AppMode.LIVE) HomeSection.LIVE else HomeSection.RECOMMEND
 
+/**
+ * 主页该显示哪一栏（HOME-03 落点记忆）。
+ *
+ * 两个来源分开对待：
+ * - [picked] 是用户**这一刻主动点的**，说什么就是什么 —— 包括「设置」；
+ * - [saved] 是 DataStore 里的存档，只用于冷启动恢复，**不能是「设置」**：
+ *   记住它会让「从播放页按返回」落到一堆开关上，用户要的是回直播。
+ *
+ * 这两条曾经被压成一条 `it != SETTINGS` 的过滤，于是用户点「设置」等于点了「推荐」——
+ * 导航栏里那颗按钮彻底失效（2026-11-02 模拟器实测：焦点收起、内容纹丝不动）。
+ */
+internal fun resolveHomeSection(
+    picked: String?,
+    saved: String?,
+    mode: AppMode,
+): HomeSection =
+    HomeSection.entries.firstOrNull { it.name == picked }
+        ?: HomeSection.entries.firstOrNull { it.name == saved && it != HomeSection.SETTINGS }
+        ?: defaultSection(mode)
+
 /** 首页按一次返回键的结果（RULES §6.4 分级返回）。 */
 internal enum class HomeBackAction {
     /** 退出确认框开着 → 先关掉它，人留在应用里 */
@@ -251,6 +271,25 @@ fun HomeScreen(
         }
     }
 
+    // 「点了导航项 → 焦点进内容区」不能同步做。
+    //
+    // 点下去的那一帧 section 刚变，内容区正在换成另一个页面：新的可聚焦节点还没组合、
+    // 更没完成布局，`requestFocus()` 会**静默落空**。落空之后焦点留在一颗马上被销毁的
+    // 导航项上，界面就进入「没有焦点」的死区 —— 用户再按一次方向键，焦点会被甩到导航栏
+    // 上（「推荐页按下去，焦点弹到左边设置」就是这么来的，2026-11-02 模拟器复现到
+    // 设置页打开后 uiautomator 里没有任何 focused 节点）。
+    //
+    // 等两帧：第一帧让新页面完成组合，第二帧让它的布局落地。
+    var pendingContentFocus by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingContentFocus) {
+        if (!pendingContentFocus) return@LaunchedEffect
+        withFrameNanos {}
+        withFrameNanos {}
+        runCatching { contentFocus.requestFocus() }
+        pendingContentFocus = false
+    }
+
     LaunchedEffect(showExitConfirm) { if (showExitConfirm) stayFocus.requestFocus() }
 
     // 返回键的语义是「退一层」，不是「退一整个应用」（RULES §6.4 修订，2026-11-02）。
@@ -292,9 +331,12 @@ fun HomeScreen(
                             mode = mode,
                             onToggle = {
                                 val next = if (mode == AppMode.LIVE) AppMode.VOD else AppMode.LIVE
-                                // 切模式必须把当前分区一起带过去，否则会出现「模式是影视、内容还是直播」的错位
-                                val nextSection = if (next == AppMode.LIVE) HomeSection.LIVE else HomeSection.MOVIE
-                                onSectionChange(nextSection)
+                                // 切模式必须把当前分区一起带过去，否则会出现「模式是影视、内容还是直播」的错位。
+                                // 落点取该模式的**默认栏目**，不写死「电影」：影视板块的首页是「推荐」，
+                                // 切过去先看到一堆片名列表（还是某个具体类型）不是这个板块该有的样子
+                                // （2026-11-02 模拟器走查：切到影视模式落在「电影」，与返回键退到的
+                                // 「推荐」不是同一格，返回键的语义跟着错位）
+                                onSectionChange(defaultSection(next))
                                 onModeChange(next)
                             },
                         )
@@ -309,9 +351,10 @@ fun HomeScreen(
                                     onSectionChange(item)
                                     item.mode?.let { target -> if (target != mode) onModeChange(target) }
                                     // 选中栏目即收起导航栏（SET-02）：用户要的是内容，不是
-                                    // 一直留着导航。收起来后焦点交给内容区，别停在已销毁的导航上
+                                    // 一直留着导航。收起来后焦点交给内容区 —— 交给
+                                    // pendingContentFocus 去做，它要等新页面组合完
                                     navExpanded = false
-                                    contentFocus.requestFocus()
+                                    pendingContentFocus = true
                                 },
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -445,8 +488,10 @@ private fun ContentArea(
         when {
             section.mode == null -> section
             section.mode == mode -> section
-            mode == AppMode.LIVE -> HomeSection.LIVE
-            else -> HomeSection.MOVIE
+            // 分区与模式对不上时退回该模式的默认栏目：影视模式退到「推荐」（板块首页），
+            // 直播模式退到「直播」。这里曾经写死「电影」—— 与返回键的地板（推荐）不一致，
+            // 用户在影视模式按返回落在推荐、切模式落在电影，同一件事出现两个「首页」
+            else -> defaultSection(mode)
         }
 
     when (effectiveSection) {

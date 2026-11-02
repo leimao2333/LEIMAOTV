@@ -1,6 +1,11 @@
 package com.leimao.tv.feature.settings
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +72,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -83,6 +89,77 @@ private const val NO_PICKER_SOURCES = "这台电视没有文件选择器，选�
 private const val NO_PICKER_BACKUP = "这台电视没有文件选择器，选不了本地文件；备份可以改用「从地址导入备份」。"
 private const val NO_PICKER_EPG = "这台电视没有文件选择器，选不了本地文件；节目单可以改用「节目单订阅地址」。"
 private const val NO_PICKER_EXPORT = "这台电视没有文件选择器，导不出备份文件。"
+
+/**
+ * 拉起选择器之后，等多久才认定「它根本没起来」。
+ *
+ * 2.5 秒：正常的选择器从 `startActivity` 到盖住我们的窗口只要几百毫秒。
+ * 拉长到 5 秒会让「点了没反应」的抱怨变成「点了半天才报错」，缩短又容易误判慢机器。
+ */
+internal const val PICKER_SILENT_MS = 2_500L
+
+/**
+ * 这个 activity 是不是**假的选择器**。
+ *
+ * AOSP 的 `frameworkpackagestubs` 会声明一个 `Stubs$DocumentsStub` 来「占位」，声明里
+ * 带着 OPEN_DOCUMENT 的 intent-filter，于是 `queryIntentActivities` 查得到、`startActivity`
+ * 也不抛异常 —— 但它不显示任何界面，也永远不回调结果。用户看到的就是「点了没反应」。
+ *
+ * 判定只认两条硬特征：包名是那个占位包，或类名里带 `Stub`。不去猜「哪些包名像文件管理器」——
+ * 第三方文件管理器叫什么的都有，猜错会把能用的机器判成没有。
+ */
+internal fun documentPickerIsStub(
+    packageName: String?,
+    className: String?,
+): Boolean {
+    val pkg = packageName.orEmpty()
+    val cls = className.orEmpty()
+    return pkg.startsWith(STUB_PACKAGE_PREFIX) || cls.contains("Stub")
+}
+
+/**
+ * 拉起选择器之后，是否该判定它**静默失败**了。
+ *
+ * 唯一可靠的信号是窗口焦点：真的选择器一出现就会把焦点从我们这里拿走。所以「够久了」
+ * 且「焦点还在自己身上」两个条件同时成立才算没起来。回调里会把 awaitingSince 清 0，
+ * 于是「用户真的选了文件（或按返回取消）」这条路径不可能走到这里。
+ */
+internal fun pickerStillSilent(
+    awaitingSince: Long,
+    nowMs: Long,
+    windowHasFocus: Boolean,
+): Boolean = awaitingSince > 0L && nowMs - awaitingSince >= PICKER_SILENT_MS && windowHasFocus
+
+/** 占位包的名字前缀。只做前缀匹配：镜像不同后缀也不一样 */
+private const val STUB_PACKAGE_PREFIX = "frameworkpackagestubs"
+
+/** 顺着 ContextWrapper 找到 Activity（判断窗口焦点要用）。找不到就返回 null，由调用方当成「没焦点」 */
+private tailrec fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+
+/**
+ * 这台机器有没有一个**真的能用**的文件选择器。
+ *
+ * 两个条件都要满足：查得到 handler，且不是占位实现。
+ * 查询失败（包可见性被 ROM 收紧等）一律当成「没有」：宁可提示用户改用地址导入，
+ * 也不要让他按下去之后对着不动的屏幕猜。
+ */
+private fun Context.canResolveDocumentPicker(): Boolean {
+    val intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+    val handlers =
+        runCatching { packageManager.queryIntentActivities(intent, 0) }
+            .getOrNull()
+            .orEmpty()
+    return handlers.any { !documentPickerIsStub(it.activityInfo.packageName, it.activityInfo.name) }
+}
 
 /**
  * 源管理（SET-03 / LIVE-03 / LIVE-04）。
@@ -204,22 +281,68 @@ fun SourceManagerScreen(
     // 系统里没有就退到 GetContent（有些盒子的「文件管理」只实现了后者），
     // 两条都走不通才写一行提示。结果由系统能力决定，不由崩溃决定。
 
-    /** 拉起系统选文件；两条通道都走不通时把原因写在状态行，不把应用带走。 */
+    /**
+     * 这台机器到底有没有**能用**的文件选择器。
+     *
+     * 比「启动时抛不抛异常」更进一步：Android TV 的部分镜像（含 AOSP 的 android-tv 系统镜像）
+     * 把 DocumentsUI 换成了一个空壳实现，`OPEN_DOCUMENT` 能解析、Activity 能启动、
+     * 但界面不出现、结果永不回调 —— 从代码角度看「成功」，从用户角度看**点了没反应**。
+     * 这是 2026-11-02 在 Android 11 TV 模拟器上实测到的：后台日志显示启动的是
+     * `frameworkpackagestubs/.Stubs$DocumentsStub`。所以启动前先问一句，别让用户白等。
+     */
+    val pickerAvailable = remember(context) { context.canResolveDocumentPicker() }
+
+    /**
+     * 最近一次拉起选择器的时刻（`elapsedRealtime`）。0 表示「没有待确认的选择器」。
+     *
+     * 用途是兜住 pickerAvailable 判断不到的那批 ROM：预检看起来正常、实际还是没起来。
+     * 拉起后给几秒，如果窗口**一直有焦点**（选择器盖上来必然抢走焦点），就说明它没开。
+     * 任何回调（选了文件 / 用户按返回取消）都会把它清 0，所以「3 秒内返回」不会被误判。
+     */
+    var pickerAwaitingSince by remember { mutableStateOf(0L) }
+
+    /** 拉起系统选文件；两条通道都走不通（或压根没起来）时把原因写在状态行，不把应用带走。 */
     fun launchSaf(
         primary: () -> Unit,
-        fallback: () -> Unit,
         missing: String,
+        /** GET_CONTENT 退路。导出用 CreateDocument，没有等价退路，传 null 即可 */
+        fallback: (() -> Unit)? = null,
     ) {
+        // 预检不过就别拉起：让它「成功启动、静默失败」比直接告诉用户更糟
+        if (!pickerAvailable) {
+            status = missing
+            return
+        }
         // 接 Exception 而不是只接 ActivityNotFoundException：同一个「拉不起来」还有别的形态 ——
         // 选择器存在但缺权限会抛 SecurityException，ROM 把它标成不导出会是别的运行时异常。
         // 这些全都是环境差异，不是我们的逻辑错，一律降级成一行提示。
         try {
             primary()
         } catch (e: Exception) {
+            if (fallback == null) {
+                status = missing
+                return
+            }
             try {
                 fallback()
             } catch (e2: Exception) {
                 status = missing
+                return
+            }
+        }
+        // 拉起来了，但可能是空壳：几秒后回头看窗口焦点还在这儿没有
+        pickerAwaitingSince = SystemClock.elapsedRealtime()
+        scope.launch {
+            delay(PICKER_SILENT_MS)
+            val stillSilent =
+                pickerStillSilent(
+                    awaitingSince = pickerAwaitingSince,
+                    nowMs = SystemClock.elapsedRealtime(),
+                    windowHasFocus = context.findActivity()?.hasWindowFocus() ?: false,
+                )
+            if (stillSilent) {
+                status = missing
+                pickerAwaitingSince = 0L
             }
         }
     }
@@ -284,12 +407,16 @@ fun SourceManagerScreen(
         }
     }
 
+    // 每个选择器回调的第一件事都是「把静默检测清掉」：能回到这里就说明选择器确实起来了，
+    // 无论用户选了文件还是按返回取消（uri 为 null）
     val pickFile =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            pickerAwaitingSince = 0L
             if (uri != null) importSourceFile(uri)
         }
     val pickFileCompat =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            pickerAwaitingSince = 0L
             if (uri != null) importSourceFile(uri)
         }
 
@@ -317,16 +444,19 @@ fun SourceManagerScreen(
 
     val pickJson =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            pickerAwaitingSince = 0L
             if (uri != null) importBackupFile(uri)
         }
     val pickJsonCompat =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            pickerAwaitingSince = 0L
             if (uri != null) importBackupFile(uri)
         }
 
     // 导出源备份（SET-03）：SAF 创建文件，写到用户选的位置
     val createJson =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            pickerAwaitingSince = 0L
             if (uri == null) return@rememberLauncherForActivityResult
             scope.launch {
                 busy = true
@@ -371,10 +501,12 @@ fun SourceManagerScreen(
 
     val pickEpg =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            pickerAwaitingSince = 0L
             if (uri != null) importEpgFile(uri)
         }
     val pickEpgCompat =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            pickerAwaitingSince = 0L
             if (uri != null) importEpgFile(uri)
         }
 
@@ -490,12 +622,13 @@ fun SourceManagerScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             FocusableCard(
                                 onClick = {
-                                    // 导出只有一条通道：CreateDocument 没有 GET_CONTENT 那种退路
-                                    try {
-                                        createJson.launch("leimao-sources.json")
-                                    } catch (e: Exception) {
-                                        status = NO_PICKER_EXPORT
-                                    }
+                                    // 导出只有一条通道（CreateDocument 没有 GET_CONTENT 那种退路），
+                                    // 但也同样要过预检与静默检测 —— 否则「导出备份」在没选择器的电视上
+                                    // 同样是按下去毫无动静
+                                    launchSaf(
+                                        primary = { createJson.launch("leimao-sources.json") },
+                                        missing = NO_PICKER_EXPORT,
+                                    )
                                 },
                             ) {
                                 Text(text = "导出备份", style = TvText.current.label)

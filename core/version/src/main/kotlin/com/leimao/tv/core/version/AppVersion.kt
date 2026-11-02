@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.5"
+    const val CURRENT_VERSION: String = "0.5.0.6"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.6",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "修复：切到影视板块后落在「推荐」，不再直接停在某个具体栏目",
+                        "修复：软解兜底内核把网络地址当成本地文件，「换内核再试」从来没有真正试过",
+                        "修复：电视没有文件选择器时，「导入本地文件」「导出备份」不再点了没反应",
+                        "修复：栏目里没有内容时，从顶部栏目条按「下」焦点会跑出内容区",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.5",
                 date = "2026-11-02",

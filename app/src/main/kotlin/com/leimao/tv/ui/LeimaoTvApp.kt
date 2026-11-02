@@ -526,10 +526,9 @@ private fun HomeRoute(
     // 「从播放页按返回」落到设置页 —— 用户要的是回直播，却看见一堆开关。
     val savedSectionName by container.settings.lastSection.collectAsStateWithLifecycle(initialValue = null)
     var pickedSectionName by rememberSaveable { mutableStateOf<String?>(null) }
-    val section =
-        HomeSection.entries.firstOrNull {
-            it.name == (pickedSectionName ?: savedSectionName) && it != HomeSection.SETTINGS
-        } ?: defaultSection(mode)
+    // 落点解析：主动点击优先，存档只用于冷启动（且不认「设置」）。
+    // 细节与那两个来源的区别见 resolveHomeSection 的注释
+    val section = resolveHomeSection(picked = pickedSectionName, saved = savedSectionName, mode = mode)
     val scope = rememberCoroutineScope()
     // 开机自启动（SET-08）：内嵌设置页开关的数据源
     val bootAutostart by

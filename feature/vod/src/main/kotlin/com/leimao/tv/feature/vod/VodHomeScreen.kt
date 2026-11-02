@@ -1,6 +1,7 @@
 package com.leimao.tv.feature.vod
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -199,7 +200,10 @@ fun VodHomeScreen(
 
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize(),
+                            // focusGroup：从顶部的栏目条按「下」进内容区时，焦点落在**组内第一个**
+                            // 可聚焦项（Hero），而不是按几何距离随便挑一个。没有这个组，上面的固定条
+                            // 与这里的海报是两个互不相干的焦点岛，落差一大就会「按下往左跑」
+                            modifier = Modifier.fillMaxSize().focusGroup(),
                             contentPadding = PaddingValues(bottom = 28.dp),
                             verticalArrangement = Arrangement.spacedBy(18.dp),
                         ) {
@@ -247,8 +251,12 @@ fun VodHomeScreen(
                                             } else {
                                                 state.note ?: "换一个栏目看看，或者到源管理里检查影视源是否可用。"
                                             },
-                                        actionText = null,
-                                        onAction = null,
+                                        // 空态也要留一颗按钮：这不仅是「给个出口」，还是内容区**唯一
+                                        // 可聚焦的东西**。早先这里是纯文字，栏目一空整块内容区就没有
+                                        // 焦点目标，从顶部栏目条按「下」焦点只能往外跑（2026-11-02
+                                        // 模拟器实测：跑到左侧导航去了）
+                                        actionText = if (state.loading) null else "去源管理",
+                                        onAction = onOpenSourceManager.takeIf { !state.loading },
                                     )
                                 }
                             }

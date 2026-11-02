@@ -22,6 +22,25 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!-- 包可见性（Android 11+）：源管理要查「这台机器有没有文件选择器」——
+         查不到就没人接 OPEN_DOCUMENT，得提前告诉用户改用地址导入，而不是按下去没反应。
+         不声明 queries 的话 queryIntentActivities 永远返回空，会把有选择器的机器误判成没有。
+         这里只声明我们真正会去问的三个动作，不涉及任何其它应用的信息 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
+            <data android:mimeType="*/*" />
+        </intent>
+    </queries>
+
     <application
         android:name=".LeimaoTvApplication"
         android:allowBackup="false"

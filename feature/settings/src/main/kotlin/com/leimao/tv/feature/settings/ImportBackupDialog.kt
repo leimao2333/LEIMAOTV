@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -25,7 +26,6 @@ import com.leimao.tv.core.designsystem.components.TvModal
 import com.leimao.tv.core.designsystem.components.TvTextField
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
-import kotlinx.coroutines.delay
 
 /**
  * 「从地址导入源备份」对话框（SET-10）。
@@ -42,12 +42,12 @@ fun ImportBackupDialog(
     // 只用于「地址没填时把焦点送回输入框」；初始焦点靠布局顺序（输入框是第一个可聚焦元素）
     val urlFieldFocus = remember { FocusRequester() }
 
-    // 弹层打开时底层内容整棵被移除，焦点系统要先把焦点「搬」到新树里；
-    // 这个搬迁完成前请求的焦点会被覆盖掉，第一次按键则被用来完成搬迁 ——
-    // 表现就是「打开后第一次按 OK 没反应」。给一小段延时让搬迁落定（实测一帧不够）
+    // 树内弹层没有窗口，不会自动把焦点给第一个可聚焦元素；不点名的话第一下按键
+    // 只会被用来做初始焦点搜索（见 TvModal 说明）。等两帧让布局落定再请求
     LaunchedEffect(Unit) {
-        delay(120)
-        urlFieldFocus.requestFocus()
+        withFrameNanos { }
+        withFrameNanos { }
+        runCatching { urlFieldFocus.requestFocus() }
     }
 
     // 树内弹层（SET-12）：不用 Dialog 窗口 —— 窗口聚焦会吃掉打开后的第一次按键

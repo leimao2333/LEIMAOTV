@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.8"
+    const val CURRENT_VERSION: String = "0.5.0.9"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.9",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "修复：「添加订阅地址」「节目单订阅地址」「从地址导入备份」三个弹层，" +
+                            "打开后第一下按键就管用，不用先随便按一下把焦点叫出来",
+                        "修复：关掉这些弹层后，焦点回到刚才点开的那个按钮上，" +
+                            "不再是一按方向键也不知道停在哪",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.8",
                 date = "2026-11-02",

@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -231,6 +232,29 @@ fun SourceManagerScreen(
     val modalOpen = adding || addingEpg || importingBackup
 
     val firstActionFocus = remember { FocusRequester() }
+    // 另外两个弹层的入口按钮：关闭弹层后要把焦点还给**打开它的那个**按钮，
+    // 否则回来的是一个没有焦点的页面（见 pendingEntryFocus）
+    val addEpgFocus = remember { FocusRequester() }
+    val importBackupFocus = remember { FocusRequester() }
+
+    /**
+     * 弹层关掉之后要接住焦点的入口按钮。
+     *
+     * 树内弹层打开时底层**整棵不组合**（[modalOpen]），关掉时那棵树是新建的，
+     * 没有任何元素持有焦点 —— 焦点系统不会「记得」用户是从哪进来的，
+     * 于是下一次方向键被用来做初始焦点搜索，看起来像「遥控器失灵了」。
+     * 所以每次关闭都记下入口，等底层重新布局后再点名请求一次。
+     */
+    var pendingEntryFocus by remember { mutableStateOf<FocusRequester?>(null) }
+
+    LaunchedEffect(pendingEntryFocus) {
+        val target = pendingEntryFocus ?: return@LaunchedEffect
+        // 两帧：第一帧底层节点刚进组合，第二帧才测量完，太早请求会落到还没布局的节点上
+        withFrameNanos { }
+        withFrameNanos { }
+        runCatching { target.requestFocus() }
+        pendingEntryFocus = null
+    }
 
     suspend fun reload() {
         sources = sourceRepository.list()
@@ -612,7 +636,10 @@ fun SourceManagerScreen(
                                 }
                             }
                             if (epgImporter != null) {
-                                FocusableCard(onClick = { addingEpg = true }) {
+                                FocusableCard(
+                                    onClick = { addingEpg = true },
+                                    modifier = Modifier.focusRequester(addEpgFocus),
+                                ) {
                                     Text(text = "节目单订阅地址", style = TvText.current.label)
                                 }
                             }
@@ -645,7 +672,10 @@ fun SourceManagerScreen(
                                 Text(text = "导入备份", style = TvText.current.label)
                             }
                             if (backupImporter != null) {
-                                FocusableCard(onClick = { importingBackup = true }) {
+                                FocusableCard(
+                                    onClick = { importingBackup = true },
+                                    modifier = Modifier.focusRequester(importBackupFocus),
+                                ) {
                                     Text(text = "从地址导入备份", style = TvText.current.label)
                                 }
                             }
@@ -744,9 +774,13 @@ fun SourceManagerScreen(
 
     if (adding) {
         AddSourceDialog(
-            onDismiss = { adding = false },
+            onDismiss = {
+                adding = false
+                pendingEntryFocus = firstActionFocus
+            },
             onConfirm = { declared, url, userAgent, referer, basicUser, basicPass ->
                 adding = false
+                pendingEntryFocus = firstActionFocus
                 scope.launch {
                     busy = true
                     // 「自动」按地址判定（SET-14）。这里拿不到正文（还没抓），
@@ -813,9 +847,13 @@ fun SourceManagerScreen(
 
     if (addingEpg) {
         AddEpgSourceDialog(
-            onDismiss = { addingEpg = false },
+            onDismiss = {
+                addingEpg = false
+                pendingEntryFocus = addEpgFocus
+            },
             onConfirm = { url ->
                 addingEpg = false
+                pendingEntryFocus = addEpgFocus
                 val importer = epgImporter ?: return@AddEpgSourceDialog
                 scope.launch {
                     busy = true
@@ -833,9 +871,13 @@ fun SourceManagerScreen(
 
     if (importingBackup) {
         ImportBackupDialog(
-            onDismiss = { importingBackup = false },
+            onDismiss = {
+                importingBackup = false
+                pendingEntryFocus = importBackupFocus
+            },
             onConfirm = { url ->
                 importingBackup = false
+                pendingEntryFocus = importBackupFocus
                 val importer = backupImporter ?: return@ImportBackupDialog
                 scope.launch {
                     busy = true
@@ -857,9 +899,18 @@ fun SourceManagerScreen(
     // 返回键：有弹层先关弹层（树内弹层没有窗口，BACK 不会自动关它），否则交给调用方
     BackHandler {
         when {
-            adding -> adding = false
-            addingEpg -> addingEpg = false
-            importingBackup -> importingBackup = false
+            adding -> {
+                adding = false
+                pendingEntryFocus = firstActionFocus
+            }
+            addingEpg -> {
+                addingEpg = false
+                pendingEntryFocus = addEpgFocus
+            }
+            importingBackup -> {
+                importingBackup = false
+                pendingEntryFocus = importBackupFocus
+            }
             else -> onBack()
         }
     }

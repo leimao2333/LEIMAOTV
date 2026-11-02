@@ -111,6 +111,35 @@ enum class HomeSection(
 internal fun defaultSection(mode: AppMode): HomeSection =
     if (mode == AppMode.LIVE) HomeSection.LIVE else HomeSection.RECOMMEND
 
+/** 首页按一次返回键的结果（RULES §6.4 分级返回）。 */
+internal enum class HomeBackAction {
+    /** 退出确认框开着 → 先关掉它，人留在应用里 */
+    CLOSE_EXIT_CONFIRM,
+
+    /** 停在子栏目（设置 / 搜索 / 影视分类）→ 退回默认栏目，**不问退出** */
+    GO_DEFAULT_SECTION,
+
+    /** 已经在默认栏目 → 才问「退出吗」 */
+    ASK_EXIT,
+}
+
+/**
+ * 首页返回键的分级决策。
+ *
+ * 抽成纯函数只为一个目的：这段逻辑错一次，用户在设置页按返回就会被屏幕正中问
+ * 「退出磊毛TV？」—— 全应用最伤人的一处反人类，必须能被单测钉死（早先就是无条件的）。
+ */
+internal fun homeBackAction(
+    showExitConfirm: Boolean,
+    section: HomeSection,
+    mode: AppMode,
+): HomeBackAction =
+    when {
+        showExitConfirm -> HomeBackAction.CLOSE_EXIT_CONFIRM
+        section != defaultSection(mode) -> HomeBackAction.GO_DEFAULT_SECTION
+        else -> HomeBackAction.ASK_EXIT
+    }
+
 /** 导航项 → 影视类型。没有对应导航项的（搜索/设置/直播）返回 null。 */
 internal fun HomeSection.toVodType(): ContentType? =
     when (this) {
@@ -235,10 +264,10 @@ fun HomeScreen(
     // 只能选「留在应用」—— 返回键等于失效，用户被迫用遥控器一路找回去。
     val homeSection = defaultSection(mode)
     BackHandler {
-        when {
-            showExitConfirm -> showExitConfirm = false
-            section != homeSection -> onSectionChange(homeSection)
-            else -> showExitConfirm = true
+        when (homeBackAction(showExitConfirm, section, mode)) {
+            HomeBackAction.CLOSE_EXIT_CONFIRM -> showExitConfirm = false
+            HomeBackAction.GO_DEFAULT_SECTION -> onSectionChange(homeSection)
+            HomeBackAction.ASK_EXIT -> showExitConfirm = true
         }
     }
 

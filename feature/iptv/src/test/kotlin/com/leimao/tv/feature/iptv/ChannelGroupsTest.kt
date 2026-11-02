@@ -183,4 +183,65 @@ class ChannelGroupsTest {
 
         assertEquals(listOf("央视频道", "省份地方"), result.map { it.name })
     }
+
+    /**
+     * 真实订阅列表的规模与脏数据（LIVE-31 的底线）。
+     *
+     * 上面每条用例都只有三个台，跑得通不代表真实列表跑得通。真实的一份 IPTV 清单动辄
+     * 两三百个台，且一定带三类脏数据：台名重复（同一路流挂两个名字）、上游编号不单调、
+     * 上游组名五花八门。这几条一起施加，验证的才是用户手里那份文件。
+     */
+    @Test
+    fun `几百个台的清单里一个都不能丢`() {
+        val big =
+            (1..300).map { i ->
+                // 每 50 个重名一次：真实清单里同一路流挂多个台名很常见
+                val name = if (i % 50 == 0) "CCTV1 综合" else "频道 $i"
+                val group =
+                    when (i % 3) {
+                        0 -> "央视频道"
+                        1 -> "卫视频道"
+                        else -> "地方台"
+                    }
+                // 上游编号故意反着给：不能靠它来排
+                channel(i.toLong(), name, group, 301 - i)
+            }
+        val groups = groupChannels(big)
+        val all = browserGroups(groups, recentChannels = emptyList()).first()
+
+        assertEquals(ALL_CHANNELS_GROUP, all.name)
+        // ① 重名不能被当成重复而合并：合并等于凭空少了台
+        assertEquals(300, all.channels.size)
+        assertEquals(300, all.channels.distinctBy { it.id }.size)
+        // ② 编号按重排结果严格递增 1..300，与上游给的顺序无关
+        assertEquals((1..300).toList(), all.channels.map { it.number })
+        // ③ 各分类加起来还是 300：归类不能吞台
+        assertEquals(300, groups.sumOf { it.channels.size })
+    }
+
+    @Test
+    fun `一直按上键能走遍每个台且回到起点`() {
+        val big =
+            (1..300).map { i ->
+                val group =
+                    when (i % 3) {
+                        0 -> "央视频道"
+                        1 -> "卫视频道"
+                        else -> "地方台"
+                    }
+                channel(i.toLong(), "频道 $i", group, i)
+            }
+        val all = browserGroups(groupChannels(big), recentChannels = emptyList()).first().channels
+
+        // 从第一个台一路按上键（到头翻回末尾）：走满 300 步必须是把整圈走完
+        val visited = mutableListOf<Long>()
+        var current = all.first().id
+        repeat(all.size) {
+            visited += current
+            current = neighborOf(all, current, delta = -1)!!.id
+        }
+
+        assertEquals(300, visited.distinct().size)
+        assertEquals("走满一圈必须回到起点", all.first().id, current)
+    }
 }

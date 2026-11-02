@@ -211,6 +211,39 @@ data class PlayerUiState(
     val textDisabled: Boolean get() = textTracks.isNotEmpty() && textTracks.none { it.selected }
 }
 
+/** 播放页按一次返回键收掉哪一层（PLAY-04 / RULES §6.5）。 */
+internal enum class PlayerBackAction {
+    CLOSE_TRACK_PANEL,
+    CLOSE_CATCHUP,
+    CLOSE_EPG,
+    CLOSE_DRAWER,
+    HIDE_CONTROLS,
+    LEAVE,
+}
+
+/**
+ * 播放页返回键的收叠顺序：越靠近用户刚按出来的那一层越先收。
+ *
+ * 节目单、回看、抽屉都是用户自己打开的浮层。一次全收掉，用户会以为「返回键把我的台
+ * 换了」；而 LEAVE 排在最后，是因为「控制条还亮着」时按返回该先熄控制条 —— 这是电视端
+ * 的通行手感（各家 TV 客户端都这样），不是多按一次。
+ */
+internal fun playerBackAction(
+    trackPanelOpen: Boolean,
+    catchupOpen: Boolean,
+    epgOpen: Boolean,
+    drawerOpen: Boolean,
+    controlsVisible: Boolean,
+): PlayerBackAction =
+    when {
+        trackPanelOpen -> PlayerBackAction.CLOSE_TRACK_PANEL
+        catchupOpen -> PlayerBackAction.CLOSE_CATCHUP
+        epgOpen -> PlayerBackAction.CLOSE_EPG
+        drawerOpen -> PlayerBackAction.CLOSE_DRAWER
+        controlsVisible -> PlayerBackAction.HIDE_CONTROLS
+        else -> PlayerBackAction.LEAVE
+    }
+
 /**
  * 直播播放页（M1）。
  *
@@ -329,13 +362,21 @@ fun PlayerScreen(
     // 优先级更高 —— 有条件接管（enabled=false 时让出）根本轮不到本页，
     // 实测返回键会直接跳过网格/抽屉回主页。
     BackHandler {
-        when {
-            trackPanel != null -> trackPanel = null
-            catchupOpen -> catchupOpen = false
-            epgOpen -> epgOpen = false
-            drawerOpen -> drawerOpen = false
-            controlsVisible -> controlsVisible = false
-            else -> onBack()
+        when (
+            playerBackAction(
+                trackPanelOpen = trackPanel != null,
+                catchupOpen = catchupOpen,
+                epgOpen = epgOpen,
+                drawerOpen = drawerOpen,
+                controlsVisible = controlsVisible,
+            )
+        ) {
+            PlayerBackAction.CLOSE_TRACK_PANEL -> trackPanel = null
+            PlayerBackAction.CLOSE_CATCHUP -> catchupOpen = false
+            PlayerBackAction.CLOSE_EPG -> epgOpen = false
+            PlayerBackAction.CLOSE_DRAWER -> drawerOpen = false
+            PlayerBackAction.HIDE_CONTROLS -> controlsVisible = false
+            PlayerBackAction.LEAVE -> onBack()
         }
     }
 

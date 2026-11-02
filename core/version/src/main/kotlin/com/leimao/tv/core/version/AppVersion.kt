@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.4"
+    const val CURRENT_VERSION: String = "0.5.0.5"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.5",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "新增：添加订阅地址时类型默认「自动」，直播与影视由应用自己判断，不用再选",
+                        "新增：一份备份里直播源和影视源混着也能直接导入，逐条自动识别",
+                        "选文件导入时不再要求先分清「播放列表」还是「源备份」，应用自己认",
+                        "导入完成后直播源与影视源都会各自刷新一遍，进来就能看到频道与影片",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.4",
                 date = "2026-11-02",

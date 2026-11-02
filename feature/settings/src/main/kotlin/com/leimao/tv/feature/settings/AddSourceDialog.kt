@@ -43,7 +43,9 @@ import kotlinx.coroutines.delay
  *
  * **只填地址**：名称由地址自动生成（见 [sourceNameFromUrl]）—— 电视上打一次字要按几十下
  * 方向键，而用户填的名称基本都是「订阅源」，既没有信息量，又在列表里堆出一排同名卡片。
- * 类型是 chip 不是输入框（直播 / 影视走两条完全不同的链路，必须选）；
+ * 类型是 chip 不是输入框（直播 / 影视走两条完全不同的链路），但**默认「自动」**（SET-14）：
+ * 由 [com.leimao.tv.core.database.repository.SourceTypeGuesser] 按地址判定，
+ * 判错了也能在源列表里改，比让用户先猜一个再得到「抓取失败」好。
  * UA 与 Referer / 认证做成可选项，绝大多数源用不到。
  *
  * 输入框走 [com.leimao.tv.core.designsystem.components.TvTextField]：按 OK 唤起**内置键盘**，
@@ -61,7 +63,9 @@ fun AddSourceDialog(
         basicPass: String,
     ) -> Unit,
 ) {
-    var type by rememberSaveable { mutableStateOf(SourceType.LIVE) }
+    // 默认「自动」（SET-14）：绝大多数人根本分不清一个地址是播放列表还是采集接口，
+    // 而选错的代价是一条能加进去、却永远刷不出内容的死源 —— 这个判断机器一秒就能做
+    var type by rememberSaveable { mutableStateOf(SourceType.AUTO) }
     var url by rememberSaveable { mutableStateOf("") }
     // 只用于「地址没填时把焦点送回输入框」；初始焦点靠布局顺序（输入框是第一个可聚焦元素）
     val urlFieldFocus = remember { FocusRequester() }
@@ -106,7 +110,7 @@ fun AddSourceDialog(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "直播填 M3U / TXT；影视填苹果CMS 采集接口。",
+                text = "粘贴地址即可：直播（M3U / TXT）与影视（苹果CMS 接口）会自动识别。",
                 style = TvText.current.hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -140,6 +144,12 @@ fun AddSourceDialog(
                         modifier = Modifier.width(56.dp),
                     )
                     TypeChip(
+                        text = "自动",
+                        selected = type == SourceType.AUTO,
+                        onClick = { type = SourceType.AUTO },
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    TypeChip(
                         text = "直播",
                         selected = type == SourceType.LIVE,
                         onClick = { type = SourceType.LIVE },
@@ -151,6 +161,19 @@ fun AddSourceDialog(
                         onClick = { type = SourceType.VOD },
                     )
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    // 「自动」认不出来时的落点是直播：直播源失败是可自证的（刷新后 0 个频道），
+                    // 影视源失败却是静默的。把这句话写出来，用户至少知道兜底去了哪
+                    text =
+                        when (type) {
+                            SourceType.AUTO -> "按地址判断；认不出来时按直播处理，可随时在列表里改。"
+                            SourceType.VOD -> "影视源只能填采集接口，例如 …/api.php/provide/vod。"
+                            else -> "直播源填 M3U / M3U8 / TXT 播放列表地址。"
+                        },
+                    style = TvText.current.hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Spacer(modifier = Modifier.height(12.dp))
                 TvTextField(
                     value = userAgent,

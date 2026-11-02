@@ -49,12 +49,20 @@ interface SourceRepository {
     suspend fun importJson(json: String): SourceImportSummary
 }
 
-/** 一次备份导入的结果（SET-03）：进来几个、跳过几个、新增的直播源是哪几个 */
+/** 一次备份导入的结果（SET-03）：进来几个、跳过几个、新增的直播源与影视源分别是哪几个 */
 data class SourceImportSummary(
     val added: Int,
     val skipped: Int,
     /** 新增的直播源 id。影视源不在其中：它走另一条刷新链路（VOD-03） */
     val addedLiveIds: List<Long> = emptyList(),
+    /**
+     * 新增的影视源 id（SET-14 混合导入）。
+     *
+     * 与 [addedLiveIds] 分开，是因为两条刷新链路不通用：直播要「下载播放列表再解析频道」，
+     * 影视要「调采集接口再按分类抓条目」。把影视源的 id 混进直播那批，结果是每条影视源
+     * 都如实报一次「内容不是 M3U / TXT 播放列表」—— 用户刚导入就看到满屏失败。
+     */
+    val addedVodIds: List<Long> = emptyList(),
     /** 备份里带的远程偏好（LIVE-08）。null = 这份备份没写 settings 段，本地设置不动 */
     val settings: RemoteSettings? = null,
 )
@@ -142,6 +150,7 @@ class RoomSourceRepository(
 
         var order = dao.maxSortOrder() + 1
         val addedLiveIds = mutableListOf<Long>()
+        val addedVodIds = mutableListOf<Long>()
         for (src in fresh) {
             val id =
                 dao.insert(
@@ -160,12 +169,19 @@ class RoomSourceRepository(
                 )
             order += 1
             // 停用的源不刷：它多半是「已知不可用、先留着备查」的那一条，刷它只是白等一次超时
-            if (src.type == SourceType.LIVE && src.enabled) addedLiveIds += id
+            if (!src.enabled) continue
+            // 类型此时已经是识别后的真实类型（见 SourceJson.parseSource）：混合备份里
+            // 直播、影视各归各的刷新队列，不会互相冒充
+            when (src.type) {
+                SourceType.VOD -> addedVodIds += id
+                else -> addedLiveIds += id
+            }
         }
         return SourceImportSummary(
             added = fresh.size,
             skipped = skipped,
             addedLiveIds = addedLiveIds,
+            addedVodIds = addedVodIds,
             // 偏好只在**导入成功**之后才落地：解析失败时用户看到的应该是一条错误，
             // 而不是「源没进来但主题变了」
             settings = SourceJson.decodeSettings(json),

@@ -68,6 +68,15 @@ data class ChannelWithSource(
 object SourceType {
     const val LIVE = "LIVE"
     const val VOD = "VOD"
+
+    /**
+     * 「自动识别」——**只存在于表单层，不落库**（SET-14）。
+     *
+     * 添加源时它表示「我不管，你按地址判断」；落库前一定会被
+     * [SourceTypeGuesser.resolve] 解析成 [LIVE] 或 [VOD]。
+     * 混进数据库会让所有 `type == VOD` 的查询静默漏掉这些源。
+     */
+    const val AUTO = "AUTO"
 }
 
 /** 影视源的格式（VOD）。与 :core:network 的 `VodSourceRef.FORMAT_*` 一一对应。 */

@@ -172,7 +172,6 @@ internal object SourceJson {
     }
 
     private fun parseSource(obj: String): Source {
-        var type = SourceType.LIVE
         var name = ""
         var url = ""
         var enabled = true
@@ -183,13 +182,12 @@ internal object SourceJson {
         var format = SourceFormat.APPLECMS
 
         val typeV = valueOf(obj, "type")
-        if (typeV != null) type = typeV
         val nameV = valueOf(obj, "name")
-        if (nameV != null) name = nameV
         val urlV = valueOf(obj, "url")
-        if (urlV != null) url = urlV
         val enabledV = valueOf(obj, "enabled")
         if (enabledV != null) enabled = enabledV == "true"
+        if (nameV != null) name = nameV
+        if (urlV != null) url = urlV
         userAgent = valueOf(obj, "userAgent")
         referer = valueOf(obj, "referer")
         basicUser = valueOf(obj, "basicUser")
@@ -198,9 +196,12 @@ internal object SourceJson {
         if (formatV != null) format = normalizeFormat(formatV)
 
         if (url.isBlank()) throw IllegalArgumentException("备份里的某个源缺少 url")
+        // 类型要等拿到 url 之后再定（SET-14）：备份里的 type 常是导出时补的默认值，
+        // 一个写着 LIVE、地址却是 `api.php/provide/vod` 的条目照声明导入只会是死源。
+        // 混合备份（直播 + 影视混在一份文件里）也靠这里逐条识别，不再要求用户分两次导。
         return Source(
             id = 0,
-            type = type,
+            type = SourceTypeGuesser.resolve(typeV, url),
             name = name.ifBlank { "订阅源" },
             url = url,
             enabled = enabled,

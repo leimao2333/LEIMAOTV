@@ -74,4 +74,23 @@ class SourceNameTest {
         assertFalse(looksLikeSourceBackupUrl("https://example.com/live.txt"))
         assertFalse(looksLikeSourceBackupUrl("https://example.com/epg.xml"))
     }
+
+    // ---- 按内容识别备份（SET-14 混合导入）----
+
+    @Test
+    fun `内容像备份就按备份导入`() {
+        // 改名成 .txt、或者干脆没有扩展名的备份也能认出来
+        assertTrue(looksLikeSourceBackupText("""{"version":1,"sources":[{"url":"https://a.com/x.m3u"}]}"""))
+        // 前面带 BOM / 空白不影响：很多手机上的编辑器会加
+        assertTrue(looksLikeSourceBackupText("\uFEFF  \n{\"sources\":[]}"))
+    }
+
+    @Test
+    fun `播放列表内容不当成备份`() {
+        // 播放列表永远不是 JSON 对象，这两条必须为假，否则 m3u 会被送去当备份解析
+        assertFalse(looksLikeSourceBackupText("#EXTM3U\n#EXTINF:-1,CCTV1\nhttp://a.com/1.m3u8"))
+        assertFalse(looksLikeSourceBackupText("CCTV1,http://a.com/1.m3u8"))
+        // 有 sources 字样但不是 JSON 对象（比如一段说明文字）
+        assertFalse(looksLikeSourceBackupText("这里的 sources 指的是频道来源"))
+    }
 }

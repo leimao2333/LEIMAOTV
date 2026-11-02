@@ -8,7 +8,7 @@
 
 图例：`- [ ]` 待办 / `- [x]` 已完成（末尾标版本）/ `⏸` 暂缓（标原因）
 
-当前进度：**87 / 91 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，LIVE-27/28、PLAY-11、SET-10 按聚合订阅仓库的产物形态补齐，剩 LIVE-08 / PLAY-06 / VOD-09 / SYS-06 与验收）
+当前进度：**83 / 87 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，LIVE-27/28、PLAY-11、SET-10、SET-14 按聚合订阅仓库与用户反馈补齐，剩 LIVE-21 / VOD-09 / PLAY-06 / SYS-06 与验收）
 
 ---
 
@@ -458,6 +458,17 @@
 - [x] **SET-03** 补：导入去重 + 导入后自动刷新 ｜ P0（未发版）
   - [x] `SourceJson.filterNew` 按**地址**去重（含文件内部重复）；`importJson` 返回 `SourceImportSummary`
   - [x] 源管理页导入后自动刷新增的直播源，状态行报「导入 N 个源（M 个已存在，跳过）；刷新完成…」
+- [x] **SET-14** 混合导入 / 类型自动识别 ｜ P0（0.5.0.5）
+  - [x] `SourceTypeGuesser`：正文 → 地址**硬**特征 → 声明 → 地址**软**特征 → 兜底直播
+  - [x] `SourceJson.parseSource` 拿到 url 再定类型：备份里 `type` 常是导出时补的默认值，
+        照着声明导入只会得到一条永远刷不出频道的死源
+  - [x] 添加对话框默认「自动」，说明文案随选项变化（选影视时给接口样例）
+  - [x] `SourceImportSummary.addedVodIds`：直播与影视分开刷，混着跑会让影视源被当播放列表解析
+  - [x] `looksLikeSourceBackupText` 按**内容**认备份：改名成 `.txt`、或从聊天软件另存后
+        丢了扩展名照样认；`.json` 后缀判定仍保留给「从地址导入」那条路
+  - [x] 单测 13 条（`SourceTypeGuesserTest`）+ 2 条（`SourceNameTest` 按内容认备份）
+  - [x] 踩到的真实约束：聚合源清单里 `format=moontv` 的影视源挂在 `.txt` 上 ——
+        `.txt` 只能是软特征，不能推翻声明（`SourceJsonTest` 的既有用例当场抓住）
 - [x] **SET-10** 从地址导入源备份 ｜ P1（未发版）
   - [x] `SourceBackupImporter`：抓 URL → 交 `importJson`（解析 / 去重 / 落库都复用同一条链路）
   - [x] 源管理页「从地址导入备份」+ 对话框；导入后同样自动刷新增的直播源

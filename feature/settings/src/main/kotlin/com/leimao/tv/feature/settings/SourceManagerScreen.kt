@@ -58,6 +58,7 @@ import com.leimao.tv.core.database.repository.Source
 import com.leimao.tv.core.database.repository.SourceImportSummary
 import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.repository.SourceType
+import com.leimao.tv.core.database.repository.SourceTypeGuesser
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
@@ -161,6 +162,31 @@ fun SourceManagerScreen(
         epgSourceUrl = epgRepository?.sourceUrl()
     }
 
+    /**
+     * 备份导入之后把**所有**新增的源刷一遍（SET-14 混合导入）。
+     *
+     * 两份 id 必须分开跑：直播源交给 [refresher]「下载播放列表 → 解析频道」，
+     * 影视源交给 [vodRefresher]「调采集接口 → 按分类抓条目」。混在一起的结果是
+     * 每条影视源都如实报一次「内容不是 M3U / TXT 播放列表」——
+     * 用户刚导入就看到满屏失败，还以为整份备份都坏了。
+     *
+     * 不刷更不行：卡片上全是「还没有频道 / 还没有影片」，用户得逐条点刷新才知道能不能用。
+     */
+    suspend fun refreshImported(
+        summary: SourceImportSummary,
+        viaMirror: String? = null,
+    ): String {
+        val liveResults = refreshConcurrently(summary.addedLiveIds, refresher)
+        val vodSources =
+            if (vodRefresher == null) {
+                emptyList<Source>()
+            } else {
+                summary.addedVodIds.mapNotNull { sourceRepository.find(it) }
+            }
+        val vodReport = vodRefresher?.refresh(vodSources)
+        return describeImport(summary, liveResults, viaMirror, vodReport)
+    }
+
     LaunchedEffect(Unit) {
         reload()
         if (isFirstRun) firstActionFocus.requestFocus()
@@ -198,6 +224,25 @@ fun SourceManagerScreen(
         }
     }
 
+    /** 备份文本 → 落地 + 刷新，返回状态行那句话。选备份文件 / 选到备份的普通文件共用 */
+    suspend fun importBackupText(text: String): String =
+        runCatching {
+            // 走 importer 而不是直接调仓储：备份里可能带 settings 段（LIVE-08），
+            // 两条入口（文件 / 地址）必须都能把它落地
+            val summary =
+                backupImporter?.importText(text)?.let { result ->
+                    when (result) {
+                        is BackupImportResult.Done -> result.summary
+                        is BackupImportResult.Failed -> throw IllegalArgumentException(result.detail)
+                    }
+                } ?: sourceRepository.importJson(text)
+            // 导入完顺手刷一遍新增的源（SET-03 / SET-14）：不刷的话卡片上全是
+            // 「还没有频道」，用户还得逐条点刷新才知道这份备份到底能不能用
+            refreshImported(summary)
+        }.getOrElse { e ->
+            "导入失败：${e.message ?: "不是有效的源备份文件"}"
+        }
+
     fun importSourceFile(uri: Uri) {
         scope.launch {
             busy = true
@@ -213,6 +258,16 @@ fun SourceManagerScreen(
                 return@launch
             }
             val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { "本地文件" } ?: "本地文件"
+            // 用户手里是什么就导什么（SET-14）：选到的可能是一份**源备份**（`.json`，
+            // 或者被改过扩展名的备份），而不是播放列表。让他先分清「该点哪个导入按钮」
+            // 是把机器的活交给人的设计 —— 认错的代价是一句「这个文件不是可识别的源」
+            if (looksLikeSourceBackupText(text)) {
+                status = importBackupText(text)
+                busy = false
+                reload()
+                onSourcesChanged()
+                return@launch
+            }
             // 兜住整段导入：文本解析、落库、刷新任何一步抛出来都只是「这个文件导不进去」，
             // 不能让它顺着协程抛到主线程变成闪退
             val result =
@@ -253,24 +308,7 @@ fun SourceManagerScreen(
                 busy = false
                 return@launch
             }
-            status =
-                runCatching {
-                    // 走 importer 而不是直接调仓储：备份里可能带 settings 段（LIVE-08），
-                    // 两条入口（文件 / 地址）必须都能把它落地
-                    val summary =
-                        backupImporter?.importText(text)?.let { result ->
-                            when (result) {
-                                is BackupImportResult.Done -> result.summary
-                                is BackupImportResult.Failed -> throw IllegalArgumentException(result.detail)
-                            }
-                        } ?: sourceRepository.importJson(text)
-                    // 导入完顺手刷一遍新增的直播源（SET-03）：不刷的话卡片上全是
-                    // 「还没有频道」，用户还得逐条点刷新才知道这份备份到底能不能用
-                    val results = summary.addedLiveIds.map { id -> refresher.refresh(id) }
-                    describeImport(summary, results)
-                }.getOrElse { e ->
-                    "导入失败：${e.message ?: "不是有效的源备份文件"}"
-                }
+            status = importBackupText(text)
             busy = false
             reload()
             onSourcesChanged()
@@ -574,19 +612,27 @@ fun SourceManagerScreen(
     if (adding) {
         AddSourceDialog(
             onDismiss = { adding = false },
-            onConfirm = { type, url, userAgent, referer, basicUser, basicPass ->
+            onConfirm = { declared, url, userAgent, referer, basicUser, basicPass ->
                 adding = false
                 scope.launch {
                     busy = true
+                    // 「自动」按地址判定（SET-14）。这里拿不到正文（还没抓），
+                    // 所以只用地址特征；猜不出时兜底直播 —— 直播源失败看得见，影视源失败是静默的
+                    val type =
+                        if (declared == SourceType.AUTO) {
+                            SourceTypeGuesser.resolve(null, url.trim())
+                        } else {
+                            declared
+                        }
                     // 贴进来的是**源备份**（`.json`）时直接按备份导入（SET-10）。
                     // 不这么做的话会先建一条源、再去当播放列表解析，最后报「内容不是
                     // M3U / TXT 播放列表」—— 用户只会以为自己贴错了地址。
+                    // 明确选了「影视」时不走这条：影视采集接口也可能挂在 .json 路径上
                     val importer = backupImporter
-                    if (type == SourceType.LIVE && importer != null && looksLikeSourceBackupUrl(url)) {
+                    if (type != SourceType.VOD && importer != null && looksLikeSourceBackupUrl(url)) {
                         when (val result = importer.importFrom(url.trim())) {
                             is BackupImportResult.Done -> {
-                                val results = refreshConcurrently(result.summary.addedLiveIds, refresher)
-                                status = describeImport(result.summary, results, result.viaMirror)
+                                status = refreshImported(result.summary, result.viaMirror)
                                 reload()
                                 onSourcesChanged()
                             }
@@ -662,8 +708,7 @@ fun SourceManagerScreen(
                     busy = true
                     when (val result = importer.importFrom(url)) {
                         is BackupImportResult.Done -> {
-                            val results = refreshConcurrently(result.summary.addedLiveIds, refresher)
-                            status = describeImport(result.summary, results, result.viaMirror)
+                            status = refreshImported(result.summary, result.viaMirror)
                             reload()
                             onSourcesChanged()
                         }
@@ -1030,6 +1075,7 @@ internal fun describeImport(
     summary: SourceImportSummary,
     results: List<RefreshResult>,
     viaMirror: String? = null,
+    vodReport: VodCatalogReport? = null,
 ): String =
     buildString {
         // 直连 GitHub 超时、改走镜像时先说一句：不然用户会奇怪「为什么这次导入慢了几秒」
@@ -1037,9 +1083,19 @@ internal fun describeImport(
         append("已从备份导入 ${summary.added} 个源")
         if (summary.skipped > 0) append("（${summary.skipped} 个地址已存在，跳过）")
         if (results.isNotEmpty()) append("；").append(summarize(results))
+        // 混合备份里影视源走的是另一条链路，结果必须分开说：
+        // 一句「2 个源成功」既不是频道数也不是影片数，用户看不出哪一半能用
+        vodReport?.takeIf { it.hasSource }?.let { append("；").append(summarizeVod(it)) }
         // 备份里带了远程偏好（LIVE-08）就说一句：设置被远程改过，用户有权知道
         summary.settings?.let { append("；已应用远程偏好：${it.describe()}") }
     }
+
+/** 影视那批的刷新结果 → 一句话（SET-14）。与 [summarize] 分开，因为单位不同：部 / 频道 */
+private fun summarizeVod(report: VodCatalogReport): String {
+    val ok = report.outcomes.count { it.ok }
+    val failed = report.outcomes.size - ok
+    return "影视 $ok 个源成功、$failed 个失败，共 ${report.totalItems} 部影片"
+}
 
 /**
  * 健康检查结果 → 一句人话（LIVE-09）。

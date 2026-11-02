@@ -4,6 +4,7 @@ import android.content.Context
 import coil.annotation.ExperimentalCoilApi
 import coil.imageLoader
 import com.leimao.tv.core.model.cache.CacheUsage
+import com.leimao.tv.core.player.PlayerCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -24,6 +25,17 @@ import java.io.File
  */
 class CacheManager(
     private val cacheDir: File,
+    /**
+     * 清播放缓存（PLAY-15）。
+     *
+     * 单独注入而不是在这里直接删目录：播放缓存由 Media3 的 SimpleCache 持有，
+     * 它自己带一份索引数据库，直接 `deleteRecursively` 会让下次写入对不上账。
+     * 必须先让它 release，再删 —— 这个顺序只能由创建它的一方保证。
+     *
+     * 位置在 [clearImageCache] 之前，是为了让调用方还能把「清图片缓存」写成尾随 lambda：
+     * 这个类原本只有那一个回调，加一个默认参数不该逼所有调用点改写法。
+     */
+    private val clearPlayerCache: () -> Unit = {},
     private val clearImageCache: () -> Unit,
 ) {
     suspend fun usage(): CacheUsage = withContext(Dispatchers.IO) { measure() }
@@ -37,9 +49,12 @@ class CacheManager(
     suspend fun clear(): CacheUsage =
         withContext(Dispatchers.IO) {
             runCatching { clearImageCache() }
+            runCatching { clearPlayerCache() }
             cacheDir.listFiles()?.forEach { file ->
-                // 图片目录已经由 Coil 清过了，这里不再动：谁的数据谁负责
-                if (file.name == IMAGE_CACHE_DIR) return@forEach
+                // 图片与播放缓存已经各自清过了，这里不再动：谁的数据谁负责
+                if (file.name == IMAGE_CACHE_DIR || file.name == PLAYER_CACHE_DIR) {
+                    return@forEach
+                }
                 runCatching { file.deleteRecursively() }
             }
             measure()
@@ -61,14 +76,21 @@ class CacheManager(
         /** 与 `LeimaoTvApplication` 里给 Coil 的磁盘缓存目录保持一致 */
         const val IMAGE_CACHE_DIR = "logo_cache"
 
+        /** 与 [com.leimao.tv.core.player.PlayerCache.DIR_NAME] 一致：播放缓存目录 */
+        const val PLAYER_CACHE_DIR = "player"
+
         @OptIn(ExperimentalCoilApi::class)
         fun create(context: Context): CacheManager =
-            CacheManager(context.cacheDir) {
-                val loader = context.imageLoader
-                // DiskCache.clear() 至今仍标着 ExperimentalCoilApi；这里只用它最基础的
-                // 一条语义（把缓存清空），不涉及会改签名的重载
-                loader.diskCache?.clear()
-                loader.memoryCache?.clear()
-            }
+            CacheManager(
+                cacheDir = context.cacheDir,
+                clearImageCache = {
+                    val loader = context.imageLoader
+                    // DiskCache.clear() 至今仍标着 ExperimentalCoilApi；这里只用它最基础的
+                    // 一条语义（把缓存清空），不涉及会改签名的重载
+                    loader.diskCache?.clear()
+                    loader.memoryCache?.clear()
+                },
+                clearPlayerCache = { PlayerCache.clear(context) },
+            )
     }
 }

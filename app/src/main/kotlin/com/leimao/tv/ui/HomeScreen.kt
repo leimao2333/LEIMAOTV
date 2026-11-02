@@ -102,6 +102,15 @@ enum class HomeSection(
     }
 }
 
+/**
+ * 某一模式的「默认栏目」—— 也就是返回键该退回的那一格。
+ *
+ * 直播模式是「直播」，影视模式是「推荐」（影视板块的首页）。它是返回链的地板：
+ * 退到这一格再按返回，才轮到「退出应用」。
+ */
+internal fun defaultSection(mode: AppMode): HomeSection =
+    if (mode == AppMode.LIVE) HomeSection.LIVE else HomeSection.RECOMMEND
+
 /** 导航项 → 影视类型。没有对应导航项的（搜索/设置/直播）返回 null。 */
 internal fun HomeSection.toVodType(): ContentType? =
     when (this) {
@@ -215,8 +224,23 @@ fun HomeScreen(
 
     LaunchedEffect(showExitConfirm) { if (showExitConfirm) stayFocus.requestFocus() }
 
-    // 主页按返回 = 退出确认，不回到播放页，避免「播放 ↔ 主页」来回打转（§6.4）
-    BackHandler { showExitConfirm = true }
+    // 返回键的语义是「退一层」，不是「退一整个应用」（RULES §6.4 修订，2026-11-02）。
+    //
+    // 分级顺序：
+    // 1. 退出确认框开着 → 先关掉它（留在应用里）；
+    // 2. 停在子栏目（设置 / 搜索 / 某个影视栏目）→ 先退回默认栏目（直播 / 推荐）；
+    // 3. 已经在默认栏目 → 才问「退出吗」。
+    //
+    // 早先这里无条件弹退出确认：用户在设置里按返回，屏幕正中直接问「退出磊毛TV？」，
+    // 只能选「留在应用」—— 返回键等于失效，用户被迫用遥控器一路找回去。
+    val homeSection = defaultSection(mode)
+    BackHandler {
+        when {
+            showExitConfirm -> showExitConfirm = false
+            section != homeSection -> onSectionChange(homeSection)
+            else -> showExitConfirm = true
+        }
+    }
 
     Box(
         modifier =

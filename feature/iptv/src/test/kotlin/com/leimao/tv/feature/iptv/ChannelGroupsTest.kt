@@ -37,6 +37,38 @@ class ChannelGroupsTest {
     }
 
     @Test
+    fun `全部频道排第一且含全量，调台不会只剩最近看过的台`() {
+        // LIVE-31：默认落点必须是全量。曾经默认落在「最近观看」，
+        // 打开抽屉只有刚看过的十几个台，用户以为应用里就这些台
+        val merged = browserGroups(groupChannels(channels), recentChannels = listOf(channels[2]))
+
+        assertEquals(ALL_CHANNELS_GROUP, merged.first().name)
+        assertEquals(listOf(1L, 2L, 3L), merged.first().channels.map { it.id })
+        assertEquals(
+            listOf(ALL_CHANNELS_GROUP, RECENT_CHANNELS_GROUP, "其他频道"),
+            merged.map { it.name },
+        )
+    }
+
+    @Test
+    fun `没有最近观看时不出现这个分组`() {
+        val merged = browserGroups(groupChannels(channels), recentChannels = emptyList())
+
+        assertEquals(listOf(ALL_CHANNELS_GROUP, "其他频道"), merged.map { it.name })
+    }
+
+    @Test
+    fun `最近观看沿用分类里的编号，按号换台不会错台`() {
+        // 历史表里存的是入库时的旧编号（999），必须换成重排后的编号（3），
+        // 否则「在最近观看里按 3」会跳到别的台或什么都不发生
+        val stale = channels[2].copy(number = 999)
+        val merged = browserGroups(groupChannels(channels), recentChannels = listOf(stale))
+
+        val recent = merged.first { it.name == RECENT_CHANNELS_GROUP }
+        assertEquals(3, recent.channels.single().number)
+    }
+
+    @Test
     fun `下键取后一个台`() {
         assertEquals(2L, neighborOf(channels, currentId = 1L, delta = 1)?.id)
     }

@@ -83,6 +83,60 @@ class VodPager(
         return VodPageResult(items = items, okSources = results.count { it != null })
     }
 
+    /**
+     * 推荐栏目的第 [page] 页（VOD-14 的「推荐也要能一直翻」）。
+     *
+     * 与 [page] 是两种翻法：
+     * - 类型栏目是「一个类型的第 N 页」，同一个分类一直往后翻；
+     * - 推荐是「跨类型的第 N 屏」，把每个源的候选分类排成一个环，按页推进 ——
+     *   第 1 页取第 1 个分类的第 1 页，第 2 页取第 2 个分类的第 1 页……一圈轮完
+     *   再从第 1 个分类借第 2 页。
+     *
+     * 为什么不能只翻一个分类：采集站的分类往往只有十几页，而且不少站**忽略 pg 参数**
+     * （翻页返回同一批），去重后就是空 —— 用户看到的正是「翻两下就没了」。
+     * 换分类能绕开这两种情况：只要源里还有别的分类，就一直有内容。
+     */
+    suspend fun recommendPage(page: Int): VodPageResult {
+        if (page < 1) return VodPageResult(emptyList(), okSources = 0)
+        val vodSources = sources.list().filter { it.type == SourceType.VOD && it.enabled }
+        if (vodSources.isEmpty()) return VodPageResult(emptyList(), okSources = 0)
+
+        val gate = Semaphore(maxConcurrency)
+        val results =
+            coroutineScope {
+                vodSources.map { source -> async { fetchRecommend(source, page, gate) } }.awaitAll()
+            }
+        val items =
+            results.filterNotNull().flatten().distinctBy { it.sourceId to it.sourceKey }
+        return VodPageResult(items = items, okSources = results.count { it != null })
+    }
+
+    /** 推荐页的单个源：分类环推进。返回 null = 这个源这次不可用 */
+    private suspend fun fetchRecommend(
+        source: Source,
+        page: Int,
+        gate: Semaphore,
+    ): List<VodSummary>? {
+        val adapter =
+            adapterFactory(
+                VodSourceRef(
+                    id = source.id,
+                    baseUrl = source.url,
+                    headers = source.toRequestHeaders(),
+                    format = source.format,
+                ),
+            )
+        val categories = categoriesOf(source, adapter, gate) ?: return null
+        // 所有类型下的候选分类拍平成一个环：顺序稳定（LinkedHashMap 的插入序），
+        // 同一个源每次翻页取到的分类是可预期的，不会这次是电影下次又是综艺
+        val ring = pickVodCandidates(categories).values.flatten().distinctBy { it.typeId }
+        if (ring.isEmpty()) return null
+
+        val (index, roundPage) = recommendSlot(page, ring.size)
+        val result = gate.withPermit { adapter.list(ring[index].typeId, roundPage) }
+        return (result as? VodFetchResult.Success)?.value?.items
+    }
+
     /** 返回 null = 这个源这次没成功（网络/格式），空列表 = 成功了但这一页确实没内容 */
     private suspend fun fetchOne(
         source: Source,
@@ -162,4 +216,19 @@ data class VodPageResult(
     val okSources: Int,
 ) {
     val allFailed: Boolean get() = okSources == 0
+}
+
+/**
+ * 推荐栏目第 [page] 屏该取「分类环里的第几个分类、那个分类的第几页」。
+ *
+ * 第 1 屏取第 1 个分类的第 1 页，第 2 屏取第 2 个分类的第 1 页……
+ * 一圈轮完再从第 1 个分类借第 2 页。抽成纯函数是为了能单测：
+ * 这里算错的表现是「翻两页又从头来」，用户看到的全是重复内容。
+ */
+internal fun recommendSlot(
+    page: Int,
+    categoryCount: Int,
+): Pair<Int, Int> {
+    if (categoryCount <= 0 || page < 1) return 0 to 1
+    return (page - 1) % categoryCount to (page - 1) / categoryCount + 1
 }

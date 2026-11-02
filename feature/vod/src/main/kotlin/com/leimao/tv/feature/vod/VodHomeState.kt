@@ -100,11 +100,18 @@ data class VodHomeState(
      *
      * 用「全库最近更新」而不是当前类型：推荐的语义就是「跨类型挑给你」。
      * 与继续观看去重 —— 同一部片不该在首页出现两次。
+     *
+     * 翻出来的页（[moreItems]）接在快照后面：快照只够铺满前两屏，
+     * 推荐要能一直往下翻，靠的就是它。跨页去重在这里再做一次 ——
+     * 翻页器只保证页内不重，源在边界上重复吐同一部片是常事。
      */
     val recommendItems: List<VodSummary>
         get() {
             val watching = continueWatching.map { it.progress.sourceId to it.progress.sourceKey }.toSet()
-            return recent.filterNot { (it.sourceId to it.sourceKey) in watching }
+            val base = recent.filterNot { (it.sourceId to it.sourceKey) in watching }
+            if (moreItems.isEmpty()) return base
+            val seen = base.map { it.sourceId to it.sourceKey }.toSet()
+            return base + moreItems.filterNot { (it.sourceId to it.sourceKey) in seen }
         }
     val filtering: Boolean
         get() = selectedYear != null || selectedArea != null || selectedTag != null

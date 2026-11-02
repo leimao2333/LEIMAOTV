@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.3"
+    const val CURRENT_VERSION: String = "0.5.0.4"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.4",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "修：调台只能调到「最近看过的台」—— 频道列表现在默认就是全部频道，分组只用来找台",
+                        "修：在设置、搜索、影视栏目里按返回不再直接问「退出」了，会先退回上一层",
+                        "修：影视「推荐」以前翻两屏就没内容，现在能一直往下翻；「换一换」也真的会换",
+                        "修：视频播放加了本地缓存，来回拖进度和切线路重看不用重新下载；缓冲也从 20 秒提到 60 秒",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.3",
                 date = "2026-11-01",

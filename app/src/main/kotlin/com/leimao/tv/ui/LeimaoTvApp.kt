@@ -520,12 +520,16 @@ private fun HomeRoute(
 ) {
     val mode by container.settings.mode.collectAsStateWithLifecycle(initialValue = AppMode.LIVE)
     // 主页内落点记忆（HOME-03）：DataStore 里存的是名字，这里解析成枚举；
-    // 存档里出现不认识的名字（降级安装 / 手工改档）时回落到「直播」，不让启动路径崩
+    // 存档里出现不认识的名字（降级安装 / 手工改档）时回落到该模式的默认栏目，不让启动路径崩。
+    //
+    // 「设置」不参与记忆（2026-11-02）：它是一次性入口，不是栏目。记它会让
+    // 「从播放页按返回」落到设置页 —— 用户要的是回直播，却看见一堆开关。
     val savedSectionName by container.settings.lastSection.collectAsStateWithLifecycle(initialValue = null)
     var pickedSectionName by rememberSaveable { mutableStateOf<String?>(null) }
     val section =
-        HomeSection.entries.firstOrNull { it.name == (pickedSectionName ?: savedSectionName) }
-            ?: HomeSection.LIVE
+        HomeSection.entries.firstOrNull {
+            it.name == (pickedSectionName ?: savedSectionName) && it != HomeSection.SETTINGS
+        } ?: defaultSection(mode)
     val scope = rememberCoroutineScope()
     // 开机自启动（SET-08）：内嵌设置页开关的数据源
     val bootAutostart by
@@ -614,25 +618,58 @@ private fun HomeRoute(
      *
      * 三重防抖：正在翻、已经到底、上一页刚失败（等用户点重试）都不再触发 ——
      * 翻页脚是「滚到就请求」，没有这层判断会在底部反复打请求。
+     *
+     * 一次点击最多连续翻 [MAX_EMPTY_PAGES] 页：采集站经常「翻页返回同一批」，
+     * 去重后一条不剩，界面纹丝不动 —— 用户只会以为翻页坏了。连翻几页都是重复内容
+     * 才算到底，这比「一页空就宣布没内容」符合实际。
      */
     val loadMoreVod: () -> Unit = {
-        if (!vodRecommend && !vodLoadingMore && !vodNoMore && !vodLoadMoreFailed) {
+        if (!vodLoadingMore && !vodNoMore && !vodLoadMoreFailed) {
             vodLoadingMore = true
             scope.launch {
-                val next = vodPage + 1
-                val result = container.vodPager.page(vodType, next)
-                when {
-                    result.allFailed && result.items.isEmpty() -> vodLoadMoreFailed = true
-                    result.items.isEmpty() -> vodNoMore = true
-                    else -> {
-                        vodPage = next
-                        // 跨页去重：源翻页时偶尔会重复吐出边界条目
-                        val seen = (vodState.items + vodMore).map { it.sourceId to it.sourceKey }.toSet()
-                        vodMore = vodMore + result.items.filterNot { (it.sourceId to it.sourceKey) in seen }
-                        // 这一页没凑满说明后面也没了，别让用户再白等一轮
-                        if (result.items.isEmpty()) vodNoMore = true
+                // 去重基准：推荐栏目要把本地快照一起算进去（翻出来的很可能和快照重复），
+                // 类型栏目算「已显示 + 已翻出的」
+                val seen =
+                    (if (vodRecommend) vodState.recommendItems else vodState.items + vodMore)
+                        .map { it.sourceId to it.sourceKey }
+                        .toMutableSet()
+
+                var page = vodPage
+                var attempts = 0
+                var fresh = 0
+                while (attempts < MAX_EMPTY_PAGES && fresh == 0) {
+                    attempts++
+                    val next = page + 1
+                    // 推荐是跨类型翻（分类环推进），类型栏目是在同一类里往后翻
+                    val result =
+                        if (vodRecommend) {
+                            container.vodPager.recommendPage(next)
+                        } else {
+                            container.vodPager.page(vodType, next)
+                        }
+                    when {
+                        result.allFailed && result.items.isEmpty() -> {
+                            vodLoadMoreFailed = true
+                            break
+                        }
+                        result.items.isEmpty() -> {
+                            vodNoMore = true
+                            break
+                        }
+                        else -> {
+                            page = next
+                            val added = result.items.filter { (it.sourceId to it.sourceKey) !in seen }
+                            added.forEach { seen += it.sourceId to it.sourceKey }
+                            if (added.isNotEmpty()) {
+                                vodMore = vodMore + added
+                                fresh = added.size
+                            }
+                        }
                     }
                 }
+                vodPage = page
+                // 连翻几页一条新的都没有 = 源在自己打转，收手并告诉用户到底了
+                if (fresh == 0) vodNoMore = true
                 vodLoadingMore = false
             }
         }
@@ -685,7 +722,11 @@ private fun HomeRoute(
         section = section,
         onSectionChange = { picked ->
             pickedSectionName = picked.name
-            scope.launch { container.settings.setLastSection(picked.name) }
+            // 设置页不写进「上次停留的栏目」：它不是用户想常驻的地方，
+            // 记下来只会让下次返回主页时先看到设置
+            if (picked != HomeSection.SETTINGS) {
+                scope.launch { container.settings.setLastSection(picked.name) }
+            }
         },
         onModeChange = { next -> scope.launch { container.settings.setMode(next) } },
         // 开机自启动（SET-08）：首页内嵌设置页与独立设置路由读的是同一份 DataStore
@@ -1702,6 +1743,15 @@ private suspend fun loadVodHomeState(
 
 /** 影视首页缓存有效期：半小时内直接读库，不为「切个板块」打一轮请求 */
 private const val VOD_CACHE_TTL_MS = 30 * 60 * 1000L
+
+/**
+ * 一次「往下翻」最多连翻几页。
+ *
+ * 采集站普遍忽略分页参数（翻页返回同一批），去重后一条不剩；翻一页空就说「没有更多了」，
+ * 会让用户觉得「推荐一共就这几个」。连翻三页都是重复内容才收手 —— 三页足够跨过
+ * 源里那些「第一页有货、后面全是复制」的分类边界。
+ */
+private const val MAX_EMPTY_PAGES = 3
 
 /**
  * 给 Hero 上的直播条目找「现在在播什么」（HOME-04）。

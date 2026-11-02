@@ -441,6 +441,20 @@
   - [x] 判据只看协议头（`rtsp://…/x.smil` 没有可用后缀），不看扩展名
   - [x] 换内核前 `stop()` 另一个：两个内核同时活着就是两路声音（rtsp 台切回 http 台必踩）
   - [x] `FallbackPlayerControllerTest` 3 条：直连软解 / 软解失败不回头试硬解 / 切回 http 停软解
+- [x] **LIVE-31** 「全部频道」是默认分组 ｜ P0（v0.5.0.4）
+  - [x] 目录顺序抽成 `browserGroups()` 纯函数：全部频道 → 最近观看 → 收藏 → 固定分类
+  - [x] 抽屉默认落点改为「全部频道」（原先是「当前台所在组」，实际几乎总是最近观看）
+  - [x] `ChannelGroupsTest` 补 3 条：全部频道排第一且含全量 / 无最近观看时不出现 / 最近观看沿用分类编号
+- [x] **VOD-14** 推荐栏目一直往下翻 ｜ P0（v0.5.0.4）
+  - [x] `VodPager.recommendPage()`：每个源的候选分类排成环，逐屏推进，一圈轮完借第二页
+  - [x] `loadMoreVod` 去掉 `!vodRecommend` 排除；一次点击最多连翻 3 页（采集站忽略 pg 参数时去重后为空）
+  - [x] 推荐栏目渲染翻页脚；「换一换」对推荐也生效（原来按下去毫无反应）
+  - [x] `VodPagerRecommendTest` 4 条钉住 `recommendSlot()` 的环推进
+- [x] **PLAY-15** 点播磁盘缓存 ｜ P0（v0.5.0.4）
+  - [x] `PlayerCache`：SimpleCache + LRU 512MB + `FLAG_IGNORE_CACHE_ON_ERROR`
+  - [x] 只包点播数据源；直播直连（live playlist 每轮都变，命中旧的那份会卡死）
+  - [x] `CacheManager` 增 `clearPlayerCache`：先 release 再删目录（SimpleCache 带索引库）
+  - [x] 缓冲档位：均衡 10s/60s、抗卡顿 20s/120s；RULES §7 写死「低于 10s 按回归缺陷处理」
 - [x] **SET-03** 补：导入去重 + 导入后自动刷新 ｜ P0（未发版）
   - [x] `SourceJson.filterNew` 按**地址**去重（含文件内部重复）；`importJson` 返回 `SourceImportSummary`
   - [x] 源管理页导入后自动刷新增的直播源，状态行报「导入 N 个源（M 个已存在，跳过）；刷新完成…」

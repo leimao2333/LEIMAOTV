@@ -187,14 +187,14 @@ fun VodHomeScreen(
                         val columns = columnsFor(maxWidth)
                         val cardWidth = (maxWidth - POSTER_SPACING * (columns - 1)) / columns
 
+                        // 两个栏目共用同一套「换一换」：推荐换的是候选的排列顺序，
+                        // 类型栏目换的是同一批内容的分页 —— 按下去都必须看得见变化。
+                        // 之前推荐栏目直接返回 recommendItems，按「换一换」毫无反应
+                        val source = if (state.recommend) state.recommendItems else state.allItems
                         val feed =
-                            if (state.recommend) {
-                                state.recommendItems
-                            } else {
+                            remember(source, shuffle, columns) {
                                 // 一页 = 一屏能看到的行数。转一页比转一张像「换了一批」
-                                remember(state.allItems, shuffle, columns) {
-                                    rotateBy(state.allItems, shuffle * columns * GRID_ROWS_PER_PAGE)
-                                }
+                                rotateBy(source, shuffle * columns * GRID_ROWS_PER_PAGE)
                             }
 
                         LazyColumn(
@@ -268,8 +268,10 @@ fun VodHomeScreen(
                                 }
                             }
 
-                            // 翻页哨兵：滚到它就说明用户看到底了，顺手要下一页
-                            if (!state.recommend && !state.filtering) {
+                            // 翻页哨兵：滚到它就说明用户看到底了，顺手要下一页。
+                            // 推荐栏目同样要有 —— 它曾经是「编好的短列表」，翻两屏就空，
+                            // 用户的原话是「推荐根本不能一直往下翻」（2026-11-02）
+                            if (!state.filtering) {
                                 item("load-more") {
                                     LoadMoreFooter(
                                         loading = state.loadingMore,

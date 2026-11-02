@@ -58,7 +58,8 @@ fun CacheScreen(
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text =
-                "台标与海报的缩略图会缓存在本地，删掉不影响播放，只是下次打开要重新加载一遍。",
+                "台标与海报的缩略图、看过的影视片段都会缓存在本地。" +
+                    "删掉不影响收藏与观看进度，只是下次打开要重新加载一遍。",
             style = TvText.current.hint,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -73,7 +74,7 @@ fun CacheScreen(
         } else {
             UsageRow(label = "图片缓存（台标 / 海报）", value = usage.imageBytes)
             Spacer(modifier = Modifier.height(10.dp))
-            UsageRow(label = "其他临时文件", value = usage.otherBytes)
+            UsageRow(label = "播放缓存与临时文件", value = usage.otherBytes)
             Spacer(modifier = Modifier.height(10.dp))
             UsageRow(label = "合计", value = usage.totalBytes, emphasized = true)
         }
@@ -97,7 +98,7 @@ fun CacheScreen(
                             // 没有可清的东西时按钮仍然在：焦点总得有个落点，
                             // 让它可以被聚焦但什么也不发生，比「焦点悬空、按返回都回不去」好
                             usage?.isEmpty == true -> "暂无可清理的缓存"
-                            else -> "删除本地的台标 / 海报缩略图与临时文件"
+                            else -> "删除本地的台标、海报缩略图与播放缓存"
                         },
                     style = TvText.current.hint,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -361,14 +361,22 @@ class Media3PlayerController(
             )
 
         // 每个源有自己的 UA / Referer，所以 data source 必须按请求重建（不能全局共用一份）
+        val upstream =
+            OkHttpDataSource.Factory(okHttpClient)
+                .setDefaultRequestProperties(current.headers)
+
+        // 点播走磁盘缓存（PLAY-15）：同一集来回拖进度、切线路重看，已经下过的分片不必再拉 ——
+        // 这是「看着卡」最直接的一块改善。直播刻意不缓存：HLS 直播的 playlist 每轮都在变，
+        // 一旦命中旧的那份，表现就是换台后一直转圈或者卡在几分钟前。
+        val network =
+            if (current.kind == PlaybackKind.VOD) {
+                PlayerCache.wrap(context, upstream)
+            } else {
+                upstream
+            }
+
         val mediaSourceFactory =
-            DefaultMediaSourceFactory(
-                DefaultDataSource.Factory(
-                    context,
-                    OkHttpDataSource.Factory(okHttpClient)
-                        .setDefaultRequestProperties(current.headers),
-                ),
-            )
+            DefaultMediaSourceFactory(DefaultDataSource.Factory(context, network))
 
         // 续播点只在本轮第一次建流时用；之后接着断点播（见 resumeFromMs 的注释）
         val startAt = (if (firstStart) resumeFromMs else videoPlayer.currentPosition).coerceAtLeast(0L)

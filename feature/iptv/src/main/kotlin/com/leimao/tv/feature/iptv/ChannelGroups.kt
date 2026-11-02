@@ -9,6 +9,46 @@ data class ChannelGroup(
     val channels: List<Channel>,
 )
 
+/** 「全部频道」虚拟分组（LIVE-31）。调台调的是全部内容，它必须排第一位且是默认落点。 */
+const val ALL_CHANNELS_GROUP = "全部频道"
+
+/** 「最近观看」虚拟分组（LIVE-15）。数据来自 history 表，不是频道表的切片。 */
+const val RECENT_CHANNELS_GROUP = "最近观看"
+
+/**
+ * 分组栏的完整目录：**全部频道 → 最近观看 → 传入的真实分组**（收藏 + 固定分类）。
+ *
+ * 抽成纯函数是为了能单测：这里一旦把顺序或编号弄错，用户看到的是
+ * 「调台只调到最近看过的那几个台」——这种错在截图和走查里都很难发现。
+ *
+ * 编号统一以「分类里的那一份」为准（LIVE-30）：最近观看 / 收藏来自历史表与收藏表，
+ * 带的是入库时的旧编号，不换过来就会出现「同一个台在最近观看里是 1078、
+ * 在央视频道里是 021」，按号换台直接失灵。
+ */
+fun browserGroups(
+    groups: List<ChannelGroup>,
+    recentChannels: List<Channel>,
+): List<ChannelGroup> {
+    val canonical = groups.flatMap { it.channels }.associateBy { it.id }
+    // 全量 = 所有真实分组切片的并集。按重排后的编号排序 —— 编号就是用户看到的顺序，
+    // 与 ↑↓ 换台共用同一套次序（按 id 或入库顺序排会让上下键跳得莫名其妙）
+    val all =
+        groups
+            .flatMap { it.channels }
+            .map { canonical[it.id] ?: it }
+            .distinctBy { it.id }
+            .sortedBy { it.number }
+    val recent =
+        if (recentChannels.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(ChannelGroup(RECENT_CHANNELS_GROUP, recentChannels.map { canonical[it.id] ?: it }))
+        }
+    return (listOf(ChannelGroup(ALL_CHANNELS_GROUP, all)) + recent + groups).map { group ->
+        group.copy(channels = group.channels.map { canonical[it.id] ?: it })
+    }
+}
+
 /**
  * 把「全量频道」切成**固定的六个分类**（LIVE-29）。
  *

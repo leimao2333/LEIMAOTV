@@ -63,24 +63,13 @@ fun ChannelBrowser(
     /** 外部请求「跳转到某个分组」（HOME-06 分组快捷入口）。变化时列表切到该分组。 */
     pendingGroup: String? = null,
 ) {
-    // 「最近观看」作为虚拟分组插在最前（LIVE-15）。它和真实分组并列出现在左侧分组栏，
-    // 只是数据来源不同：真实分组来自全集切片，它是 history 表的一份倒序查询。
-    val allGroups =
-        remember(groups, recentChannels) {
-            // 编号以「六个分类里的那一份」为准（LIVE-30）：最近观看 / 收藏的频道来自
-            // 历史表与收藏表，带的是入库时的旧编号，不换过来就会出现
-            // 「同一个台在最近观看里是 1078、在央视频道里是 021」——按号换台直接失灵
-            val canonical = groups.flatMap { it.channels }.associateBy { it.id }
-            val recent =
-                if (recentChannels.isEmpty()) {
-                    emptyList()
-                } else {
-                    listOf(ChannelGroup(RECENT_GROUP_NAME, recentChannels.map { canonical[it.id] ?: it }))
-                }
-            (recent + groups).map { group ->
-                group.copy(channels = group.channels.map { canonical[it.id] ?: it })
-            }
-        }
+    // 「全部频道」「最近观看」都是虚拟分组（LIVE-15 / LIVE-31），目录顺序与编号规则
+    // 全在 [browserGroups] 里，UI 只管画。
+    //
+    // 重点是**全部频道排第一且默认选中**：分组是「找台时的筛子」，不是内容上限 ——
+    // 早先默认落在「最近观看」，打开抽屉只能看到刚看过的十几个台，
+    // 用户想调台却以为应用里就这些台（2026-11-02 反馈）。
+    val allGroups = remember(groups, recentChannels) { browserGroups(groups, recentChannels) }
 
     if (allGroups.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -93,10 +82,10 @@ fun ChannelBrowser(
         return
     }
 
-    val selectedGroupName =
-        allGroups.firstOrNull { group -> group.channels.any { it.id == selectedChannelId } }?.name
-            ?: allGroups.first().name
-    var activeGroup by rememberSaveable(allGroups) { mutableStateOf(selectedGroupName) }
+    // 默认停在「全部频道」（LIVE-31）：打开抽屉第一眼就是全量列表，
+    // 当前正在看的台由下面的 scrollToItem 滚到可见位置 ——
+    // 靠「默认落到当前台所在的分组」来定位是反的：那会把用户关在「最近观看」里
+    var activeGroup by rememberSaveable(allGroups) { mutableStateOf(ALL_CHANNELS_GROUP) }
 
     // 外部请求跳转分组：分组快捷入口点中某个分组时，把列表切过去（HOME-06）。
     // 只在分组真实存在时才切，避免外部传了个已不存在的分组名导致列表错乱。
@@ -338,6 +327,3 @@ private val NUMBER_WIDTH = 44.dp
  * primary（深蓝）会把 onSurface 的对比度拉到 4.5:1 以下。
  */
 private const val SELECTED_TINT_ALPHA = 0.16f
-
-/** 抽屉里「最近观看」虚拟分组的名字（LIVE-15）。 */
-private const val RECENT_GROUP_NAME = "最近观看"

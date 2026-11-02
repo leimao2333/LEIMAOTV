@@ -72,22 +72,26 @@ enum class BufferProfile(
     ),
     BALANCED(
         label = "均衡",
-        description = "起播快、抗轻微抖动，默认档",
-        minBufferMs = 5_000,
-        maxBufferMs = 20_000,
-        bufferForPlaybackMs = 500,
+        description = "默认档：攒够 10 秒、最多存 60 秒，抗住常见抖动",
+        // 2026-11-02 上调：原来 5s / 20s 在聚合源上太薄 —— 那些线路经常在 20 秒内
+        // 抖两三次，缓冲一空就是一次可见的卡顿。10 秒的下限能把大部分抖动吃掉，
+        // 60 秒的上限让「回头拖十秒」也不必重新下载
+        minBufferMs = 10_000,
+        maxBufferMs = 60_000,
+        bufferForPlaybackMs = 1_000,
         // 卡住之后恢复的门槛要低：源里不少线路是 10 Mbps 的 1080p，
         // 把「恢复前要攒多久」调大，在慢线路上等于把一次卡顿拖成十几秒
-        // （实测 2.5s 的门槛 → 每次卡 11 秒，回到 1s 才合理）
-        bufferAfterRebufferMs = 1_000,
+        // （实测 2.5s 的门槛 → 每次卡 11 秒，回到 1.5s 才合理）
+        bufferAfterRebufferMs = 1_500,
     ),
     ANTI_JITTER(
         label = "抗卡顿",
-        description = "多攒缓冲，弱网更稳；换台稍慢",
-        minBufferMs = 10_000,
-        maxBufferMs = 30_000,
-        bufferForPlaybackMs = 1_000,
-        bufferAfterRebufferMs = 2_000,
+        description = "多攒缓冲，弱网更稳；换台和起播会慢一些",
+        // 弱网专用档：宁可晚两秒出画，也不要在正片中间卡
+        minBufferMs = 20_000,
+        maxBufferMs = 120_000,
+        bufferForPlaybackMs = 2_000,
+        bufferAfterRebufferMs = 3_000,
     ),
     ;
 

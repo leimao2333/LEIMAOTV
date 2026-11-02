@@ -505,13 +505,17 @@
   - [x] 状态行会写「已应用远程偏好：刷新 12h · 深色 · 大」—— 设置被远程改过，用户有权知道
   - [ ] 已知小毛病：弹层刚打开时的**第一次按键**会被窗口聚焦吃掉（要按两次），属 Compose Dialog 窗口切换行为，
         真机待验；彻底解法是把这些弹层改成树内全屏覆盖层（不动 Dialog 窗口），记在这里备查
-- [ ] **焦点落点：点左侧导航后停在顶部第一个栏目** ｜ P2（0.5.0.6 走查发现，未修）
+- [x] **焦点落点：点左侧导航后停在顶部第一个栏目** ｜ P2（0.5.0.6 走查发现，0.5.0.7 修）
   - 现象：在影视板块点导航「电影」→ 内容确实切成电影，但焦点落在顶部栏目条的**第一个**（推荐）
-    上，再按 OK 会切回推荐。根因是 `contentFocus.requestFocus()` 落在内容区焦点组的第一个子项。
-  - 建议改法：把 `contentFocus` 传给 `VodHomeScreen`，挂在**当前选中**的那个 `TypeTab` 上；
-    注意同一个 `FocusRequester` 只能 attach 一个节点，切换时要先 detach，否则抛
-    "FocusRequester is already attached"。
-  - 不算硬伤（焦点位置本身就是「你会按哪个」的诚实提示，用户能看到它停在推荐上），故未在 0.5.0.6 处理。
+    上，再按 OK 会切回推荐。
+  - 根因：外层只有一个 `focusGroup` 的 requester，请求它就是「组内第一个可聚焦项」= 固定的推荐。
+  - 改法（0.5.0.7）：内容区自己声明入口 —— 首页把 `contentEntryFocus` + 「第几次点导航」的
+    token 交给 `VodHomeScreen`，影视页把 requester 挂在**当前选中**的 `TypeTab` 上；
+    `LaunchedEffect(entryToken, state.recommend, state.selectedType)` 再校正一次，
+    因为「点导航 → 切类型」中间隔一次 state 同步，只请求一次会落在旧的 tab 上。
+  - 同一个 `FocusRequester` 换挂节点实测不抛异常（Compose 会先 detach 旧的），
+    但换挂那一帧可能命中旧节点，所以必须有那一次「跟着 state 收敛」的校正。
+  - 模拟器实测：电影 / 动漫 / 推荐 / 设置 / 直播 五个入口落点全部正确。
 
 ### 5.2 M4 既有待办（继续照旧）
 

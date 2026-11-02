@@ -94,8 +94,29 @@ fun VodHomeScreen(
     onOpenSourceManager: () -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
+    /**
+     * 内容区入口焦点：由外层的首页交给这里，落到**当前选中的那个栏目**上。
+     *
+     * 不传的话外层只能把焦点扔进整个内容区，落点是「组内第一个可聚焦项」——
+     * 也就是固定在「推荐」上：用户点导航「电影」进来，焦点却停在推荐，
+     * 顺手按一下 OK 内容又切回推荐，等于导航点了个寂寞（2026-11-02 模拟器走查）。
+     * 焦点落在哪个 tab，就是「你刚才选的是哪个」最直接的提示。
+     */
+    entryFocus: FocusRequester? = null,
+    /**
+     * 入口焦点的「第几次请求」。外层每点一次导航项就 +1。
+     *
+     * 单靠 requester 不够：点「电影」时 section 先变、影视类型后变（中间隔一次
+     * LaunchedEffect），外层请求焦点那一刻新的 tab 可能还没组合出来，请求会落在旧的 tab 上。
+     * 带上 token 并以 state 为 key，就能在「所选栏目真正落定」的那一帧再校正一次 ——
+     * 点几次导航都不会留下「焦点停在推荐」的尾巴。
+     */
+    entryToken: Int = 0,
 ) {
-    val firstTab = remember { FocusRequester() }
+    // 没人指定入口时自己攒一个：这个 requester 只挂在「当前选中的栏目」上，
+    // 所以请求它就等于「把焦点放到选中的栏目」
+    val ownTabFocus = remember { FocusRequester() }
+    val firstTab = entryFocus ?: ownTabFocus
     val listState = rememberLazyListState()
 
     // 「换一换」只是把本地这批往前转一页，不重新请求
@@ -105,6 +126,14 @@ fun VodHomeScreen(
 
     LaunchedEffect(autoFocus) {
         if (!autoFocus) return@LaunchedEffect
+        withFrameNanos { }
+        runCatching { firstTab.requestFocus() }
+    }
+
+    // 外层（首页）要求把焦点交给内容区时，落点由这一层定：当前选中的栏目。
+    // key 里带 state 是有意的 —— 见 [entryToken] 的说明，栏目晚一拍落定时要再校正一次。
+    LaunchedEffect(entryToken, state.recommend, state.selectedType) {
+        if (entryToken == 0) return@LaunchedEffect
         withFrameNanos { }
         runCatching { firstTab.requestFocus() }
     }

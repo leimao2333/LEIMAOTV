@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -248,6 +249,12 @@ fun HomeScreen(
     // 几何上更近的 ModeSwitch 抢走，用户按右没反应、导航也不收（2026-10-24 模拟器实测）
     val contentFocus = remember { FocusRequester() }
 
+    // 内容区「入口节点」焦点：比 contentFocus 精确一格 —— 前者只能指定「这个区域」，
+    // 焦点最终落在组内第一个可聚焦项上（影视页恰好是「推荐」那个 tab）；这个是让内容区
+    // 自己把「该从哪进来」说出来（影视页把它挂在当前选中的栏目上）。
+    // 没挂上（直播 / 设置 / 搜索都不需要精确落点）就退回 contentFocus。
+    val contentEntryFocus = remember { FocusRequester() }
+
     // 导航栏自动隐藏（SET-02）。
     //
     // 驱动信号用「内容区是否有焦点」而不是「导航栏是否失焦」：导航栏内部节点之间移动
@@ -282,11 +289,21 @@ fun HomeScreen(
     // 等两帧：第一帧让新页面完成组合，第二帧让它的布局落地。
     var pendingContentFocus by remember { mutableStateOf(false) }
 
+    // 「第几次点导航项」。内容区用它把焦点校正到当前选中的栏目上（影视页的 tab 条）——
+    // 影视类型不是点下去那一刻就变的，中间隔一次 state 同步，只有 token 才能分辨
+    // 「这次是刚点进来的」还是「我自己在里面走动」。
+    var contentEntryToken by remember { mutableIntStateOf(0) }
+
     LaunchedEffect(pendingContentFocus) {
         if (!pendingContentFocus) return@LaunchedEffect
         withFrameNanos {}
         withFrameNanos {}
-        runCatching { contentFocus.requestFocus() }
+        // 先问内容区「你希望我从哪进来」，问不到（没挂 / 已经卸载）再退回整块区域的组首。
+        // 用「有没有抛异常」判断而不是看返回值：本仓的 compose-ui 里 requestFocus()
+        // 解析成 Unit，只能靠 IllegalStateException（requester 从未挂上）来分辨。
+        // 影视页只在「有栏目条可聚焦」时才挂它，所以挂上就一定会接住。
+        val entered = runCatching { contentEntryFocus.requestFocus() }.isSuccess
+        if (!entered) runCatching { contentFocus.requestFocus() }
         pendingContentFocus = false
     }
 
@@ -355,6 +372,7 @@ fun HomeScreen(
                                     // pendingContentFocus 去做，它要等新页面组合完
                                     navExpanded = false
                                     pendingContentFocus = true
+                                    contentEntryToken++
                                 },
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -407,6 +425,8 @@ fun HomeScreen(
                     ContentArea(
                         section = section,
                         mode = mode,
+                        entryFocus = contentEntryFocus,
+                        entryToken = contentEntryToken,
                         onOpenPlayer = onOpenPlayer,
                         channels = channels,
                         favoriteIds = favoriteIds,
@@ -449,6 +469,13 @@ fun HomeScreen(
 private fun ContentArea(
     section: HomeSection,
     mode: AppMode,
+    /**
+     * 内容区入口焦点：分区自己决定「焦点从哪进来」。目前只有影视页用它 ——
+     * 挂在当前选中的栏目 tab 上，避免「点了电影、焦点停在推荐」。
+     */
+    entryFocus: FocusRequester? = null,
+    /** 入口焦点的第几次请求，见 [ContentArea] 里传给影视页的说明 */
+    entryToken: Int = 0,
     onOpenPlayer: () -> Unit,
     channels: List<Channel>,
     favoriteIds: Set<Long>,
@@ -543,6 +570,8 @@ private fun ContentArea(
                 onLoadMore = vodActions.onLoadMore,
                 onOpenSourceManager = onOpenSourceManager,
                 autoFocus = false,
+                entryFocus = entryFocus,
+                entryToken = entryToken,
             )
     }
 }

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.6"
+    const val CURRENT_VERSION: String = "0.5.0.7"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,15 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.7",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "修复：点左边导航「电影」「动漫」等栏目后，焦点落在当前选中的栏目上，" +
+                            "不再停在「推荐」（以前顺手按一下确认就会被切回推荐）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.6",
                 date = "2026-11-02",

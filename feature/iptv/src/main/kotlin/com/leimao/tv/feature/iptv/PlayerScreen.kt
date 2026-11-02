@@ -1215,6 +1215,18 @@ private fun ChannelDrawer(
     var filterQuery by remember { mutableStateOf("") }
     // 即时过滤（LIVE-16）：输入即筛，空关键词等价于不过滤。过滤后的分组喂给浏览器。
     val visibleGroups = remember(state.groups, filterQuery) { filterGroups(state.groups, filterQuery) }
+    // 最近观看也要跟着筛：「全部频道」是从过滤后的分组拼出来的，而这一组来自 history，
+    // 不筛的话会变成「输入 CCTV，切到最近观看却全是不匹配的台」——
+    // 一个组里混着筛过的和没筛的，比不过滤更让人困惑
+    val visibleRecent =
+        remember(state.recentChannels, filterQuery) {
+            val keyword = filterQuery.trim()
+            if (keyword.isEmpty()) {
+                state.recentChannels
+            } else {
+                state.recentChannels.filter { it.name.contains(keyword, ignoreCase = true) }
+            }
+        }
 
     Box(
         modifier =
@@ -1243,7 +1255,7 @@ private fun ChannelDrawer(
                     selectedChannelId = state.channel?.id,
                     onChannelClick = onSelect,
                     favoriteIds = state.favoriteIds,
-                    recentChannels = state.recentChannels,
+                    recentChannels = visibleRecent,
                     modifier = Modifier.weight(1f),
                     initialFocusRequester = firstChannelFocus,
                 )

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.7"
+    const val CURRENT_VERSION: String = "0.5.0.8"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,14 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.8",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "修复：退出确认弹层弹出来后要按两次才管用 —— 改成应用内弹层，第一下按键就生效",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.7",
                 date = "2026-11-02",

@@ -35,10 +35,14 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
@@ -307,7 +311,25 @@ fun HomeScreen(
         pendingContentFocus = false
     }
 
-    LaunchedEffect(showExitConfirm) { if (showExitConfirm) stayFocus.requestFocus() }
+    // 退出确认是树内覆盖层（见 [ExitConfirmOverlay]），没有窗口边界，所以焦点要自己看住：
+    //   • 打开时把焦点交给「留在应用」（等一帧，新节点还没布局时请求会落空）；
+    //   • 关闭时把焦点送回内容区 —— 底层在覆盖层开着期间是不可聚焦的，焦点不会自己回去。
+    //
+    // 「关掉后交焦」只对「真的关过一次」生效：冷启动时 showExitConfirm 也是 false，
+    // 不拦的话这里会和首帧接导航焦点（navExpanded 的那个 effect）抢，谁后跑谁赢。
+    var exitConfirmSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(showExitConfirm) {
+        if (!showExitConfirm && !exitConfirmSeen) return@LaunchedEffect
+        withFrameNanos {}
+        if (showExitConfirm) {
+            exitConfirmSeen = true
+            runCatching { stayFocus.requestFocus() }
+        } else {
+            // 先问内容区入口（影视页会落到当前栏目），问不到再退回组首
+            val entered = runCatching { contentEntryFocus.requestFocus() }.isSuccess
+            if (!entered) runCatching { contentFocus.requestFocus() }
+        }
+    }
 
     // 返回键的语义是「退一层」，不是「退一整个应用」（RULES §6.4 修订，2026-11-02）。
     //
@@ -456,7 +478,7 @@ fun HomeScreen(
         }
 
         if (showExitConfirm) {
-            ExitConfirmDialog(
+            ExitConfirmOverlay(
                 stayFocusRequester = stayFocus,
                 onStay = { showExitConfirm = false },
                 onExit = onExit,
@@ -867,13 +889,72 @@ private fun NavItem(
     }
 }
 
+/**
+ * 退出确认里，一个方向键该把焦点交给谁。
+ *
+ * 抽成纯函数是为了能单测：这段逻辑错了，用户按方向键会把焦点甩到弹层外面
+ * （树内覆盖层没有窗口帮它挡焦点），而「焦点在弹层外、按钮还画着」是最难自查的状态。
+ *
+ * 左右与上下都映射到两个按钮上：卡片是左右排的，但遥控器上「上」比「左」顺手，
+ * 两个方向做同一件事比强行区分更不容易按错。非方向键返回 null（不拦，交给按钮与
+ * BackHandler）。
+ */
+internal enum class ExitConfirmTarget { STAY, EXIT }
+
+internal fun exitConfirmTarget(key: Key): ExitConfirmTarget? =
+    when (key) {
+        Key.DirectionLeft, Key.DirectionUp -> ExitConfirmTarget.STAY
+        Key.DirectionRight, Key.DirectionDown -> ExitConfirmTarget.EXIT
+        else -> null
+    }
+
+/**
+ * 退出确认 —— **树内覆盖层，不是 Dialog 窗口**（2026-11-02 修「弹层要按两次」）。
+ *
+ * 用 `Dialog` 时它会新开一个窗口，系统的焦点要等窗口起来才落到按钮上；用户在这个
+ * 空隙里按的第一下会丢进新窗口的「还没有焦点」状态，什么都没发生 —— 于是「弹出来要按
+ * 两次」。同一个 BACK 与 OK 连发（模拟器实测）时，第一次 OK 被吃、弹层纹丝不动。
+ *
+ * 树内覆盖层没有窗口边界：按键始终在同一棵树的同一个窗口里，第一下就到位。
+ *
+ * 代价是它也必须**自己看住焦点**：窗口自带的那套隔离没有了。实测过
+ * `focusProperties { canFocus = false }` 挡不住 —— 它只让那个节点自己不参与焦点搜索，
+ * 子孙照样能被方向键拽走（模拟器上按三下「下」焦点就跑到左边导航的模式开关上）。
+ * 所以这里在**预览阶段**截方向键，自己把焦点钉在两个按钮之间：这才是确定性的锁。
+ */
 @Composable
-private fun ExitConfirmDialog(
+private fun ExitConfirmOverlay(
     stayFocusRequester: FocusRequester,
     onStay: () -> Unit,
     onExit: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onStay) {
+    val exitFocusRequester = remember { FocusRequester() }
+    // 半透明遮罩铺满整棵树：既是「现在走不出去」的视觉提示，也是点击兜底。
+    // 它本身不可聚焦，焦点只属于卡片里的两个按钮。
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.72f))
+                // 预览阶段就吃掉方向键：焦点在按钮上时，按键先过这里（父 → 子），
+                // 于是焦点搜索根本没机会把这棵树挪到底下的导航栏去。
+                // 只拦方向键，OK / BACK 照常下发给按钮与 BackHandler。
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (exitConfirmTarget(event.key)) {
+                        ExitConfirmTarget.STAY -> {
+                            runCatching { stayFocusRequester.requestFocus() }
+                            true
+                        }
+                        ExitConfirmTarget.EXIT -> {
+                            runCatching { exitFocusRequester.requestFocus() }
+                            true
+                        }
+                        null -> false
+                    }
+                },
+        contentAlignment = Alignment.Center,
+    ) {
         Column(
             modifier =
                 Modifier
@@ -900,7 +981,10 @@ private fun ExitConfirmDialog(
                     Text(text = "留在应用", style = TvText.current.label)
                 }
                 Spacer(modifier = Modifier.width(16.dp))
-                FocusableCard(onClick = onExit) {
+                FocusableCard(
+                    onClick = onExit,
+                    modifier = Modifier.focusRequester(exitFocusRequester),
+                ) {
                     Text(text = "退出", style = TvText.current.label)
                 }
             }

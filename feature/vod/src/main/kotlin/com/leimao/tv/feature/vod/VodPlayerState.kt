@@ -107,6 +107,20 @@ data class VodPlayerUiState(
     val progress: Float
         get() = if (durationMs <= 0L) 0f else (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
 
+    /**
+     * 起播缓冲的进度（浮层用）：**已经拿到手的部分 / 全片时长**。
+     *
+     * 与 [progress] 不是一回事：那个是「播到哪了」，这个是「下了多少」。
+     * 时长还没解析出来（拉详情、拿到流信息之前）时返回 null —— 浮层据此改画扫光条，
+     * 看着一个 0% 不动的条比没有进度条更像卡死。
+     */
+    val bufferFraction: Float?
+        get() {
+            if (durationMs <= 0L) return null
+            val loaded = positionMs + loadStats.bufferedMs
+            return (loaded.toFloat() / durationMs).coerceIn(0f, 1f)
+        }
+
     val hasPrevious: Boolean get() = episodeIndex > 0
 
     val hasNext: Boolean get() = episodeIndex + 1 < episodeCount

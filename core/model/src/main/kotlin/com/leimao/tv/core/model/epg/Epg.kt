@@ -155,3 +155,48 @@ fun List<EpgProgramme>.currentAt(millis: Long): EpgProgramme? = firstOrNull { it
 
 /** 下一档：开始时间晚于此刻的第一条 */
 fun List<EpgProgramme>.nextAfter(millis: Long): EpgProgramme? = firstOrNull { it.startAt > millis }
+
+/**
+ * 一条「频道 + 一档节目」的扁平结果（LIVE-21 频道列表用）。
+ *
+ * 播放页只关心一个台，可以按频道名单独查；频道列表要一次性问几百上千个台，
+ * 逐条查库就是几百次往返。批量查询把归一化名带出来，回到内存再按台归堆。
+ *
+ * 带上 `normalizedName` 而不是频道 id：节目单里的 id 与播放列表的 `tvg-id` 不是一回事，
+ * 两边的唯一共同语言是归一化后的名字（见 [normalizeEpgName]）。
+ */
+data class NamedProgramme(
+    val normalizedName: String,
+    val startAt: Long,
+    val endAt: Long,
+    val title: String,
+)
+
+/**
+ * 把批量查询回来的扁平结果按频道归堆，每个台留**开始时间最晚**的那条（LIVE-21）。
+ *
+ * 同一归一名字下出现多条同时「在播」的节目是常态：一份聚合 EPG 里同一个台有几个 id，
+ * 各自写了一份节目表，时间还常常对不上（一个说 20:00 开始，一个说 20:05）。
+ * 取开始最晚的那条 = 取「最近开播的」，它最可能是用户此刻真正在看的节目；
+ * 取最早的那条会让列表里长期挂着已经播完一半的旧节目名。
+ *
+ * 空标题（或全是空白）的条目直接丢掉：画一行 `· ` 出来比不画更让人困惑。
+ */
+fun latestPerChannel(rows: List<NamedProgramme>): Map<String, EpgProgramme> {
+    val result = LinkedHashMap<String, EpgProgramme>()
+    rows.forEach { row ->
+        val title = row.title.trim()
+        if (title.isEmpty() || row.endAt <= row.startAt) return@forEach
+        val existing = result[row.normalizedName]
+        if (existing == null || row.startAt > existing.startAt) {
+            result[row.normalizedName] =
+                EpgProgramme(
+                    channelId = row.normalizedName,
+                    startAt = row.startAt,
+                    endAt = row.endAt,
+                    title = title,
+                )
+        }
+    }
+    return result
+}

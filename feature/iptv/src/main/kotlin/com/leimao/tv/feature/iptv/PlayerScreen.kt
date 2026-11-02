@@ -138,6 +138,14 @@ data class PlayerUiState(
      */
     val epgProgrammes: List<EpgProgramme> = emptyList(),
     /**
+     * 频道列表里每个台「此刻在播什么」（LIVE-21），key = 归一化后的频道名。
+     *
+     * 与 [epgProgrammes] 分开两份：那一份只覆盖**当前台**（顶部 HUD 与节目单网格用），
+     * 这一份是给抽屉的几百个台用的。合成一份要么让 HUD 的数据变成全量表，
+     * 要么让抽屉只能看到当前台 —— 两种都不对。
+     */
+    val channelNowPlaying: Map<String, EpgProgramme> = emptyMap(),
+    /**
      * 当前流的可选轨道（PLAY-07）。
      *
      * 直播里大多数台没有可选轨道，所以两个按钮都是「有才显示」。
@@ -1299,6 +1307,7 @@ private fun ChannelDrawer(
                     recentChannels = visibleRecent,
                     modifier = Modifier.weight(1f),
                     initialFocusRequester = firstChannelFocus,
+                    nowPlaying = state.channelNowPlaying,
                 )
             }
         }

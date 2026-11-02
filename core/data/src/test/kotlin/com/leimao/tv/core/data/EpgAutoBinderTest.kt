@@ -6,6 +6,7 @@ import com.leimao.tv.core.database.entity.EpgChannelEntity
 import com.leimao.tv.core.database.entity.EpgProgrammeEntity
 import com.leimao.tv.core.database.entity.EpgSourceEntity
 import com.leimao.tv.core.database.repository.EpgRepository
+import com.leimao.tv.core.model.epg.NamedProgramme
 import com.leimao.tv.core.network.FetchErrorKind
 import com.leimao.tv.core.network.FetchOutcome
 import com.leimao.tv.core.network.HttpClient
@@ -162,6 +163,12 @@ class EpgAutoBinderTest {
 
         override suspend fun channelsByNormalizedName(normalizedName: String): List<EpgChannelEntity> =
             channelRows.filter { it.normalizedName == normalizedName }
+
+        // 本类只验证「挂载时机」，不覆盖频道列表的在播列（那是 LatestPerChannelTest 的事）
+        override suspend fun liveProgrammes(
+            normalizedNames: List<String>,
+            nowMillis: Long,
+        ): List<NamedProgramme> = emptyList()
     }
 
     private class FakeEpgSourceDao : EpgSourceDao {

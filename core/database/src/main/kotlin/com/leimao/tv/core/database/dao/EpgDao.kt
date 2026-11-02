@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.leimao.tv.core.database.entity.EpgChannelEntity
 import com.leimao.tv.core.database.entity.EpgProgrammeEntity
+import com.leimao.tv.core.model.epg.NamedProgramme
 
 /**
  * 节目单读写（LIVE-20）。
@@ -61,6 +62,33 @@ interface EpgDao {
 
     @Query("SELECT * FROM epg_channel WHERE normalizedName = :normalizedName")
     suspend fun channelsByNormalizedName(normalizedName: String): List<EpgChannelEntity>
+
+    /**
+     * 一批频道**此刻正在播**的节目（LIVE-21，频道列表用）。
+     *
+     * 与 [programmesInWindow] 的差别不是「时间窗收窄」而是**语义不同**：
+     * 那个是「某个台的节目表」，这个是「几百个台各自此刻的那一档」——
+     * 用 `startAt <= now AND endAt > now` 让 SQLite 自己去筛，不必把窗口内的
+     * 整批节目拉回内存再过滤（5000 个台 × 12 小时窗口是几万行）。
+     *
+     * 归一化名带出来：调用方要把结果按台归堆，而节目单 id 跟播放列表对不上。
+     */
+    @Query(
+        """
+        SELECT c.normalizedName AS normalizedName,
+               p.startAt AS startAt,
+               p.endAt AS endAt,
+               p.title AS title
+        FROM epg_programme p
+        INNER JOIN epg_channel c ON c.id = p.epgChannelId
+        WHERE c.normalizedName IN (:normalizedNames)
+          AND p.startAt <= :nowMillis AND p.endAt > :nowMillis
+        """,
+    )
+    suspend fun liveProgrammes(
+        normalizedNames: List<String>,
+        nowMillis: Long,
+    ): List<NamedProgramme>
 
     /** 清空 + 批量插入放在一个事务里：中途失败时不能留下半份节目单 */
     @Transaction

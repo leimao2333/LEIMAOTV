@@ -8,13 +8,22 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,11 +37,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.theme.TvText
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /**
  * 起播 / 缓冲浮层（PLAY-12）。
@@ -52,6 +63,9 @@ import kotlinx.coroutines.delay
  * 3. **数据行可以为空**。libVLC 内核给不出字节数，这时只显示标题；
  *    编一个假的「0 KB/s」比不显示更误导。
  * 4. **不接焦点**。它只是状态显示，遥控器的一切操作都该照常落到播放页上。
+ * 5. **进度条只在知道分母时才画百分比**（见 [progress]）。直播没有「总共多久」，
+ *    硬凑一个百分比就是编数据；那种情况退一步画扫光条 + 已等待秒数，
+ *    同样能回答「它还在动吗」，但不假装知道进度。
  *
  * [detail] 由调用方从 `LoadStats.summary()` 取 —— 格式化逻辑放在 core:player，
  * 这样直播页和影视页显示的是同一句话，不会各写一套单位。
@@ -62,8 +76,21 @@ fun BufferingOverlay(
     title: String,
     detail: String?,
     modifier: Modifier = Modifier,
+    /**
+     * 起播进度 0f..1f。**只有知道总时长时才传**（影视点播：已缓冲到的位置 / 全片时长）；
+     * 直播没有分母，传 null —— 那时画扫光条，不画百分比。
+     */
+    progress: Float? = null,
 ) {
     if (!visible) return
+
+    // 已等待秒数：直播那种「不知道自己排到哪」的场景里，唯一能持续变化的真实数字。
+    // 它随浮层的组合生命周期走 —— 浮层一消失就从头开始，不会把两次加载累加在一起
+    val waitedSeconds = rememberWaitSeconds()
+
+    // 0% 一律当作「还不知道」。填一条空的轨道 + 写「已加载 0%」，读起来就是卡死，
+    // 而真相往往只是「刚发出请求，第一个字节还没回来」—— 那时该画扫光条
+    val shown = progress?.takeIf { it > 0f }
 
     Column(
         modifier =
@@ -81,6 +108,8 @@ fun BufferingOverlay(
             color = Color.White,
             textAlign = TextAlign.Center,
         )
+        LoadingBar(progress = shown, color = MaterialTheme.colorScheme.primary)
+        LoadingProgressText(progress = shown, waitedSeconds = waitedSeconds)
         if (!detail.isNullOrBlank()) {
             Text(
                 text = detail,
@@ -91,6 +120,116 @@ fun BufferingOverlay(
         }
     }
 }
+
+/**
+ * 浮层的进度条。
+ *
+ * 两种情况分开画：
+ * - 有 [progress]：实心条按比例填，用户能直接看出「还差多少」；
+ * - 没有：一段 28% 宽的亮条从左扫到右，循环。它不承诺任何比例，
+ *   只承诺「还在动」—— 这与转圈是一个意思，但配合下面那行秒数更让人安心。
+ */
+@Composable
+private fun LoadingBar(
+    progress: Float?,
+    color: Color,
+) {
+    val track = Color.White.copy(alpha = 0.16f)
+    BoxWithConstraints(
+        modifier =
+            Modifier
+                .width(BAR_WIDTH)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(track),
+    ) {
+        val barWidth = maxWidth
+        if (progress != null) {
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxHeight()
+                        // 给下限：0% 时也要留出一点，否则看起来像条灰色空槽，
+                        // 用户会以为进度条本身坏了
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .background(color),
+            )
+        } else {
+            val transition = rememberInfiniteTransition(label = "buffering-sweep")
+            val shift by
+                transition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(durationMillis = 1150, easing = LinearEasing)),
+                    label = "buffering-shift",
+                )
+            val segmentWidth = barWidth * SWEEP_FRACTION
+            Box(
+                modifier =
+                    Modifier
+                        .offset { IntOffset(x = ((barWidth - segmentWidth) * shift).roundToPx(), y = 0) }
+                        .width(segmentWidth)
+                        .fillMaxHeight()
+                        .background(color),
+            )
+        }
+    }
+}
+
+/**
+ * 进度条下面那行：知道进度就报百分比，不知道就报「已等待 N 秒」。
+ *
+ * 两个都显示会挤成两条互不相干的信息；而它们回答的是同一个问题（「还要等多久」），
+ * 只是精度不同，所以二选一。
+ */
+@Composable
+private fun LoadingProgressText(
+    progress: Float?,
+    waitedSeconds: Int,
+) {
+    val text =
+        if (progress != null) {
+            "已加载 ${(progress.coerceIn(0f, 1f) * 100).roundToInt()}%"
+        } else {
+            formatWait(waitedSeconds)
+        }
+    Text(
+        text = text,
+        style = TvText.current.hint,
+        color = Color.White.copy(alpha = 0.9f),
+        textAlign = TextAlign.Center,
+    )
+}
+
+/**
+ * 已等待时长。60 秒以内报秒（「3 秒」和「31 秒」是两种心情），超过就折算成分，
+ * 免得出现「已等待 187 秒」这种要用户自己换算的写法。
+ */
+private fun formatWait(seconds: Int): String =
+    if (seconds < 60) {
+        "已等待 $seconds 秒"
+    } else {
+        "已等待 ${seconds / 60} 分 ${(seconds % 60).toString().padStart(2, '0')} 秒"
+    }
+
+/** 从浮层出现开始每秒 +1。浮层不组合时协程随之取消，下次打开从 0 起算 */
+@Composable
+private fun rememberWaitSeconds(): Int {
+    var seconds by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            seconds++
+        }
+    }
+    return seconds
+}
+
+/** 进度条宽度：比标题窄一点，让视觉重心留在文字上 */
+private val BAR_WIDTH = 220.dp
+
+/** 扫光条占轨道的比例。太宽像进度、太窄像故障灯，28% 刚好读作「一段在跑」 */
+private const val SWEEP_FRACTION = 0.28f
 
 /**
  * 自绘转圈。

@@ -40,6 +40,8 @@ import coil.compose.AsyncImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.Channel
+import com.leimao.tv.core.model.epg.EpgProgramme
+import com.leimao.tv.core.model.epg.normalizeEpgName
 
 /**
  * 分组频道浏览（LIVE-10）。
@@ -62,6 +64,16 @@ fun ChannelBrowser(
     recentChannels: List<Channel> = emptyList(),
     /** 外部请求「跳转到某个分组」（HOME-06 分组快捷入口）。变化时列表切到该分组。 */
     pendingGroup: String? = null,
+    /**
+     * 每个台**此刻在播什么**（LIVE-21），key 是 [normalizeEpgName] 之后的频道名。
+     *
+     * 没有节目单、或节目单没覆盖这个台时，map 里就是没有这一项 —— 行里不画节目名。
+     * 画一行「无节目信息」比空白更吵，而且用户没法据此做任何判断。
+     *
+     * 只显示**当前**这一档，不显示下一档：56dp 的单行放不下两档，而「下一档」在
+     * 播放页顶部已经有了 —— 列表是「找台」用的，知道这会在播什么就够。
+     */
+    nowPlaying: Map<String, EpgProgramme> = emptyMap(),
 ) {
     // 「全部频道」「最近观看」都是虚拟分组（LIVE-15 / LIVE-31），目录顺序与编号规则
     // 全在 [browserGroups] 里，UI 只管画。
@@ -187,6 +199,8 @@ fun ChannelBrowser(
         ) {
             items(items = activeChannels, key = { it.id }) { channel ->
                 val isCurrent = channel.id == selectedChannelId
+                // 节目单按归一化名索引（`CCTV-1` 与 `CCTV1` 要能对上），与仓库那头同一套规则
+                val live = nowPlaying[normalizeEpgName(channel.name)]
                 FocusableCard(
                     onClick = { onChannelClick(channel) },
                     modifier =
@@ -235,8 +249,24 @@ fun ChannelBrowser(
                                 },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            // 有节目名时把宽度让出一半：台名通常比节目名短，
+                            // 让它继续按 weight(1f) 独占剩余空间，节目名就永远被挤成省略号
+                            modifier = Modifier.weight(if (live != null) 0.8f else 1f),
                         )
+                        if (live != null) {
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                // 「在播什么」而不是再加一颗徽标：台名已经说了是哪个台，
+                                // 这里只回答「此刻有什么可看」。前面那一点是用来隔开台名的，
+                                // 否则长台名与节目名会连成一句话
+                                text = "· ${live.title}",
+                                style = TvText.current.hint,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1.2f),
+                            )
+                        }
                         if (isCurrent) {
                             Spacer(modifier = Modifier.width(8.dp))
                             NowPlayingBadge()

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.9"
+    const val CURRENT_VERSION: String = "0.5.0.10"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.10",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "新增：频道列表每一行显示「此刻在播什么」，找台不用先点进去看",
+                        "新增：加载时的转圈下面多了一条进度条 —— 点播显示真实百分比，" +
+                            "直播显示「已等待 N 秒」，一眼能看出它还在动还是已经卡住",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.9",
                 date = "2026-11-02",

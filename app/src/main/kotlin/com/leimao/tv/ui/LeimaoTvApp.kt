@@ -548,6 +548,9 @@ private fun HomeRoute(
         recentChannels = container.historyRepository.recent()
     }
 
+    // 频道列表里的「此刻在播」（LIVE-21）
+    val channelNowPlaying = rememberChannelNowPlaying(container, channels)
+
     // ---- 影视首页（VOD-03）----
     // 类型 / 年份 / 地区三个「用户选择」用 rememberSaveable：进详情页再返回时不该被重置
     var vodState by remember { mutableStateOf(VodHomeState()) }
@@ -728,6 +731,7 @@ private fun HomeRoute(
             }
         },
         onModeChange = { next -> scope.launch { container.settings.setMode(next) } },
+        channelNowPlaying = channelNowPlaying,
         // 开机自启动（SET-08）：首页内嵌设置页与独立设置路由读的是同一份 DataStore
         bootAutostart = bootAutostart,
         onToggleBootAutostart = { enabled ->
@@ -846,6 +850,9 @@ private fun PlayerRoute(
     var recentChannels by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var programme by remember { mutableStateOf<ProgrammeLine?>(null) }
     var epgProgrammes by remember { mutableStateOf<List<EpgProgramme>>(emptyList()) }
+    // 抽屉里几百个台的「此刻在播」（LIVE-21）：与顶部 HUD 用的是同一份节目单，
+    // 但覆盖范围不同 —— 这一份是全量频道，HUD 那一份只有当前台
+    val channelNowPlaying = rememberChannelNowPlaying(container, channels)
     // 回看（LIVE-24）：能力来自起播配置，档期来自节目单（没有节目单时按小时兜底）
     var catchup by remember { mutableStateOf<Catchup?>(null) }
     var catchupEntries by remember { mutableStateOf<List<CatchupEntry>>(emptyList()) }
@@ -1045,6 +1052,7 @@ private fun PlayerRoute(
                 programme = programme,
                 recentChannels = recentChannels,
                 epgProgrammes = epgProgrammes,
+                channelNowPlaying = channelNowPlaying,
                 tracks = tracks,
                 catchup = catchup,
                 catchupEntries = catchupEntries,
@@ -1788,6 +1796,39 @@ private const val ARG_START_MS = "startMs"
  * 再密就是在为「精确到秒」做无用功 —— 每次都要过一遍 Room 的时间窗查询。
  */
 private const val EPG_REFRESH_MS = 60_000L
+
+/**
+ * 频道列表的「此刻在播」表（LIVE-21）。
+ *
+ * 首页直播区与播放页抽屉都要这张表，所以抽成一处：两边各写一份的话，
+ * 归一化口径（[com.leimao.tv.core.model.epg.normalizeEpgName]）迟早会一边改了另一边没改，
+ * 表现就是「同一个台在列表里显示节目、在抽屉里不显示」。
+ *
+ * 按 [EPG_REFRESH_MS] 对表：节目跨档时列表里的名字要跟着换，否则会一直挂着上一档。
+ * 频道列表为空（还没加源）时直接跳过，省掉一次必然空结果的查询。
+ *
+ * 刷新节奏跟随各自的页面：两个 Route 各自持有一份，同一时刻最多差一分钟 ——
+ * 差异只会出现在「刚好跨档的那一刻」，不值得为此把 channels 提升到路由层。
+ */
+@Composable
+private fun rememberChannelNowPlaying(
+    container: AppContainer,
+    channels: List<Channel>,
+): Map<String, EpgProgramme> {
+    var table by remember { mutableStateOf<Map<String, EpgProgramme>>(emptyMap()) }
+    LaunchedEffect(channels) {
+        if (channels.isEmpty()) {
+            table = emptyMap()
+            return@LaunchedEffect
+        }
+        val names = channels.map { it.name }
+        while (true) {
+            table = container.epgRepository.nowPlaying(names, System.currentTimeMillis())
+            delay(EPG_REFRESH_MS)
+        }
+    }
+    return table
+}
 
 /** 一天的毫秒数：回看查节目单的窗口按「能回看几天」放宽（LIVE-24） */
 private const val DAY_MILLIS = 86_400_000L

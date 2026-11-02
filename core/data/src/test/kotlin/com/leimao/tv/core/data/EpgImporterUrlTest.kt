@@ -6,6 +6,7 @@ import com.leimao.tv.core.database.entity.EpgChannelEntity
 import com.leimao.tv.core.database.entity.EpgProgrammeEntity
 import com.leimao.tv.core.database.entity.EpgSourceEntity
 import com.leimao.tv.core.database.repository.EpgRepository
+import com.leimao.tv.core.model.epg.NamedProgramme
 import com.leimao.tv.core.network.FetchErrorKind
 import com.leimao.tv.core.network.FetchOutcome
 import com.leimao.tv.core.network.HttpClient
@@ -56,6 +57,12 @@ class EpgImporterUrlTest {
 
         override suspend fun channelsByNormalizedName(name: String): List<EpgChannelEntity> =
             channels.filter { it.normalizedName == name }
+
+        // 本类只验证「导入 → 落库」这条链路，不读在播列；归堆逻辑由 LatestPerChannelTest 覆盖
+        override suspend fun liveProgrammes(
+            normalizedNames: List<String>,
+            nowMillis: Long,
+        ): List<NamedProgramme> = emptyList()
 
         override suspend fun replaceAll(
             newChannels: List<EpgChannelEntity>,

@@ -51,6 +51,7 @@ import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.AppMode
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.ContentType
+import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.vod.VodContinueItem
 import com.leimao.tv.core.model.vod.VodSummary
 import com.leimao.tv.feature.iptv.CANONICAL_GROUPS
@@ -220,6 +221,12 @@ fun HomeScreen(
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
+    /**
+     * 每个台此刻在播什么（LIVE-21），key = 归一化后的频道名。
+     * 由路由层统一取一份，播放页抽屉与这里共用 —— 两处各查一遍库，
+     * 就会出现「列表说在播 A、抽屉说在播 B」。
+     */
+    channelNowPlaying: Map<String, EpgProgramme> = emptyMap(),
     vodState: VodHomeState,
     vodActions: VodHomeActions,
     hero: List<HeroItem>,
@@ -453,6 +460,7 @@ fun HomeScreen(
                         channels = channels,
                         favoriteIds = favoriteIds,
                         recentChannels = recentChannels,
+                        channelNowPlaying = channelNowPlaying,
                         vodState = vodState,
                         vodActions = vodActions,
                         hero = hero,
@@ -502,6 +510,7 @@ private fun ContentArea(
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
+    channelNowPlaying: Map<String, EpgProgramme> = emptyMap(),
     vodState: VodHomeState,
     vodActions: VodHomeActions,
     hero: List<HeroItem>,
@@ -550,6 +559,7 @@ private fun ContentArea(
                 channels = channels,
                 favoriteIds = favoriteIds,
                 recentChannels = recentChannels,
+                channelNowPlaying = channelNowPlaying,
                 liveNow = hero.firstLive(),
                 onOpenHero = onHeroOpen,
                 onOpenPlayer = onOpenPlayer,
@@ -615,6 +625,7 @@ private fun LiveSectionContent(
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
+    channelNowPlaying: Map<String, EpgProgramme> = emptyMap(),
     liveNow: HeroItem.Live?,
     onOpenHero: (HeroItem) -> Unit,
     onOpenPlayer: () -> Unit,
@@ -679,6 +690,7 @@ private fun LiveSectionContent(
                 onChannelClick = { channel -> onOpenChannel(channel.id) },
                 favoriteIds = favoriteIds,
                 recentChannels = recentChannels,
+                nowPlaying = channelNowPlaying,
                 // 分组入口就用浏览器左侧那一条：它一直可见，按 OK 直接切分组
                 modifier = Modifier.weight(1f),
             )

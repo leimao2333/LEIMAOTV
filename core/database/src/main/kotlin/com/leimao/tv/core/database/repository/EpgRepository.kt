@@ -7,7 +7,9 @@ import com.leimao.tv.core.database.entity.EpgProgrammeEntity
 import com.leimao.tv.core.database.entity.EpgSourceEntity
 import com.leimao.tv.core.model.epg.EpgGuide
 import com.leimao.tv.core.model.epg.EpgProgramme
+import com.leimao.tv.core.model.epg.NamedProgramme
 import com.leimao.tv.core.model.epg.currentAt
+import com.leimao.tv.core.model.epg.latestPerChannel
 import com.leimao.tv.core.model.epg.nextAfter
 import com.leimao.tv.core.model.epg.normalizeEpgName
 
@@ -90,6 +92,38 @@ class EpgRepository(
         return NowNext(current = list.currentAt(nowMillis), next = list.nextAfter(nowMillis))
     }
 
+    /**
+     * 一批频道此刻在播什么，key = [normalizeEpgName] 后的频道名（LIVE-21）。
+     *
+     * 频道列表一屏就是几百上千个台，逐个台调 [nowNext] 等于几百次数据库往返，
+     * 遥控器翻一页就要卡一下。这里一次问完，在内存里按台归堆。
+     *
+     * 分批是因为 SQLite 的绑定参数上限（旧版本 999）：5000 个台的名字一次塞进 `IN`，
+     * Room 会直接抛 `too many SQL variables`。
+     *
+     * 没有任何节目单（没导入 EPG）时返回空 map —— 调用方据此**不画**节目名，
+     * 而不是画一行「无节目信息」。列表里满是「无节目信息」比空白更吵。
+     */
+    suspend fun nowPlaying(
+        channelNames: Collection<String>,
+        nowMillis: Long,
+    ): Map<String, EpgProgramme> {
+        val normalized =
+            channelNames
+                .asSequence()
+                .map { normalizeEpgName(it) }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .toList()
+        if (normalized.isEmpty()) return emptyMap()
+
+        val rows = mutableListOf<NamedProgramme>()
+        normalized.chunked(EPG_NAME_BATCH).forEach { batch ->
+            rows += dao.liveProgrammes(batch, nowMillis)
+        }
+        return latestPerChannel(rows)
+    }
+
     private fun EpgProgramme.toEntity(channelId: String) =
         EpgProgrammeEntity(
             epgChannelId = channelId,
@@ -138,5 +172,16 @@ class EpgRepository(
                 lastRefreshNote = note,
             ),
         )
+    }
+
+    private companion object {
+        /**
+         * 一次 `IN (...)` 里塞多少个频道名。
+         *
+         * SQLite 的绑定参数上限是 999（3.32 起才提到 32766，但 Android 各版本带的版本不一致），
+         * 一个频道名算一个参数，取 400 留足余量：5000 个台分成 13 批，比一次查询多几次往返，
+         * 但不会在老机器上抛 `too many SQL variables`。
+         */
+        const val EPG_NAME_BATCH = 400
     }
 }

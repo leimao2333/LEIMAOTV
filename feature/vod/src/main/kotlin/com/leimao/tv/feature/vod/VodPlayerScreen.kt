@@ -224,6 +224,8 @@ fun VodPlayerScreen(
                 visible = rememberBufferingVisible(state.showLoading),
                 title = state.loadingTitle,
                 detail = state.note ?: state.loadingDetail,
+                // 点播知道全片时长，能给真实百分比；时长还没解析出来时是 null（扫光条）
+                progress = state.bufferFraction,
                 modifier = Modifier.align(Alignment.Center),
             )
         }

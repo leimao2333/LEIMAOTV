@@ -213,18 +213,25 @@ class VodCatalogRefresher(
 private const val CANDIDATES_PER_TYPE = 2
 
 /**
- * 每个类型挑最多 [CANDIDATES_PER_TYPE] 个候选分类，顺序即优先级。
+ * 每个类型挑最多 [limitPerType] 个候选分类，顺序即优先级。
  *
  * **不改分类顺序**：苹果CMS 返回的分类通常顶层在前，按原序取第一个命中率最高。
  * 映射不出九类的分类（源自定义的「福利」之类）直接跳过 —— 合规上也不该展示。
+ *
+ * [limitPerType] 可调：抓首屏只值得试 2 个（多试就是多打请求），
+ * 而**往下翻页恰恰需要更多** —— 翻页是拿候选分类轮着用的，
+ * 环里有几个分类，就能翻几页新内容。见 `VodPager` 的说明。
  */
-internal fun pickVodCandidates(categories: List<VodCategory>): Map<ContentType, List<VodCategory>> {
+internal fun pickVodCandidates(
+    categories: List<VodCategory>,
+    limitPerType: Int = CANDIDATES_PER_TYPE,
+): Map<ContentType, List<VodCategory>> {
     val result = linkedMapOf<ContentType, MutableList<VodCategory>>()
     for (category in categories) {
         val type = category.type ?: continue
         if (type == ContentType.LIVE_CHANNEL) continue
         val list = result.getOrPut(type) { mutableListOf() }
-        if (list.size < CANDIDATES_PER_TYPE) list.add(category)
+        if (list.size < limitPerType) list.add(category)
     }
     return result
 }

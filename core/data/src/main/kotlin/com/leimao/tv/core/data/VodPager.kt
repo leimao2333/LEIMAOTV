@@ -128,8 +128,11 @@ class VodPager(
             )
         val categories = categoriesOf(source, adapter, gate) ?: return null
         // 所有类型下的候选分类拍平成一个环：顺序稳定（LinkedHashMap 的插入序），
-        // 同一个源每次翻页取到的分类是可预期的，不会这次是电影下次又是综艺
-        val ring = pickVodCandidates(categories).values.flatten().distinctBy { it.typeId }
+        // 同一个源每次翻页取到的分类是可预期的，不会这次是电影下次又是综艺。
+        // 环的大小直接决定「能往下翻多少页」，所以这里同样用翻页的宽口径
+        val ring =
+            pickVodCandidates(categories, PAGER_CANDIDATES_PER_TYPE).values.flatten()
+                .distinctBy { it.typeId }
         if (ring.isEmpty()) return null
 
         val (index, roundPage) = recommendSlot(page, ring.size)
@@ -161,16 +164,21 @@ class VodPager(
         }
 
         val categories = categoriesOf(source, adapter, gate) ?: return null
-        val candidates = pickVodCandidates(categories)[type] ?: return emptyList()
+        // 翻页用「多余量」的候选分类：环里有几个分类，就能翻几页新内容（见 PAGER_CANDIDATES_PER_TYPE）
+        val candidates =
+            pickVodCandidates(categories, PAGER_CANDIDATES_PER_TYPE)[type] ?: return emptyList()
+        if (candidates.isEmpty()) return emptyList()
 
-        // 与刷新器同一套策略：同一个类型可能对应源里多个分类，依次试到有内容为止
-        for (category in candidates) {
-            val result = gate.withPermit { adapter.list(category.typeId, page) }
-            if (result is VodFetchResult.Success && result.value.items.isNotEmpty()) {
-                return result.value.items
-            }
-        }
-        return emptyList()
+        // 与推荐栏目同一套环推进：先把每个分类的第 1 页走一遍，再回头借第 2 页。
+        //
+        // 这是「翻两下就没了」的直接修法。原来所有分类都用**同一个 page** 依次试，
+        // 采集站普遍忽略 `pg` 参数（第 2 页返回的还是第 1 页那批），
+        // 于是第 2 页就全军覆没 → 界面停在「没有更多了」。
+        // 换成环之后，即使每个分类只会吐第一页，10 个分类也能撑 10 页；
+        // 真支持翻页的源，第二圈照样能拿到第 2 页。
+        val (index, roundPage) = recommendSlot(page, candidates.size)
+        val result = gate.withPermit { adapter.list(candidates[index].typeId, roundPage) }
+        return (result as? VodFetchResult.Success)?.value?.items
     }
 
     private suspend fun categoriesOf(
@@ -201,6 +209,21 @@ class VodPager(
 
         /** 戏曲板块的搜索词。见类注释里「戏曲为什么走搜索」 */
         const val OPERA_KEYWORD = "戏曲"
+
+        /**
+         * 翻页时每个类型最多用几个候选分类（2026-11-04）。
+         *
+         * 抓首屏用 2 个就够（多试就是多打请求），但**翻页是拿分类当环用的** ——
+         * 环里有几个分类，就能翻几页新内容。原来沿用 2，环只有两格：
+         * 第 3 页绕回第一个分类的第 2 页，而采集站普遍忽略 `pg`，
+         * 拿回来的还是第 1 页那批，去重后一条不剩，界面就停在「没有更多了」——
+         * 这正是用户说的「随便翻两下就直接没新东西了」。
+         *
+         * 12 是折中：苹果CMS 一个类型的子分类（动作片 / 喜剧片 / 科幻片…）
+         * 通常就有十几个，取 12 意味着 12 页、约 240 部片，够翻很久了；
+         * 再大就只是把「源里没有」推迟几页。
+         */
+        const val PAGER_CANDIDATES_PER_TYPE = 12
     }
 }
 

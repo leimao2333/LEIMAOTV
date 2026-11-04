@@ -1,11 +1,14 @@
 package com.leimao.tv
 
 import android.app.Application
+import android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
+import coil.imageLoader
 import coil.memory.MemoryCache
 import com.leimao.tv.core.data.RefreshInterval
+import com.leimao.tv.core.player.MemoryLevel
 import com.leimao.tv.data.CacheManager
 import com.leimao.tv.data.CrashArchive
 import kotlinx.coroutines.flow.first
@@ -59,15 +62,19 @@ class LeimaoTvApplication :
         }
     }
 
-    override fun newImageLoader(): ImageLoader =
-        ImageLoader.Builder(this)
+    override fun newImageLoader(): ImageLoader {
+        // 内存档位：2GB 盒子（堆上限常见 192MB）上，8% 的图片缓存就是 15MB，
+        // 而 4K 分辨率下一屏海报的真实像素是 1080p 的四倍 —— 缓存还没满，
+        // 解码过程中的瞬时峰值就已经很危险了。低配机压到 4%，宁可多重解码几次
+        val level = MemoryLevel.of(this)
+        return ImageLoader.Builder(this)
             // 走 AppContainer 的 OkHttp：用户配了代理 / 超时后，海报请求与接口同路。
             // 不接的话 Coil 用自己的默认 client，隔离网络下海报全都拉不到（2026-10-24 实测）
             .okHttpClient(container.imageHttpClient)
             .memoryCache {
                 MemoryCache.Builder(this)
                     // 台标解码后约 40×40dp，256 个足够覆盖一屏来回滚动
-                    .maxSizePercent(0.08)
+                    .maxSizePercent(if (level.constrained) 0.04 else 0.08)
                     .build()
             }
             .diskCache {
@@ -82,4 +89,21 @@ class LeimaoTvApplication :
             // 而原因（DNS / 403 / 解码失败）只有这里看得到
             .logger(if (BuildConfig.DEBUG) coil.util.DebugLogger() else null)
             .build()
+    }
+
+    /**
+     * 内存吃紧时先把图片缓存整个丢掉（低配机防闪退）。
+     *
+     * 图片是本应用里**唯一可以随时重新拿回来**的大块内存：丢了最多重下一张海报，
+     * 而播放器缓冲丢了会直接卡一下。所以内存一紧，先牺牲它。
+     *
+     * 阈值取 [TRIM_MEMORY_RUNNING_LOW]：比它更轻的两档（RUNNING_MODERATE）说明
+     * 后台还有别的应用在跑，那时丢缓存属于白丢 —— 用户切回来还得重下。
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_RUNNING_LOW) {
+            runCatching { imageLoader.memoryCache?.clear() }
+        }
+    }
 }

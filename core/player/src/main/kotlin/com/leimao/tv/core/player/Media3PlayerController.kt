@@ -607,8 +607,16 @@ class Media3PlayerController(
                     // 硬解初始化失败时退到系统软解，这是 PLAY-02 在 Media3 内能做到的兜底
                     .setEnableDecoderFallback(true),
             )
-            // 缓冲档位由设置页（SET-01）决定，默认均衡档
-            .setLoadControl(bufferProfile.loadControl())
+            // 缓冲档位由设置页（SET-01）决定，默认均衡档。
+            // 设备内存档位在这里注入：同一档在 2GB 盒子上要按字节收紧，
+            // 否则 4K 码流会把进程撑到被系统杀掉（见 MemoryLevel 的说明）
+            .setLoadControl(
+                bufferProfile.loadControl(
+                    MemoryLevel.of(context).also {
+                        Log.d(PlaybackDiagnostics.TAG, "内存档位 ${MemoryLevel.describe(context)}")
+                    },
+                ),
+            )
             .build()
             // 诊断日志：解码器是硬解还是软解、分辨率帧率、丢帧数 —— 用户说「卡」时先看这个
             .apply {

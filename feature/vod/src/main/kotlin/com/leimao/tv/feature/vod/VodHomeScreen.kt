@@ -220,11 +220,26 @@ fun VodHomeScreen(
                         // 两个栏目共用同一套「换一换」：推荐换的是候选的排列顺序，
                         // 类型栏目换的是同一批内容的分页 —— 按下去都必须看得见变化。
                         // 之前推荐栏目直接返回 recommendItems，按「换一换」毫无反应
-                        val source = if (state.recommend) state.recommendItems else state.allItems
+                        //
+                        // 先按 state 记住 source：`recommendItems` / `allItems` 都是 getter，
+                        // 每读一次就要遍历两遍列表、建两个 Set 做去重。直接写进 remember 的
+                        // key 里，等于每次重组都白算一遍（2GB 的 A55 盒子经不起这么花）
+                        val source =
+                            remember(state) {
+                                if (state.recommend) state.recommendItems else state.allItems
+                            }
                         val feed =
                             remember(source, shuffle, columns) {
                                 // 一页 = 一屏能看到的行数。转一页比转一张像「换了一批」
                                 rotateBy(source, shuffle * columns * GRID_ROWS_PER_PAGE)
+                            }
+                        // 分块结果同样要记住：`chunked` 每次调用都新建 N 个 List，
+                        // 而 LazyColumn 只要重新组合就会读它 —— 滚到底部追加一页时，
+                        // 前面几百行的分块全被白白重建一遍
+                        val feedRows = remember(feed, columns) { feed.chunked(columns) }
+                        val continueRows =
+                            remember(state.continueWatching, columns) {
+                                state.continueWatching.chunked(columns)
                             }
 
                         LazyColumn(
@@ -245,8 +260,9 @@ fun VodHomeScreen(
                             if (state.recommend && state.continueWatching.isNotEmpty()) {
                                 item("continue-title") { SectionTitle(title = "继续观看") }
                                 items(
-                                    items = state.continueWatching.chunked(columns),
+                                    items = continueRows,
                                     key = { row -> "continue-${row.first().progress.sourceKey}" },
+                                    contentType = { "continue-row" },
                                 ) { row ->
                                     Row(horizontalArrangement = Arrangement.spacedBy(POSTER_SPACING)) {
                                         row.forEach { item ->
@@ -291,8 +307,9 @@ fun VodHomeScreen(
                             }
 
                             items(
-                                items = feed.chunked(columns),
+                                items = feedRows,
                                 key = { row -> "row-${row.first().rowKey()}" },
+                                contentType = { "feed-row" },
                             ) { row ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(POSTER_SPACING)) {
                                     row.forEach { media ->

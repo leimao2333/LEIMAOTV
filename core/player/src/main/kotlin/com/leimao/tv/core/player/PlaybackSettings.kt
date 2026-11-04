@@ -100,8 +100,21 @@ enum class BufferProfile(
     ),
     ;
 
-    /** 把档位翻译成 Media3 的缓冲控制（PLAY-03）。 */
-    fun loadControl(): DefaultLoadControl =
+    /**
+     * 把档位翻译成 Media3 的缓冲控制（PLAY-03）。
+     *
+     * [level] 只改一件事：**时间与字节谁优先**。
+     *
+     * 原来固定 `prioritizeTimeOverSizeThresholds(true)`，意思是「只要时间没攒够就继续下载，
+     * 字节超了也不管」。低配机上这条必须反过来 —— 否则 Media3 按自己估的字节上限形同虚设，
+     * 4K 码流能把 2GB 机器的进程撑到被系统杀掉（表现是「看着看着退回桌面」）。
+     *
+     * **不自己设 `targetBufferBytes`**：试过给 24MB，结果播放直接卡死 ——
+     * Media3 的分配器是「按整段分片」分配的，一个分片就顶满预算之后就不再加载，
+     * 而播放器还在等数据，看门狗 3 秒判一次超时，表现为「BUFFERING → IDLE」无限循环。
+     * 让 Media3 按码率自己估，只把「尊重字节上限」这个开关打开，才是安全的做法。
+     */
+    fun loadControl(level: MemoryLevel = MemoryLevel.NORMAL): DefaultLoadControl =
         DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 minBufferMs,
@@ -109,7 +122,8 @@ enum class BufferProfile(
                 bufferForPlaybackMs,
                 bufferAfterRebufferMs,
             )
-            .setPrioritizeTimeOverSizeThresholds(true)
+            // 低配机字节优先：宁可偶尔薄一点，也不能让 4K 码流把进程压垮
+            .setPrioritizeTimeOverSizeThresholds(!level.constrained)
             .build()
 
     companion object {

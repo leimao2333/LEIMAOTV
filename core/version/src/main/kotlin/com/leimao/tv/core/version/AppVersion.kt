@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.3.0"
+    const val CURRENT_VERSION: String = "0.5.4.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,18 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.4.0",
+                date = "2026-11-04",
+                changes =
+                    listOf(
+                        "修复：影视板块「翻两下就没新内容了」—— 翻页原来只在两个分类之间打转，" +
+                            "现在按十几个分类轮着翻，能一直往下看",
+                        "修复：2GB 内存的盒子看片时会闪退 —— 播放缓冲改为按机器内存量力而行",
+                        "修复：4K 电视上海报按原图载入，内存吃紧导致闪退 —— 改为按显示尺寸载入",
+                        "优化：影视列表滚动更顺，翻到后面不卡",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.3.0",
                 date = "2026-11-04",

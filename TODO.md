@@ -459,11 +459,17 @@
   - [x] `loadMoreVod` 去掉 `!vodRecommend` 排除；一次点击最多连翻 3 页（采集站忽略 pg 参数时去重后为空）
   - [x] 推荐栏目渲染翻页脚；「换一换」对推荐也生效（原来按下去毫无反应）
   - [x] `VodPagerRecommendTest` 4 条钉住 `recommendSlot()` 的环推进
+  - [x] **类型栏目也走分类环**（v0.5.4.0）：原来对所有候选分类用同一个 `page` 依次试，
+        而候选上限只有 2 个 —— 第 2 页就全军覆没（采集站忽略 `pg` + 环只有两格）。
+        改为 `recommendSlot()` 同一套推进，候选上限提到 `PAGER_CANDIDATES_PER_TYPE = 12`
+  - [x] `MAX_EMPTY_PAGES` 3 → 6：分类轮转后空分类（体育 / 预告片）会消耗连翻次数
+  - [x] `VodCandidatesTest` 5 条钉住「首屏 2 个 / 翻页 12 个」两种口径与顺序
+  - [x] 实测（mock 源 999 页）：连翻 14 页到第 280 条不早停，PSS 129MB → 131MB
 - [x] **PLAY-15** 点播磁盘缓存 ｜ P0（v0.5.0.4）
   - [x] `PlayerCache`：SimpleCache + LRU 512MB + `FLAG_IGNORE_CACHE_ON_ERROR`
   - [x] 只包点播数据源；直播直连（live playlist 每轮都变，命中旧的那份会卡死）
   - [x] `CacheManager` 增 `clearPlayerCache`：先 release 再删目录（SimpleCache 带索引库）
-  - [x] 缓冲档位：均衡 10s/60s、抗卡顿 20s/120s；RULES §7 写死「低于 10s 按回归缺陷处理」
+  - [x] 缓冲档位：均衡 10s/30s、抗卡顿 20s/60s（0.5.3.0 从 60s/120s 收敛）；RULES §7 保留「低于 10s 按回归缺陷处理」，上限改为按内存档位定
 - [x] **SET-03** 补：导入去重 + 导入后自动刷新 ｜ P0（未发版）
   - [x] `SourceJson.filterNew` 按**地址**去重（含文件内部重复）；`importJson` 返回 `SourceImportSummary`
   - [x] 源管理页导入后自动刷新增的直播源，状态行报「导入 N 个源（M 个已存在，跳过）；刷新完成…」

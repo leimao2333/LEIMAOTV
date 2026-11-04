@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,9 +39,10 @@ import okhttp3.OkHttpClient
  * 同线路重连 N 次 → 换下一条线路（重连次数重置）→ 线路用尽 → Failed（UI 给三个出口）
  * ```
  *
- * 关于「软解兜底」：这一版用 Media3 的 [DefaultRenderersFactory.setEnableDecoderFallback]
- * —— 硬解初始化失败时自动退到系统软解。内置 libVLC 内核是 D-02 的决策，但它是 +20MB 的
- * native 依赖，按 RULES §4 的体积条款必须单独一个 PR 写清代价与替代方案，不能混在功能提交里。
+ * 关于「软解兜底」：这一层先用 Media3 的 [DefaultRenderersFactory.setEnableDecoderFallback]
+ * —— 硬解初始化失败时自动退到系统软解。系统软解也没有的冷门编码，交给
+ * [FallbackPlayerController] 在整份请求失败后唤起 [VlcPlayerController]（D-02 已落地）。
+ * 三层各管一段，不要在某一路里重复做别人的事。
  */
 class Media3PlayerController(
     private val context: Context,
@@ -119,14 +121,37 @@ class Media3PlayerController(
 
     private val videoPlayer: ExoPlayer = buildPlayer()
 
-    override fun createSurfaceView(context: Context): View =
-        PlayerView(context).apply {
-            useController = false
-            // 直播不裁画面：宁可留黑边，也不要把台标和字幕切掉
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setShutterBackgroundColor(android.graphics.Color.BLACK)
-            player = videoPlayer
+    /**
+     * 当前的画面出口。
+     *
+     * 每次 `createSurfaceView` 都新建一个 `PlayerView`（不复用：Compose 会把它挂进
+     * 视图树，同一个 View 实例不能同时属于两棵树），但**必须记住它**，
+     * 这样 [release] 在 UI 忘了走 `onRelease` 时还能兜底解绑。
+     */
+    private var playerView: PlayerView? = null
+
+    override fun createSurfaceView(context: Context): View {
+        // 上一块出口若还在，先摘掉：`PlayerView.player = x` 会给 ExoPlayer 注册一整套
+        // 监听（ComponentListener / SurfaceCallback / Player.Listener），不解绑就是纯泄漏
+        playerView?.let { releaseSurfaceView(it) }
+        return PlayerView(context)
+            .apply {
+                useController = false
+                // 直播不裁画面：宁可留黑边，也不要把台标和字幕切掉
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                player = videoPlayer
+            }.also { playerView = it }
+    }
+
+    override val surfaceToken: Any get() = this
+
+    override fun releaseSurfaceView(view: View) {
+        if (view is PlayerView) {
+            view.player = null
+            if (playerView === view) playerView = null
         }
+    }
 
     private var request: PlaybackRequest? = null
     private var lineIndex = 0
@@ -145,8 +170,10 @@ class Media3PlayerController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watchdog: Job? = null
 
+    /** 加载统计的轮询任务。**只在播放期间存在**，见 [startStatsTicker] */
+    private var statsTicker: Job? = null
+
     init {
-        startStatsTicker()
         videoPlayer.addListener(
             object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -226,6 +253,7 @@ class Media3PlayerController(
         autoSwitchCount = 0
         deadLines = 0
         suppressRebufferUntil = 0L
+        startStatsTicker()
         startCurrentLine()
     }
 
@@ -252,6 +280,7 @@ class Media3PlayerController(
 
     override fun stop() {
         stopWatchdog()
+        stopStatsTicker()
         videoPlayer.stop()
         clearTracks()
         _state.value = PlaybackState.Idle
@@ -280,9 +309,14 @@ class Media3PlayerController(
 
     override fun release() {
         stopWatchdog()
+        stopStatsTicker()
         request = null
         clearTracks()
+        // 兜底解绑：正常路径由 Compose 的 onRelease 调用，但「Activity 直接 finish」
+        // 之类的路径不保证走到 onRelease
+        playerView?.let { releaseSurfaceView(it) }
         videoPlayer.release()
+        scope.cancel()
         _state.value = PlaybackState.Idle
     }
 
@@ -533,31 +567,45 @@ class Media3PlayerController(
      *
      * 500ms 是「数字看起来在动」与「别为了一行字频繁唤醒」之间的折中。
      * 值没变时 StateFlow 会自动去重（data class equals），不会白白触发重组。
+     *
+     * ## 为什么改成「只在播放期间跑」（2026-11-04，2GB 机器防闪退）
+     *
+     * 原来在 `init` 里就 `while (true)` 起跑，永不停止：即使播放器处于 Idle，
+     * 主线程仍然每 500ms 被唤醒一次去读三个播放器属性、算速率、可能写 StateFlow。
+     * 低配机（A55 四小核）上这是纯浪费 —— 空闲时也进不了低功耗态，还和 4K 渲染抢调度。
+     * 现在由 [play] 启动、[stop]/[release] 取消，并且用 `isActive` 兜住重复调用。
      */
-
     private fun startStatsTicker() {
-        scope.launch {
-            var lastBytes = 0L
-            var lastAt = SystemClock.elapsedRealtime()
-            while (true) {
-                delay(STATS_TICK_MS)
-                val now = SystemClock.elapsedRealtime()
-                val elapsed = (now - lastAt).coerceAtLeast(1L)
-                val current = _loadStats.value
-                val speed = (current.bytesLoaded - lastBytes).coerceAtLeast(0L) * 1000L / elapsed
-                lastBytes = current.bytesLoaded
-                lastAt = now
+        if (statsTicker?.isActive == true) return
+        statsTicker =
+            scope.launch {
+                var lastBytes = 0L
+                var lastAt = SystemClock.elapsedRealtime()
+                while (true) {
+                    delay(STATS_TICK_MS)
+                    val now = SystemClock.elapsedRealtime()
+                    val elapsed = (now - lastAt).coerceAtLeast(1L)
+                    val current = _loadStats.value
+                    val speed = (current.bytesLoaded - lastBytes).coerceAtLeast(0L) * 1000L / elapsed
+                    lastBytes = current.bytesLoaded
+                    lastAt = now
 
-                val buffered =
-                    (videoPlayer.bufferedPosition - videoPlayer.currentPosition).coerceAtLeast(0L)
-                _loadStats.value =
-                    current.copy(
-                        buffering = videoPlayer.playbackState == Player.STATE_BUFFERING,
-                        bufferedMs = buffered,
-                        bytesPerSecond = speed,
-                    )
+                    val buffered =
+                        (videoPlayer.bufferedPosition - videoPlayer.currentPosition).coerceAtLeast(0L)
+                    _loadStats.value =
+                        current.copy(
+                            buffering = videoPlayer.playbackState == Player.STATE_BUFFERING,
+                            bufferedMs = buffered,
+                            bytesPerSecond = speed,
+                        )
+                }
             }
-        }
+    }
+
+    /** 停掉统计轮询。[stop]/[release] 调用；重复调用无副作用 */
+    private fun stopStatsTicker() {
+        statsTicker?.cancel()
+        statsTicker = null
     }
 
     /**

@@ -24,9 +24,34 @@ import com.leimao.tv.core.model.search.removeSearchHistory
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.PlaybackSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.tvSettings: DataStore<Preferences> by preferencesDataStore(name = "tv-settings")
+
+/**
+ * 冷启动阶段要用到的设置快照（见 [SettingsStore.startupSnapshot]）。
+ *
+ * 四项都有「读不到就按默认值走」的语义，所以这个对象**永远不会是 null** ——
+ * 启动路径上不该出现「还得判空」的分支。
+ */
+data class StartupSnapshot(
+    val themeMode: ThemeMode,
+    val keepScreenOn: Boolean,
+    val playbackSettings: PlaybackSettings,
+    val networkSettings: NetworkSettings,
+) {
+    companion object {
+        /** 全默认：DataStore 读失败（文件损坏、迁移异常）时的退路 */
+        val Default =
+            StartupSnapshot(
+                themeMode = ThemeMode.DEFAULT,
+                keepScreenOn = true,
+                playbackSettings = PlaybackSettings.DEFAULT,
+                networkSettings = NetworkSettings(),
+            )
+    }
+}
 
 /**
  * 本地设置。只放「启动判定需要读的那几项」与轻量偏好，频道等结构化数据在 Room。
@@ -70,6 +95,19 @@ interface SettingsStore {
      * 该标记自动失效，不会在后台拖着电视不睡。
      */
     val keepScreenOn: Flow<Boolean>
+
+    /**
+     * 冷启动要用的那一组设置，**一次读完**。
+     *
+     * 为什么单独给一个方法：这几项分别由 `AppContainer`（缓冲档位、网络设置）和
+     * `MainActivity`（主题、常亮）在**主线程**同步读取，原来是各自的 `runBlocking { xxx.first() }`。
+     * 单看每次都不贵，但在 2GB 盒子的低速 eMMC 上串起来就是 80~300ms 纯主线程阻塞，
+     * 而且发生在 `setContent` 之前 —— 用户在这一段里连遥控器都按不动，冷启动体感极差。
+     *
+     * 这里的四项来自**同一个** DataStore 文件（`tv-settings`），本来就是一次文件读，
+     * 拆成四次 `first()` 只是把同一次读做了四遍。
+     */
+    suspend fun startupSnapshot(): StartupSnapshot
 
     suspend fun setComplianceAgreed(agreed: Boolean)
 
@@ -120,15 +158,7 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         context.tvSettings.data.map { it[KEY_LAST_SECTION] }
 
     override val playbackSettings: Flow<PlaybackSettings> =
-        context.tvSettings.data.map { prefs ->
-            PlaybackSettings(
-                bufferProfile = BufferProfile.fromName(prefs[KEY_BUFFER_PROFILE]),
-                seekIncrementMs = prefs[KEY_SEEK_STEP_MS] ?: PlaybackSettings.DEFAULT.seekIncrementMs,
-                playbackSpeed =
-                    prefs[KEY_PLAYBACK_SPEED]?.toFloatOrNull()
-                        ?: PlaybackSettings.DEFAULT.playbackSpeed,
-            )
-        }
+        context.tvSettings.data.map { prefs -> prefs.decodePlaybackSettings() }
 
     override val refreshInterval: Flow<RefreshInterval> =
         context.tvSettings.data.map { prefs ->
@@ -139,19 +169,13 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
         context.tvSettings.data.map { decodeSearchHistory(it[KEY_SEARCH_HISTORY]) }
 
     override val themeMode: Flow<ThemeMode> =
-        context.tvSettings.data.map { ThemeMode.fromStorage(it[KEY_THEME_MODE]) }
+        context.tvSettings.data.map { prefs -> prefs.decodeThemeMode() }
 
     override val fontScale: Flow<FontScale> =
         context.tvSettings.data.map { FontScale.fromStorage(it[KEY_FONT_SCALE]) }
 
     override val networkSettings: Flow<NetworkSettings> =
-        context.tvSettings.data.map { prefs ->
-            NetworkSettings(
-                timeout = TimeoutProfile.fromStorage(prefs[KEY_TIMEOUT_PROFILE]),
-                concurrency = ConcurrencyProfile.fromStorage(prefs[KEY_CONCURRENCY_PROFILE]),
-                proxy = proxyFromStorage(prefs[KEY_PROXY]),
-            )
-        }
+        context.tvSettings.data.map { prefs -> prefs.decodeNetworkSettings() }
 
     override val bootAutostart: Flow<Boolean> =
         context.tvSettings.data.map { it[KEY_BOOT_AUTOSTART] ?: false }
@@ -159,7 +183,18 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
     // 默认 true：老用户升级上来也要立刻常亮 —— 「没设过」和「用户主动关掉」必须分开，
     // 所以默认值写在读的一侧，而不是写进存档
     override val keepScreenOn: Flow<Boolean> =
-        context.tvSettings.data.map { it[KEY_KEEP_SCREEN_ON] ?: true }
+        context.tvSettings.data.map { prefs -> prefs.decodeKeepScreenOn() }
+
+    override suspend fun startupSnapshot(): StartupSnapshot {
+        // 只读一次文件，四个字段都从这一份 Preferences 里解出来
+        val prefs = context.tvSettings.data.first()
+        return StartupSnapshot(
+            themeMode = prefs.decodeThemeMode(),
+            keepScreenOn = prefs.decodeKeepScreenOn(),
+            playbackSettings = prefs.decodePlaybackSettings(),
+            networkSettings = prefs.decodeNetworkSettings(),
+        )
+    }
 
     override suspend fun setComplianceAgreed(agreed: Boolean) {
         context.tvSettings.edit { it[KEY_COMPLIANCE_AGREED] = agreed }
@@ -236,6 +271,36 @@ class DataStoreSettingsStore(private val context: Context) : SettingsStore {
             if (proxy == null) prefs.remove(KEY_PROXY) else prefs[KEY_PROXY] = proxy.address
         }
     }
+
+    // --------------------------------------------------------------------- //
+    // 解码：Flow 与 startupSnapshot 共用同一份，避免两处判定漂移
+    // --------------------------------------------------------------------- //
+
+    /**
+     * 做成类的成员扩展而不是顶层函数：键都锁在 `private companion object` 里，
+     * 顶层函数拿不到。共用是硬要求 —— 一旦「启动快照」和「运行期 Flow」对同一个键
+     * 给出不同的默认值，就会出现「刚启动是 A、过一会儿变 B」的诡异现象。
+     */
+    private fun Preferences.decodePlaybackSettings(): PlaybackSettings =
+        PlaybackSettings(
+            bufferProfile = BufferProfile.fromName(this[KEY_BUFFER_PROFILE]),
+            seekIncrementMs = this[KEY_SEEK_STEP_MS] ?: PlaybackSettings.DEFAULT.seekIncrementMs,
+            playbackSpeed =
+                this[KEY_PLAYBACK_SPEED]?.toFloatOrNull()
+                    ?: PlaybackSettings.DEFAULT.playbackSpeed,
+        )
+
+    private fun Preferences.decodeNetworkSettings(): NetworkSettings =
+        NetworkSettings(
+            timeout = TimeoutProfile.fromStorage(this[KEY_TIMEOUT_PROFILE]),
+            concurrency = ConcurrencyProfile.fromStorage(this[KEY_CONCURRENCY_PROFILE]),
+            proxy = proxyFromStorage(this[KEY_PROXY]),
+        )
+
+    private fun Preferences.decodeThemeMode(): ThemeMode = ThemeMode.fromStorage(this[KEY_THEME_MODE])
+
+    // 默认 true：「没设过」和「用户主动关掉」必须分开，默认值写在读的一侧
+    private fun Preferences.decodeKeepScreenOn(): Boolean = this[KEY_KEEP_SCREEN_ON] ?: true
 
     private companion object {
         val KEY_COMPLIANCE_AGREED = booleanPreferencesKey("compliance_agreed")

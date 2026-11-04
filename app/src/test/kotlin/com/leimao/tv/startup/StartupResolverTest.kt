@@ -15,6 +15,7 @@ import com.leimao.tv.core.model.search.removeSearchHistory
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.data.SettingsStore
+import com.leimao.tv.data.StartupSnapshot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
@@ -140,6 +141,14 @@ class StartupResolverTest {
         override val networkSettings: Flow<NetworkSettings> = networkSettingsFlow
         override val bootAutostart: Flow<Boolean> = bootAutostartFlow
         override val keepScreenOn: Flow<Boolean> = keepScreenOnFlow
+
+        override suspend fun startupSnapshot(): StartupSnapshot =
+            StartupSnapshot(
+                themeMode = themeModeFlow.value,
+                keepScreenOn = keepScreenOnFlow.value,
+                playbackSettings = playbackSettingsFlow.value,
+                networkSettings = networkSettingsFlow.value,
+            )
 
         override suspend fun setComplianceAgreed(agreed: Boolean) {
             agreedFlow.value = agreed

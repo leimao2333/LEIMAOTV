@@ -1,6 +1,7 @@
 package com.leimao.tv.core.network
 
 import com.leimao.tv.core.model.network.TimeoutProfile
+import java.io.InputStream
 
 /**
  * 每源可配的请求头（LIVE-06）。
@@ -89,6 +90,47 @@ enum class FetchErrorKind {
  */
 interface HttpClient {
     suspend fun fetch(url: String, headers: RequestHeaders = RequestHeaders.NONE): FetchOutcome
+
+    /**
+     * 流式抓取：**边下边交给 [consume]，全程不把响应整体读进内存**。
+     *
+     * 为什么必须单开一条通道：节目单常见 `.xml.gz`，实测一份 14573 条的真实节目单压缩后
+     * 6.6MB，解开是 50~90MB，再转成 UTF-16 的 `String` 又是 100~180MB —— 而 2GB 盒子的
+     * 单进程堆只有 192MB。走 [fetch] 拿字符串，等于「点一下刷新节目单，App 自己没了」，
+     * 而且死在 native 的内存分配上，Java 层连堆栈都没有。
+     *
+     * `consume` 抛出的异常原样往上抛（不在这里吞）：解析错误该由调用方按「节目单损坏」
+     * 处理，不该被包装成「网络失败」。
+     */
+    suspend fun <T> fetchStream(
+        url: String,
+        headers: RequestHeaders = RequestHeaders.NONE,
+        consume: (InputStream) -> T,
+    ): StreamOutcome<T> {
+        // 默认实现退化成「整份读进来再交给 consume」：语义等价，只是不省内存。
+        // 真省内存的那份在 OkHttpHttpClient 里（直接吃 byteStream）。
+        //
+        // 为什么给默认实现而不是抽象方法：测试里的假 client 只关心「返回什么内容」，
+        // 逼它们各自实现一条流式通道，除了噪音什么也没换来。
+        return when (val outcome = fetch(url, headers)) {
+            is FetchOutcome.Success ->
+                StreamOutcome.Success(consume(outcome.text.byteInputStream()))
+
+            is FetchOutcome.Failure ->
+                StreamOutcome.Failure(outcome.kind, outcome.detail, outcome.httpStatus)
+        }
+    }
+}
+
+/** [HttpClient.fetchStream] 的结局。失败字段与 [FetchOutcome.Failure] 同构 */
+sealed interface StreamOutcome<out T> {
+    data class Success<T>(val value: T) : StreamOutcome<T>
+
+    data class Failure(
+        val kind: FetchErrorKind,
+        val detail: String? = null,
+        val httpStatus: Int? = null,
+    ) : StreamOutcome<Nothing>
 }
 
 /**

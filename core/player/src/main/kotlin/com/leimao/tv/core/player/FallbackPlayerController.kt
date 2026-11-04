@@ -28,11 +28,24 @@ import kotlinx.coroutines.launch
  * 这类地址（IPTV 单播源的主要形态）Media3 侧没有对应的数据源，按默认顺序只会先白等
  * 一轮「播放失败」；顺序反过来，用户感觉到的差别是换台快了两秒。
  *
- * 画面出口：当前活跃内核决定 `createSurfaceView` 返回什么。切内核后，上层在下次重组时
- * 重新取一次 view 即可（[VlcPlayerController.createSurfaceView] 会复用同一个 SurfaceView）。
+ * 画面出口：当前活跃内核决定 `createSurfaceView` 返回什么。换内核时 [surfaceToken]
+ * 会跟着变，上层必须用它当 `key` 重建 `AndroidView` —— 这个 View 的 `factory`
+ * 一辈子只跑一次，光靠重组是换不掉画面的。
  */
 class FallbackPlayerController(
     private val primary: PlayerController,
+    /**
+     * 换内核时的通知（诊断用）。
+     *
+     * 做成回调而不是在这里直接 `Log.d`：这个类是**纯编排逻辑**，有 JVM 单测覆盖；
+     * 一调 `android.util.Log` 单测里就抛「not mocked」，而异常发生在协程里会被吞掉，
+     * 表现成「兜底内核一次都没被唤起」，排查方向会被带偏到降级链本身。
+     * 由 app 层注入真正的日志实现，核心模块保持可测。
+     *
+     * 放在 `fallbackFactory` 之前是有意的：它是带默认值的可选参数，
+     * 而 [fallbackFactory] 必须留在最后，测试才能继续用尾随 lambda 写法。
+     */
+    private val onKernelSwitch: (from: String, to: String, reason: String) -> Unit = { _, _, _ -> },
     /**
      * 兜底内核**按需创建**（不传实例）。
      *
@@ -112,6 +125,24 @@ class FallbackPlayerController(
             ?: (fallbackInstance as? VideoSurfaceHost)?.createSurfaceView(context)
             ?: FrameLayout(context)
 
+    /**
+     * 画面出口代号 = **当前活跃内核本身**。
+     *
+     * 换内核（Media3 全线路失败 → VLC 兜底）时 `active` 换成另一个对象，
+     * 这个代号跟着变，Compose 的 `key()` 就会把旧 View 拆掉、向新内核要一块新的。
+     *
+     * 不做成固定值是有原因的：`AndroidView` 的 `factory` 一辈子只调一次，
+     * 代号不变就意味着画面永远挂在**旧内核**的 View 上 —— 换到 VLC 之后
+     * 用户看到的是「有声音、没画面」，而且完全没有报错，极难从日志上看出来。
+     */
+    override val surfaceToken: Any get() = active
+
+    override fun releaseSurfaceView(view: View) {
+        // 不知道这块 View 是谁造的，问一圈；两边都会靠 `=== ` 自己排除掉不是自己的
+        (primary as? VideoSurfaceHost)?.releaseSurfaceView(view)
+        (fallbackInstance as? VideoSurfaceHost)?.releaseSurfaceView(view)
+    }
+
     override fun play(request: PlaybackRequest) {
         currentRequest = request
         // rtsp / rtmp 直接交给软解内核（PLAY-11）：Media3 侧没引 RTSP 数据源，
@@ -181,6 +212,9 @@ class FallbackPlayerController(
             fallbackUsed = true
             val soft = fallback()
             active = soft
+            // 这一行是「有声音没画面」类问题的唯一线索：换内核后 UI 必须靠 surfaceToken
+            // 重建画面出口，日志里看到这行而画面没恢复，问题就在渲染侧而不在解码侧
+            onKernelSwitch("硬解", "软解", s.reason)
             soft.play(currentRequest!!)
             _state.value = soft.state.value
             _tracks.value = soft.tracks.value

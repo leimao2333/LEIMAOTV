@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.io.InputStream
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
@@ -72,6 +73,57 @@ class OkHttpHttpClient(
             } catch (e: IOException) {
                 // 连接被拒 / TLS 失败 / 中途断开都落在这里；只报类型，不打地址
                 FetchOutcome.Failure(FetchErrorKind.NETWORK, e.javaClass.simpleName)
+            }
+        }
+
+    /**
+     * 流式抓取（节目单 `.xml.gz` 专用通道）。
+     *
+     * 关键点是**不 materialize**：`response.body.byteStream()` 直接包一层
+     * `BufferedInputStream` + 按魔数套 `GZIPInputStream`，然后交给 [consume]。
+     * 整条链上只有 8KB 缓冲在内存里，与文件大小无关。
+     *
+     * `use {}` 保证 [consume] 返回（或抛异常）之后响应体一定被关闭 —— 否则连接不会
+     * 回到池子里，多刷几次节目单就把连接池耗光了。
+     */
+    override suspend fun <T> fetchStream(
+        url: String,
+        headers: RequestHeaders,
+        consume: (InputStream) -> T,
+    ): StreamOutcome<T> =
+        withContext(ioDispatcher) {
+            val request =
+                try {
+                    Request.Builder()
+                        .url(url)
+                        .apply {
+                            headers.userAgent?.let { header("User-Agent", it) }
+                            headers.referer?.let { header("Referer", it) }
+                            headers.basicAuth?.let { header("Authorization", it.toHeaderValue()) }
+                        }
+                        .build()
+                } catch (_: IllegalArgumentException) {
+                    return@withContext StreamOutcome.Failure(FetchErrorKind.NETWORK, "地址格式不对")
+                }
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@use StreamOutcome.Failure(
+                            kind = FetchErrorKind.HTTP,
+                            detail = "HTTP ${response.code}",
+                            httpStatus = response.code,
+                        )
+                    }
+                    val body = response.body ?: return@use StreamOutcome.Failure(FetchErrorKind.EMPTY)
+                    StreamOutcome.Success(consume(HttpBody.gzipIfNeeded(body.byteStream())))
+                }
+            } catch (e: SocketTimeoutException) {
+                StreamOutcome.Failure(FetchErrorKind.TIMEOUT)
+            } catch (e: UnknownHostException) {
+                StreamOutcome.Failure(FetchErrorKind.NETWORK, "域名解析失败")
+            } catch (e: IOException) {
+                StreamOutcome.Failure(FetchErrorKind.NETWORK, e.javaClass.simpleName)
             }
         }
 

@@ -48,8 +48,27 @@ class VodPager(
     private val maxConcurrency: Int = DEFAULT_CONCURRENCY,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    /** 源 id → 分类（带抓取时刻）。只缓存在内存里：分类变了重开一次 App 就自动跟上 */
-    private val categoryCache = HashMap<Long, CachedCategories>()
+    /**
+     * 源 id → 分类（带抓取时刻）。
+     *
+     * 只缓存在内存里：分类变了重开一次 App 就自动跟上。
+     *
+     * ## 为什么要有上限（2026-11-04，低配机防闪退）
+     *
+     * 原来是裸 `HashMap` + 「读的时候判断 TTL、过期就重抓」—— 注意：**重抓并不删旧条目**，
+     * 它是覆盖同一个 key，所以真正的漏洞不是过期，而是**被删掉的源永远留在这里**：
+     * 用户来回增删源、或导入一份几十个源的订阅，这个 Map 在进程生命周期内只增不减。
+     * `VodPager` 是 `AppContainer` 里的单例，这部分内存压在 2GB 机器的 192MB 堆里是纯增量。
+     *
+     * 用 `LinkedHashMap(accessOrder = true)` 当 LRU：读一次就把该源挪到队尾，
+     * 超过 [CATEGORY_CACHE_LIMIT] 个源就淘汰最久没问过的那个。
+     */
+    private val categoryCache =
+        object : LinkedHashMap<Long, CachedCategories>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<Long, CachedCategories>?,
+            ): Boolean = size > CATEGORY_CACHE_LIMIT
+        }
 
     private data class CachedCategories(
         val at: Long,
@@ -187,18 +206,25 @@ class VodPager(
         gate: Semaphore,
     ): List<VodCategory>? {
         val now = clock()
-        categoryCache[source.id]?.let { cached ->
-            if (now - cached.at < CATEGORY_TTL_MS) return cached.categories
+        // LRU 的 read 会调整链表顺序，属于**结构性修改**：多路并发拿分类时
+        // 裸读 LinkedHashMap 会踩 ConcurrentModificationException。锁只圈住 Map 操作，
+        // 网络请求在锁外，不会把并发度压回串行
+        synchronized(categoryCache) {
+            categoryCache[source.id]?.let { cached ->
+                if (now - cached.at < CATEGORY_TTL_MS) return cached.categories
+            }
         }
         val result = gate.withPermit { adapter.categories() }
         val categories = (result as? VodFetchResult.Success)?.value ?: return null
-        categoryCache[source.id] = CachedCategories(now, categories)
+        synchronized(categoryCache) {
+            categoryCache[source.id] = CachedCategories(now, categories)
+        }
         return categories
     }
 
     /** 源被删/停用后清掉缓存，免得内存里一直留着一份用不上的分类表 */
     fun forget(sourceId: Long) {
-        categoryCache.remove(sourceId)
+        synchronized(categoryCache) { categoryCache.remove(sourceId) }
     }
 
     private companion object {
@@ -206,6 +232,14 @@ class VodPager(
 
         /** 分类缓存有效期：10 分钟。够覆盖一次「一直往下翻」，又不会拿隔夜的分类去查 */
         const val CATEGORY_TTL_MS = 10 * 60 * 1000L
+
+        /**
+         * 分类缓存最多留几个源。
+         *
+         * 12 是个「够用且不心疼」的数：一个用户真正在用的影视源很少超过十个，
+         * 而单份分类表（几十到几百个 `VodCategory`）在低配机上不值得为「可能再用到」留着。
+         */
+        const val CATEGORY_CACHE_LIMIT = 12
 
         /** 戏曲板块的搜索词。见类注释里「戏曲为什么走搜索」 */
         const val OPERA_KEYWORD = "戏曲"

@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import coil.compose.AsyncImage
+import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.components.TvKeypad
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.focus.focusRing
@@ -449,31 +449,18 @@ private fun VodHitCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column {
-            Box(
+            // 搜索结果一屏可能有十几张 2:3 海报，按原图解码是这一页最大的内存来源
+            RemoteImage(
+                url = hit.posterUrl,
+                fallbackText = hit.title,
+                contentScale = ContentScale.Crop,
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .aspectRatio(2f / 3f)
                         .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                val poster = hit.posterUrl
-                if (poster.isNullOrBlank()) {
-                    Text(
-                        text = hit.title.take(1),
-                        style = TvText.current.display,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    AsyncImage(
-                        model = poster,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
+            )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = hit.title,
@@ -503,31 +490,19 @@ private fun LogoThumb(
     fallback: String,
     size: Dp,
 ) {
-    Box(
+    // 台标槽位只有 32dp 左右，源站台标常是 512²/1024²，必须按槽位解码
+    RemoteImage(
+        url = url,
+        fallbackText = fallback,
+        contentScale = ContentScale.Fit,
+        fallbackTextStyle = TvText.current.label,
         modifier =
             Modifier
                 .width(size)
                 .height(size)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surface),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (url.isNullOrBlank()) {
-            // 没有台标时用首字占位：电视距离下，「央」「湖」比一块灰底好认得多
-            Text(
-                text = fallback.take(1),
-                style = TvText.current.label,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
+    )
 }
 
 /**

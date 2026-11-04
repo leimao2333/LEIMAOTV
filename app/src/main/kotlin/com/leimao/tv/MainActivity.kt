@@ -28,8 +28,6 @@ import com.leimao.tv.core.model.appearance.shouldUseDarkTheme
 import com.leimao.tv.core.model.startup.StartDestination
 import com.leimao.tv.debug.DebugSeed
 import com.leimao.tv.ui.LeimaoTvApp
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 
 /**
  * 电脑键盘 → 遥控器的按键映射。
@@ -145,18 +143,16 @@ class MainActivity : ComponentActivity() {
     /**
      * 冷启动到首帧之间那块底色。
      *
-     * 在 `setContent` 之前同步读一次主题：DataStore 的小文件读取是毫秒级，而这里省下的
-     * 是「浅色主题下先闪一帧深色」—— 那恰恰是用户刚按下开机键、最会盯着屏幕看的时刻。
-     * 读失败就按深色处理，与 `themes.xml` 里的默认值一致。
+     * 用容器启动时**已经读好的** [AppContainer.startup]，这里不再碰 DataStore：
+     * 原来这里单独 `runBlocking { themeMode.first() }`，与容器里那两次读的是同一个
+     * `tv-settings` 文件，等于把一次文件读做了四遍（2026-11-04，2GB 机冷启动优化）。
+     * 读失败退默认深色，与 `themes.xml` 的默认值一致。
      */
     private fun applyStartupWindowBackground(container: AppContainer) {
         val systemDark =
             (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
                 Configuration.UI_MODE_NIGHT_YES
-        val dark =
-            runCatching {
-                runBlocking { shouldUseDarkTheme(container.settings.themeMode.first(), systemDark) }
-            }.getOrDefault(true)
+        val dark = shouldUseDarkTheme(container.startup.themeMode, systemDark)
         setWindowBackground(dark)
     }
 
@@ -177,8 +173,8 @@ class MainActivity : ComponentActivity() {
      * 读失败按开启处理：这条路径上「电视黑掉」比「多亮一会儿」严重得多。
      */
     private fun applyStartupKeepScreenOn(container: AppContainer): Boolean {
-        val keep =
-            runCatching { runBlocking { container.settings.keepScreenOn.first() } }.getOrDefault(true)
+        // 同 applyStartupWindowBackground：用容器已读好的快照，不再同步读 DataStore
+        val keep = container.startup.keepScreenOn
         applyKeepScreenOn(keep)
         return keep
     }

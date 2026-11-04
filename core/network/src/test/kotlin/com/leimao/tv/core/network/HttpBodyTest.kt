@@ -66,4 +66,41 @@ class HttpBodyTest {
         assertFalse(HttpBody.looksGzipped("<?xml version=\"1.0\"?>".toByteArray()))
         assertFalse(HttpBody.looksGzipped(byteArrayOf(0x1f)))
     }
+
+    // ------------------------------------------------------------------ //
+    // 流式通道（2026-11-04，2GB 机器防闪退）
+    // ------------------------------------------------------------------ //
+
+    @Test
+    fun `流式通道能解开 gzip 且内容一字不差`() {
+        val xml = """<?xml version="1.0" encoding="UTF-8"?><tv><channel id="demo"/></tv>"""
+
+        val text =
+            HttpBody.gzipIfNeeded(gzip(xml).inputStream()).use { it.readBytes().toString(Charsets.UTF_8) }
+
+        assertEquals(xml, text)
+    }
+
+    @Test
+    fun `流式通道对普通文本不做任何包装`() {
+        val text = "#EXTM3U\n#EXTINF:-1,示例频道\nhttps://example.com/a.m3u8\n"
+
+        val read =
+            HttpBody.gzipIfNeeded(text.toByteArray(Charsets.UTF_8).inputStream())
+                .use { it.readBytes().toString(Charsets.UTF_8) }
+
+        // 这条钉的是「魔数判定必须吃过又吐回来」：mark/reset 少一次 reset，
+        // 正文的前两个字节就被吞了，解析器会报「节目单在第一个标签前就坏了」
+        assertEquals(text, read)
+    }
+
+    @Test
+    fun `gzip 魔数的第二个字节带符号也不能判错`() {
+        // 0x8b 转成 Byte 是 -117，而 InputStream.read() 返回 139。
+        // 少一个 and 0xFF，这行判定就永远为 false —— 压缩包被当明文喂给 SAX
+        val gz = gzip("<tv/>")
+
+        assertTrue(HttpBody.looksGzipped(gz))
+        assertEquals("<tv/>", HttpBody.gzipIfNeeded(gz.inputStream()).use { it.readBytes() }.toString(Charsets.UTF_8))
+    }
 }

@@ -6,8 +6,8 @@ import com.leimao.tv.core.model.epg.EpgChannel
 import com.leimao.tv.core.model.epg.EpgProgramme
 import com.leimao.tv.core.model.epg.mergeEpgGuide
 import com.leimao.tv.core.network.FetchErrorKind
-import com.leimao.tv.core.network.FetchOutcome
 import com.leimao.tv.core.network.HttpClient
+import com.leimao.tv.core.network.StreamOutcome
 import com.leimao.tv.core.network.epg.XmltvParser
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -80,22 +80,46 @@ class EpgImporter(
      */
     suspend fun importUrl(url: String): EpgImportResult =
         withContext(ioDispatcher) {
-            val outcome = http.fetch(url)
-            if (outcome is FetchOutcome.Failure) {
+            // 流式解析，**不先变成 String**（2026-11-04，2GB 机器防闪退）。
+            //
+            // 原来的链路是 fetch → body.bytes()（压缩包 6.6MB）→ 解压 ByteArray（50~90MB）
+            // → UTF-16 String（100~180MB）→ byteInputStream()（又一份）→ SAX。
+            // 四份同时活着，2GB 机 192MB 的堆必然 OOM，而且死在内存分配上、
+            // Java 层拿不到堆栈，用户看到的就是「点刷新节目单，App 直接没了」。
+            //
+            // 现在只有 8KB 缓冲常驻，SAX 边读边吐事件。
+            // 解析异常在 lambda 里捕成 Result：只有这三类算「节目单坏了」，
+            // OutOfMemoryError / LinkageError 之类照旧往上抛，不该被伪装成格式问题。
+            val outcome =
+                http.fetchStream(url) { stream ->
+                    try {
+                        Result.success(XmltvParser.parse(stream))
+                    } catch (e: org.xml.sax.SAXException) {
+                        Result.failure<XmltvParser.Result>(e)
+                    } catch (e: javax.xml.parsers.ParserConfigurationException) {
+                        Result.failure<XmltvParser.Result>(e)
+                    } catch (e: java.io.IOException) {
+                        Result.failure<XmltvParser.Result>(e)
+                    }
+                }
+
+            if (outcome is StreamOutcome.Failure) {
                 repository.markRefreshed(url, clock(), describe(outcome))
                 return@withContext EpgImportResult.Failed(EpgFailure.NETWORK, outcome.detail)
             }
 
-            val text = (outcome as FetchOutcome.Success).text
             val parsed =
-                try {
-                    XmltvParser.parse(text.byteInputStream())
-                } catch (e: org.xml.sax.SAXException) {
-                    repository.markRefreshed(url, clock(), "节目单损坏：${e.message}")
-                    return@withContext EpgImportResult.Failed(EpgFailure.BROKEN_XML, e.message)
-                } catch (e: javax.xml.parsers.ParserConfigurationException) {
-                    repository.markRefreshed(url, clock(), "节目单损坏：${e.message}")
-                    return@withContext EpgImportResult.Failed(EpgFailure.BROKEN_XML, e.message)
+                (outcome as StreamOutcome.Success).value.getOrElse { e ->
+                    val cannotRead = e is java.io.IOException
+                    repository.markRefreshed(
+                        url,
+                        clock(),
+                        if (cannotRead) "读取失败：${e.message}" else "节目单损坏：${e.message}",
+                    )
+                    return@withContext EpgImportResult.Failed(
+                        if (cannotRead) EpgFailure.CANNOT_READ else EpgFailure.BROKEN_XML,
+                        e.message,
+                    )
                 }
 
             val result = store(parsed.channels, parsed.programmes)
@@ -123,7 +147,7 @@ class EpgImporter(
         return EpgImportResult.Done(repository.summary())
     }
 
-    private fun describe(failure: FetchOutcome.Failure): String =
+    private fun describe(failure: StreamOutcome.Failure): String =
         when (failure.kind) {
             FetchErrorKind.TIMEOUT -> "超时：节目单源没有在规定时间内响应"
             FetchErrorKind.HTTP -> "抓取失败：${failure.detail ?: "HTTP 错误"}"

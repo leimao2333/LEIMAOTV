@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.4.0"
+    const val CURRENT_VERSION: String = "0.5.5.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,18 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.5.0",
+                date = "2026-11-04",
+                changes =
+                    listOf(
+                        "修复：硬解失败自动切软解后可能只剩声音、没有画面",
+                        "修复：反复进出播放页会一点点占住内存，看久了容易闪退",
+                        "修复：导入节目单（.xml.gz）时内存暴涨导致闪退 —— 改为边下载边解析，不再整份读进内存",
+                        "修复：设置页「解码内核」还写着 VLC 软解尚未引入（其实早就接好了）",
+                        "优化：开机启动少读三遍配置文件，低配盒子上开机更快",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.4.0",
                 date = "2026-11-04",

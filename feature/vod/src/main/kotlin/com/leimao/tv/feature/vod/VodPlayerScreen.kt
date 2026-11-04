@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -425,10 +426,14 @@ private fun VideoSurface(surfaceHost: VideoSurfaceHost?) {
         return
     }
 
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { context -> surfaceHost.createSurfaceView(context) },
-    )
+    // 与直播页同构：换内核必须重建 View（factory 只跑一次），离场必须解绑（防泄漏/原生崩溃）
+    key(surfaceHost.surfaceToken) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context -> surfaceHost.createSurfaceView(context) },
+            onRelease = { view -> surfaceHost.releaseSurfaceView(view) },
+        )
+    }
 }
 
 /**

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -711,10 +712,17 @@ private fun VideoSurface(surfaceHost: VideoSurfaceHost?) {
         return
     }
 
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { context -> surfaceHost.createSurfaceView(context) },
-    )
+    // surfaceToken 在内核切换时变化（Media3 失败 → VLC 兜底）。AndroidView 的 factory
+    // 一辈子只调一次，不加 key 的话换内核后画面还挂在旧内核的 View 上 —— 有声音没画面。
+    // onRelease 负责把 View 还给内核解绑：不解绑，每次进出播放页都会在 ExoPlayer 上
+    // 多挂一份监听（PlayerView 持有 Activity），libVLC 侧则可能直接原生断言崩溃。
+    key(surfaceHost.surfaceToken) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context -> surfaceHost.createSurfaceView(context) },
+            onRelease = { view -> surfaceHost.releaseSurfaceView(view) },
+        )
+    }
 }
 
 /**

@@ -36,7 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import coil.compose.AsyncImage
+import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.Channel
@@ -307,25 +307,20 @@ fun ChannelLogo(
     size: Int = 40,
 ) {
     val shape = RoundedCornerShape(4.dp)
-    Box(
+    // 走统一入口：台标源站普遍给 512²/1024²，按原图解码在 4K 下比 1080p 又大四倍。
+    // 这里交给 Coil 按 36dp 的实际像素降采样（低配机防闪退，见 RemoteImage 注释）
+    RemoteImage(
+        url = logoUrl,
+        fallbackText = "台",
+        contentScale = ContentScale.Fit,
+        fallbackTextStyle = TvText.current.hint,
         modifier =
             modifier
                 .size(size.dp)
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (logoUrl.isNullOrBlank()) {
-            Text(text = "台", style = TvText.current.hint, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            AsyncImage(
-                model = logoUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().padding(2.dp),
-            )
-        }
-    }
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(2.dp),
+    )
 }
 
 private val MATERIAL_GOLD = Color(0xFFE6B422)

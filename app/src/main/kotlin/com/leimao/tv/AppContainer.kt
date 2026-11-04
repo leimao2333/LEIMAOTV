@@ -46,7 +46,6 @@ import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.MirrorHttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
 import com.leimao.tv.core.network.buildNetworkClient
-import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.FallbackPlayerController
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
@@ -58,11 +57,11 @@ import com.leimao.tv.data.DataStoreSettingsStore
 import com.leimao.tv.data.ImageHeadersInterceptor
 import com.leimao.tv.data.RemoteSettingsApplier
 import com.leimao.tv.data.SettingsStore
+import com.leimao.tv.data.StartupSnapshot
 import com.leimao.tv.startup.StartupResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
@@ -85,6 +84,21 @@ class AppContainer(context: Context) {
 
     val settings: SettingsStore = DataStoreSettingsStore(appContext)
 
+    /**
+     * 冷启动要用的四项设置，**一次**同步读完（2026-11-04，2GB 机器冷启动优化）。
+     *
+     * 为什么必须同步：缓冲档位是 `ExoPlayer` 的构造期参数、主题决定首帧窗口底色，
+     * 两者都得在 `setContent` 之前定下来。但「必须早」不等于「必须读四次」——
+     * 原来容器读两次、Activity 再读两次，四次 `runBlocking { ...first() }` 串起来，
+     * 在低速 eMMC 上就是 80~300ms 的纯主线程阻塞。四项本来就躺在同一个
+     * DataStore 文件里，一次 `first()` 全取出来即可。
+     *
+     * 读失败退到 [StartupSnapshot.Default]：启动路径上不该因为一个配置文件就崩。
+     */
+    val startup: StartupSnapshot =
+        runCatching { runBlocking { settings.startupSnapshot() } }
+            .getOrDefault(StartupSnapshot.Default)
+
     /** 缓存统计与清理（SET-05）：只读 `cacheDir`，没有别的依赖 */
     val cacheManager: CacheManager = CacheManager.create(appContext)
 
@@ -95,7 +109,7 @@ class AppContainer(context: Context) {
      * 而那个实例被播放内核与各仓储在构造期就抓走了，中途换要重建整条链并打断正在播的画面。
      * 故与缓冲档位同口径：改了下次启动生效，设置页会明说。
      */
-    private val networkSettings: NetworkSettings = currentNetworkSettings(settings)
+    private val networkSettings: NetworkSettings = startup.networkSettings
 
     /**
      * 全应用共用一个 OkHttp 实例：连接池复用是它性能的大头，
@@ -339,7 +353,7 @@ class AppContainer(context: Context) {
                     context = appContext,
                     // 播放走独立 Dispatcher，不与后台抓取抢并发名额（见 playerHttpClient）
                     okHttpClient = playerHttpClient,
-                    bufferProfile = currentBufferProfile(settings),
+                    bufferProfile = startup.playbackSettings.bufferProfile,
                 ),
             // 软解兜底（PLAY-02 / D-02）：Media3 把整份请求的所有线路都试过仍失败时接管。
             // VLC 自己重连/换线的预算与 Media3 一致，保证「换内核」不改变失败观感。
@@ -348,11 +362,11 @@ class AppContainer(context: Context) {
             // 每次启动都付这份钱，而绝大多数起播用不到它（Media3 直接成功）。
             // 实测常驻内存因此从 130MB 降到 95MB（PSS，模拟器 1080p 播放中）。
             fallbackFactory = { VlcPlayerController(context = appContext) },
+            // 换内核的可观测性：只在 debug 包留痕（release 由 R8 整条裁掉）。
+            // 用户说「有声音没画面」时，先看有没有这行 —— 有就说明是渲染出口没重建，
+            // 没有就说明压根没走到兜底，排查方向完全不同
+            onKernelSwitch = { from, to, reason ->
+                android.util.Log.d("LeimaoPlay", "切内核 $from → $to（原因：$reason）")
+            },
         )
-
-    private fun currentBufferProfile(settings: SettingsStore): BufferProfile =
-        runBlocking { settings.playbackSettings.first().bufferProfile }
-
-    private fun currentNetworkSettings(settings: SettingsStore): NetworkSettings =
-        runBlocking { settings.networkSettings.first() }
 }

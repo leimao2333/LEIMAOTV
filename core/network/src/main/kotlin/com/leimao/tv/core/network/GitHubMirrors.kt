@@ -1,5 +1,7 @@
 package com.leimao.tv.core.network
 
+import java.io.InputStream
+
 /**
  * GitHub 地址的镜像兜底。
  *
@@ -95,5 +97,24 @@ class MirrorHttpClient(
             }
         }
         return lastFailure ?: FetchOutcome.Failure(FetchErrorKind.NETWORK, "全部镜像不可达")
+    }
+
+    /** 流式通道同样要过镜像：节目单聚合地址也在 GitHub raw 上 */
+    override suspend fun <T> fetchStream(
+        url: String,
+        headers: RequestHeaders,
+        consume: (InputStream) -> T,
+    ): StreamOutcome<T> {
+        var lastFailure: StreamOutcome.Failure? = null
+        for (candidate in GitHubMirrors.candidates(url)) {
+            val outcome = inner.fetchStream(candidate, headers, consume)
+            // 成功就结束；HTTP 4xx / 空响应换镜像也是同一个结果，不浪费第二轮
+            if (outcome !is StreamOutcome.Failure) return outcome
+            if (outcome.kind != FetchErrorKind.TIMEOUT && outcome.kind != FetchErrorKind.NETWORK) {
+                return outcome
+            }
+            lastFailure = outcome
+        }
+        return lastFailure ?: StreamOutcome.Failure(FetchErrorKind.NETWORK, "全部镜像不可达")
     }
 }

@@ -258,6 +258,29 @@ interface PlayerController {
  */
 interface VideoSurfaceHost {
     fun createSurfaceView(context: Context): View
+
+    /**
+     * 画面出口的代号：**内核换了就必须变**。
+     *
+     * Compose 的 `AndroidView` 只在该节点第一次进入组合时调一次 `factory`，
+     * 之后 `surfaceHost` 的内容怎么变都不会重建 View。而播放器恰恰会在播放中途换内核
+     * （Media3 全线路失败 → VLC 软解兜底），如果 UI 拿不到「出口换了」的信号，
+     * 画面就永远停在旧内核那个 View 上 —— 表现是**有声音没画面**。
+     *
+     * 所以 UI 侧必须 `key(surfaceToken) { AndroidView(...) }`：
+     * 代号一变，旧 View 走 [releaseSurfaceView]，新 View 从新内核创建。
+     */
+    val surfaceToken: Any
+
+    /**
+     * 把 [createSurfaceView] 造出来的 View 交还给内核，**必须解绑**。
+     *
+     * 不解绑的后果分两种：Media3 的 `PlayerView` 会一直挂在 `ExoPlayer` 的监听链上
+     * （每次进出播放页多一份，`PlayerView` 还持有 Activity 的 Context）；libVLC 的
+     * `IVLCVout` 若带着已失效的 Surface 再 `attachViews()`，是**原生断言**，
+     * 进程直接 SIGABRT，连 Java 堆栈都没有。
+     */
+    fun releaseSurfaceView(view: View)
 }
 
 /**

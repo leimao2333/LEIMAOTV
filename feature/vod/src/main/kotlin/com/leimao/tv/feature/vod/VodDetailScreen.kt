@@ -2,7 +2,6 @@ package com.leimao.tv.feature.vod
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -36,7 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import coil.compose.AsyncImage
+import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.vod.VodEpisode
@@ -290,31 +289,19 @@ private fun FavoriteButton(
 
 @Composable
 private fun Poster(state: VodDetailState) {
-    Box(
+    // 详情页海报是全屏最大的一张位图：源站常见 1500×2250（13MB）、长图到 2000×3000（24MB），
+    // 而 2GB 机整个进程堆只有 192MB —— 不按显示尺寸解码就是一次性的 OOM 门票
+    RemoteImage(
+        url = state.poster,
+        fallbackText = state.title.ifBlank { "影" },
+        contentScale = ContentScale.Crop,
         modifier =
             Modifier
                 .width(POSTER_WIDTH)
                 .height(POSTER_HEIGHT)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center,
-    ) {
-        val poster = state.poster
-        if (poster.isNullOrBlank()) {
-            Text(
-                text = state.title.take(1).ifBlank { "影" },
-                style = TvText.current.display,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            AsyncImage(
-                model = poster,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
+    )
 }
 
 @Composable

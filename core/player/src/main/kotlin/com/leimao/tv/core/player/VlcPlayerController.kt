@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -97,15 +98,36 @@ class VlcPlayerController(
     }
 
     override fun createSurfaceView(context: Context): View {
-        // 复用同一份 SurfaceView：内核只有一个 mediaPlayer，画面也只能有一个出口
+        // 先把上一块出口摘干净再建新的。
+        //
+        // libVLC 的 IVLCVout 对**同一个实例**重复 attachViews() 是原生断言，
+        // 结果是 SIGABRT —— Kotlin 的未捕获异常兜底（CrashArchive）根本抓不到，
+        // 用户看到的是「进播放页直接没了」。所以 attach 之前必须确保是 detach 状态。
+        detachVout()
         val view =
-            surfaceView
-                ?: SurfaceView(context).apply {
-                    setBackgroundColor(Color.BLACK)
-                    vout.setVideoSurface(holder.surface, holder)
-                    vout.attachViews()
-                }.also { surfaceView = it }
+            SurfaceView(context).apply {
+                setBackgroundColor(Color.BLACK)
+                vout.setVideoSurface(holder.surface, holder)
+                vout.attachViews()
+            }
+        surfaceView = view
         return view
+    }
+
+    override val surfaceToken: Any get() = this
+
+    override fun releaseSurfaceView(view: View) {
+        // 只认自己的那一块：兜底链里 Media3 与 VLC 共用 VideoSurfaceHost，
+        // 上层不保证把谁造的 View 还给了谁
+        if (surfaceView === view) {
+            detachVout()
+            surfaceView = null
+        }
+    }
+
+    /** 摘掉视频出口。libVLC 这边 detach 与 attach 必须成对，缺一次就是原生崩溃 */
+    private fun detachVout() {
+        runCatching { if (vout.areViewsAttached()) vout.detachViews() }
     }
 
     override fun play(request: PlaybackRequest) {
@@ -165,9 +187,14 @@ class VlcPlayerController(
     override fun release() {
         stopWatchdog()
         request = null
+        // detach 必须排在 release 前面：带着已 attach 的 vout 去释放 libVLC，
+        // 是 native 层的 use-after-free / 断言，属于最难查的一类崩溃
+        detachVout()
+        surfaceView = null
         mediaPlayer.stop()
         mediaPlayer.release()
         libVlc.release()
+        scope.cancel()
         _state.value = PlaybackState.Idle
     }
 

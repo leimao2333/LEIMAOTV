@@ -6,6 +6,58 @@
 - **规则变更**（RULES.md 的任何修改）必须单独成节，写清「改了什么」与「为什么」。
 - 日志里不得出现任何真实源地址、频道名、站点名（见 RULES.md §2）。
 
+## v0.5.5.0（2026-11-04）
+
+**修复**
+
+- **硬解失败切软解后「有声音没画面」**：`AndroidView` 的 `factory` 一辈子只在节点第一次
+  进入组合时调一次，而画面出口偏偏会在**播放中途**换内核（Media3 整份请求失败 → VLC 兜底）。
+  原来 UI 没有任何「出口换了」的信号，换内核后画面仍挂在旧内核的 `PlayerView` 上，
+  于是只有声音没有画面，而且不报任何错。现在 `VideoSurfaceHost` 多一个 `surfaceToken`，
+  活跃内核一变它就变，UI 侧 `key(surfaceToken) { AndroidView(...) }` 强制重建；
+  同时在 `onRelease` 里把 View 还给内核解绑。
+- **反复进出播放页会线性累积内存**：两处叠加 ——
+  `PlayerView` 每次新建都往 `ExoPlayer` 上注册一整套监听却从不解绑（`PlayerView` 还持有
+  Activity 的 `Context`）；`libVLC` 的 `IVLCVout` 在 `release()` 时没有 `detachViews()`
+  就释放了 `LibVLC`，属于 native 层的 use-after-free，线上表现是「某几个台一切线路进程就没了」，
+  而 Kotlin 的未捕获异常兜底（`CrashArchive`）完全抓不到。现在 release 前先 detach、
+  再 stop/release，`createSurfaceView` 也先摘旧出口再 attach（同一 `vout` 重复 `attachViews()`
+  是原生断言，SIGABRT）。
+- **导入节目单（`.xml.gz`）时闪退**：原链路把响应物化了四次 ——
+  `body.bytes()`（压缩包 6.6MB）→ 解压 `ByteArray`（50~90MB）→ UTF-16 `String`（100~180MB）
+  → `byteInputStream()` 又一份 → SAX。四份同时活着，2GB 机器 192MB 的堆必然 OOM，
+  而且死在内存分配上，Java 层没有堆栈，用户只知道「点刷新节目单，App 自己没了」。
+  新增真正的流式通道 `HttpClient.fetchStream`：`body.byteStream()` 直接包
+  `BufferedInputStream` + 按魔数套 `GZIPInputStream`，整条链只有 8KB 缓冲常驻。
+- **设置页「解码内核」文案过期**：还写着「内置软解内核（VLC）尚未引入」，
+  而 VLC 早在 D-02 就接进来了。遇到播不动的源时，这句话会直接堵死用户「换个内核试试」的念头。
+
+**变更**
+
+- **`statsTicker` 只在播放期间运行**：原来在 `init` 里 `while (true)` 起跑、永不停止，
+  播放器空闲时主线程仍每 500ms 被唤醒一次去读三个属性。A55 四小核上这是纯浪费，
+  空闲时进不了低功耗态，还和 4K 渲染抢调度。改由 `play()` 启动、`stop()`/`release()` 取消。
+- **冷启动从 4 次同步读降为 1 次**：缓冲档位 / 网络设置 / 主题 / 屏幕常亮本来就躺在同一个
+  DataStore 文件里，却被 `AppContainer` 读两次、`MainActivity` 再读两次。低端 eMMC 上
+  串起来是 80~300ms 纯主线程阻塞，且都在 `setContent` 之前。新增
+  `SettingsStore.startupSnapshot()` 一次读全，读失败退 `StartupSnapshot.Default`。
+- **`VodPager` 分类缓存加上限**：裸 `HashMap` 的 TTL 只在读的时候判断、不删条目，
+  而 `VodPager` 是进程级单例 —— 被删掉的源会永远留在内存里。
+  改为 `LinkedHashMap(accessOrder = true)` 的 LRU（上限 12 个源），并把 Map 操作放进
+  `synchronized`：LRU 的读会调整链表顺序，属于结构性修改，多路并发拿分类会踩
+  `ConcurrentModificationException`。
+- **`RemoteImage` 无界约束时不再退回原图**：原来拿不到有界约束就不传尺寸（等于
+  `Size.ORIGINAL`）。现在兜一个 1024px 的分辨率上限 —— Coil 只会等比缩小、不会放大，
+  上限给小了最坏是画质略降，不给是直接 OOM。
+
+**测试**
+
+- `VodPagerPaginationTest`（新增 4 条）：连翻 8 页 24 条不重复、分类只抓一次、
+  分类环用满才借第二页、无可用分类时归为「源回答上了但没内容」而不是失败
+  ——后者决定界面是「没有更多了」还是「可重试」，判错会让用户白重试一百次。
+- `HttpBodyTest`（新增 3 条）：流式通道能解 gzip、对普通文本不做包装（`mark/reset`
+  少一次 `reset` 会吞掉正文前两字节）、`0x8b` 的符号位不能判错。
+
 ## v0.5.4.0（2026-11-04）
 
 **修复**

@@ -92,12 +92,14 @@ fun PlaybackSettingsScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        SectionTitle(text = "默认内核")
+        SectionTitle(text = "解码内核")
         Spacer(modifier = Modifier.height(8.dp))
         Text(
+            // 这段原来写着「内置软解内核（VLC）尚未引入」，而 VLC 早在 D-02 就接进来了 ——
+            // 用户遇到播不动的源时，看到这句话就不会再试第二次，直接把「换个内核也许能播」这条路堵死
             text =
-                "当前使用内置 Media3 内核（硬解优先，失败自动退软解）。" +
-                    "可替换的内置软解内核（VLC）尚未引入。",
+                "优先使用系统硬解；硬解播不动时自动退到系统软解，仍失败则再交给内置 VLC 软解。" +
+                    "整个过程自动完成，不需要手动切换。",
             style = TvText.current.body,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

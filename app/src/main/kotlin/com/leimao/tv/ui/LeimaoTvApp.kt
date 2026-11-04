@@ -1013,13 +1013,27 @@ private fun PlayerRoute(
     }
 
     LaunchedEffect(Unit) {
-        channels = container.channelRepository.listFromEnabledSources()
+        // **先起播，再装列表**（2026-11-04 起播优化）。
+        //
+        // 旧写法是「等 listFromEnabledSources() 返回 → 再算 target → 再起播」：
+        // 几千个频道从库里读出来要几百毫秒到一个多秒，这段时间屏幕上是全黑的，
+        // 而落点其实早就由 StartupResolver 算好了（channelId 直接就在参数里）。
+        // 列表只是播放页 UI（抽屉 / 切台）的需要，不是出画的前提。
+        val known = channelId ?: container.historyRepository.latestChannelId()
+        // 只有在「连落点都没有」时，才不得不先加载列表去挑第一个台 —— 那种情况列表本来就要读
+        val loaded = if (known == null) container.channelRepository.listFromEnabledSources() else null
+        val target = known ?: loaded?.firstOrNull()?.id
+
+        if (target != null) {
+            // startChannel 内部先用 channels 找，找不到才查库 —— 此刻 channels 还是空的，
+            // 走的是单条查询，比整表加载快得多
+            startChannel(target)
+        }
+
+        // 列表、收藏、最近观看：都是 UI 素材，与起播并行（上面已经省掉一次重复读）
+        channels = loaded ?: container.channelRepository.listFromEnabledSources()
         favoriteIds = container.favoriteRepository.favoriteChannelIds().toSet()
         refreshRecent()
-
-        // 落点已经由 StartupResolver 算过；这里只处理「当时没算出来、现在有频道了」
-        val target = channelId ?: container.historyRepository.latestChannelId() ?: channels.firstOrNull()?.id
-        if (target != null) startChannel(target)
     }
 
     // 音轨 / 字幕（PLAY-07）：内核在起播与换台后自己刷这张表，界面只需要跟着读

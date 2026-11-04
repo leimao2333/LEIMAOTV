@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.2.0"
+    const val CURRENT_VERSION: String = "0.5.3.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,23 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.3.0",
+                date = "2026-11-04",
+                changes =
+                    listOf(
+                        "修复：直播播到断流后画面一闪一闪、最后整屏黑住 —— " +
+                            "重连时错把「片尾位置」当成续播点，新流一秒内又播完，如此往复",
+                        "修复：弱源上「等半天什么都没有」—— 连数据都没回的线路 4 秒就切走，" +
+                            "不再一条等满 15 秒",
+                        "修复：一个源几十条线路全不通时，连续 5 条就给出失败提示，" +
+                            "不用在转圈里坐满一分钟",
+                        "优化：播放更顺 —— 换线不再过于敏感（从 30 秒放宽到 45 秒才判定）",
+                        "优化：直播缓冲上限从 60 秒压到 30 秒，减少内存压力带来的停顿",
+                        "优化：播放与后台任务不再抢网络连接，后台刷列表时不会拖慢画面",
+                        "优化：进入播放页先起播、再加载频道列表，冷启动少等一截",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.2.0",
                 date = "2026-11-04",

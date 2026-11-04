@@ -64,6 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 
 /**
@@ -125,6 +126,28 @@ class AppContainer(context: Context) {
         okHttpClient
             .newBuilder()
             .addInterceptor(ImageHeadersInterceptor())
+            .build()
+
+    /**
+     * 播放专用 client（2026-11-04，卡顿优化）。
+     *
+     * 播放与抓取共用一份 Dispatcher 时，两边抢的是同一组并发名额（OkHttp 默认每主机 5 个）：
+     * 后台刷新订阅源、导入节目单、健康检查这些动作一开，HLS 的分片请求就排在它们后面，
+     * 表现是「播几秒卡一下」，而此时网络其实是通的。
+     *
+     * 这里给播放单独开一个 Dispatcher：播放请求不再和后台任务排队，额度也放宽到 8 个/主机
+     * （Media3 的 HLS 同时最多抓 4 个分片，8 留了余量）。**连接池不重设** —— `newBuilder()`
+     * 默认复用同一个 [okhttp3.ConnectionPool]，所以「全应用一个连接池」的收益还在。
+     */
+    val playerHttpClient: OkHttpClient =
+        okHttpClient
+            .newBuilder()
+            .dispatcher(
+                Dispatcher().apply {
+                    maxRequests = 32
+                    maxRequestsPerHost = 8
+                },
+            )
             .build()
 
     /**
@@ -314,7 +337,8 @@ class AppContainer(context: Context) {
             primary =
                 Media3PlayerController(
                     context = appContext,
-                    okHttpClient = okHttpClient,
+                    // 播放走独立 Dispatcher，不与后台抓取抢并发名额（见 playerHttpClient）
+                    okHttpClient = playerHttpClient,
                     bufferProfile = currentBufferProfile(settings),
                 ),
             // 软解兜底（PLAY-02 / D-02）：Media3 把整份请求的所有线路都试过仍失败时接管。

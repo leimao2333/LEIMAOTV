@@ -72,6 +72,9 @@ class VlcPlayerController(
     private var request: PlaybackRequest? = null
     private var lineIndex = 0
     private var retriesLeft = retryLimit
+
+    /** 本次播放里连超时的线路数（见 `handleFailure` 的收敛规则） */
+    private var deadLines = 0
     private var resumeFromMs = 0L
     private var firstStart = true
 
@@ -109,6 +112,7 @@ class VlcPlayerController(
         this.request = request
         lineIndex = 0
         retriesLeft = retryLimit
+        deadLines = 0
         resumeFromMs = request.startPositionMs
         firstStart = true
         startCurrentLine()
@@ -197,7 +201,14 @@ class VlcPlayerController(
         mediaPlayer.media = media
         media.release()
 
-        val startAt = (if (firstStart) resumeFromMs else mediaPlayer.time).coerceAtLeast(0L)
+        // 续播点的语义：本轮第一次建流用请求里给的位置，之后重连接着断点走。
+        // 但**已经播到末尾时不能拿它当续播点** —— 直播断流常表现为「播到结束」，
+        // 此时 mediaPlayer.time 就停在总时长上，直接续到末尾会让新流一秒内又结束，
+        // 用户看到的是画面一闪一闪反复重连。靠近末尾一律从 0 重来。
+        val rawStart = if (firstStart) resumeFromMs else mediaPlayer.time
+        val total = mediaPlayer.length
+        val atEnd = total > 0L && rawStart >= total - END_GUARD_MS
+        val startAt = if (atEnd) 0L else rawStart.coerceAtLeast(0L)
         firstStart = false
         if (startAt > 0L) {
             mediaPlayer.time = startAt
@@ -247,7 +258,7 @@ class VlcPlayerController(
             scope.launch {
                 delay(LINE_BUDGET_MS)
                 if (_state.value is PlaybackState.Preparing) {
-                    handleFailure(reason = "这条线路一直没出画面")
+                    handleFailure(reason = REASON_TIMEOUT)
                 }
             }
     }
@@ -260,6 +271,29 @@ class VlcPlayerController(
     private fun handleFailure(reason: String) {
         val current = request ?: return
         val lines = current.normalizedLines
+
+        // 超时 = 这条线路一直没出画面，原地重试只会把用户再关在转圈里一个预算周期。
+        // Media3 那边对「一个字节都没来」也是直接换线（`nothingArrived`），
+        // 两个内核的失败观感要对齐，否则降级之后忽然变慢，用户以为是换了个 App
+        if (reason == REASON_TIMEOUT) {
+            retriesLeft = 0
+            deadLines++
+        }
+
+        // 兜底内核本来就在「Media3 已经把整轮试完」之后才上，再逐条走完十几条线路
+        // 等于让用户多等一分钟。连着三条超时就直接认输，把失败出口交出去
+        if (deadLines >= DEAD_LINE_LIMIT) {
+            stopWatchdog()
+            _state.value =
+                PlaybackState.Failed(
+                    url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
+                    item = current.item,
+                    reason = reason,
+                    lineIndex = lineIndex,
+                    lineCount = lines.size,
+                )
+            return
+        }
 
         if (retriesLeft > 0) {
             retriesLeft--
@@ -289,8 +323,33 @@ class VlcPlayerController(
         /** 与 Media3 内核一致的重连上限：降级链的语义两内核要对齐 */
         const val PLAYBACK_RETRY_LIMIT = 3
 
-        /** 与 Media3 内核一致的单线时间预算 */
-        private const val LINE_BUDGET_MS = 20_000L
+        /**
+         * 与 Media3 内核一致的单线时间预算。
+         *
+         * 2026-11-04 从 20s 压到 10s：VLC 只在 Media3 全轮失败后才接管，那时每条线路
+         * 已经被证明过一次不可用，再给 20 秒只是把失败出口往后推。
+         */
+        private const val LINE_BUDGET_MS = 10_000L
+
+        /** 超时的统一措辞：`handleFailure` 靠它判「不值得原地重试」 */
+        private const val REASON_TIMEOUT = "这条线路一直没出画面"
+
+        /**
+         * 兜底内核连几条超时就认输。
+         *
+         * 比 Media3 的 5 条更小：走到这里说明 Media3 已经失败过一整轮，
+         * 每条线路的价值都已经下降，没有理由再陪跑十几条。
+         */
+        private const val DEAD_LINE_LIMIT = 3
+
+        /**
+         * 距末尾多近算「已经播完」。
+         *
+         * 直播断流在 VLC 里表现为播放位置停在片子末尾；续播点正好落在末尾时，
+         * 新起的流会立刻再次结束，形成一闪一闪的重连死循环。1.5 秒是留给人眼
+         * 分辨「这是刚才那一帧还是新画面」的余量，再小就会把正常的短暂卡顿判成播完。
+         */
+        private const val END_GUARD_MS = 1_500L
     }
 }
 

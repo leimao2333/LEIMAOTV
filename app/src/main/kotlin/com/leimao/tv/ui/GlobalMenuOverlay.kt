@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -26,6 +25,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.theme.TvText
 
 /**
@@ -57,11 +57,11 @@ fun GlobalMenuOverlay(
 
     val firstFocus = remember { FocusRequester() }
 
-    // 初始焦点落在第一个菜单项（RULES §6.2 第 4 条）；菜单刚组合时节点未 attach，
-    // 等一帧再请求，避免 requestFocus 抛异常（与播放页控制条同一套时序处理）。
+    // 初始焦点落在第一个菜单项（RULES §6.2 第 4 条）。
+    // 必须重试到真的挂上：只等一帧在低配盒子上常常失败，异常被吞掉之后
+    // 菜单虽然弹出来了、方向键却完全没有反应（与播放页控制条同一套处理）
     LaunchedEffect(Unit) {
-        withFrameNanos { }
-        runCatching { firstFocus.requestFocus() }
+        firstFocus.requestFocusWhenReady()
     }
 
     // 返回键先收菜单，不穿透到下层页面（§6.4：菜单是临时的覆盖层，不是导航栈的一页）

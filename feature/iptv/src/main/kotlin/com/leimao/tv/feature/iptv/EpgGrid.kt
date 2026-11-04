@@ -23,7 +23,6 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -33,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.epg.EpgBlock
 import com.leimao.tv.core.model.epg.EpgTimeline
@@ -185,9 +185,8 @@ private fun TimelineBody(
     LaunchedEffect(timeline.windowStart) {
         val focusIndex = timeline.blocks.indexOfFirst { it.programme.isLiveAt(nowMillis) }
         if (focusIndex >= 0) {
-            // 节点要等一帧才 attach，直接 requestFocus 会抛 «not initialized»
-            withFrameNanos { }
-            runCatching { requesters[focusIndex].requestFocus() }
+            // 节点要等挂载完才接焦点；只等一帧在低配盒子上不够，重试到成为止
+            requesters[focusIndex].requestFocusWhenReady()
         }
     }
 

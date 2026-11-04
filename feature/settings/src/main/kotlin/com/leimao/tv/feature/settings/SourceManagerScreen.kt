@@ -33,7 +33,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -66,6 +65,7 @@ import com.leimao.tv.core.database.repository.SourceRepository
 import com.leimao.tv.core.database.repository.SourceType
 import com.leimao.tv.core.database.repository.SourceTypeGuesser
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.network.vod.VodFailure
@@ -249,10 +249,9 @@ fun SourceManagerScreen(
 
     LaunchedEffect(pendingEntryFocus) {
         val target = pendingEntryFocus ?: return@LaunchedEffect
-        // 两帧：第一帧底层节点刚进组合，第二帧才测量完，太早请求会落到还没布局的节点上
-        withFrameNanos { }
-        withFrameNanos { }
-        runCatching { target.requestFocus() }
+        // 重试到真的拿到焦点：固定等两帧在低端盒子上仍有概率落空，
+        // 落空的表现是「取消弹层回来了，但方向键要按两下才有反应」
+        target.requestFocusWhenReady()
         pendingEntryFocus = null
     }
 

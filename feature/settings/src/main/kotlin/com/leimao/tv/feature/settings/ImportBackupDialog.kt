@@ -15,7 +15,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -25,6 +24,7 @@ import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.components.TvModal
 import com.leimao.tv.core.designsystem.components.TvTextField
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.theme.TvText
 
 /**
@@ -45,9 +45,9 @@ fun ImportBackupDialog(
     // 树内弹层没有窗口，不会自动把焦点给第一个可聚焦元素；不点名的话第一下按键
     // 只会被用来做初始焦点搜索（见 TvModal 说明）。等两帧让布局落定再请求
     LaunchedEffect(Unit) {
-        withFrameNanos { }
-        withFrameNanos { }
-        runCatching { urlFieldFocus.requestFocus() }
+        // 固定等两帧只是「大多数情况够」：低端盒子上仍会落空，落空就是「打开弹层后
+        // 第一下按键没反应」。改成成功与否驱动重试
+        urlFieldFocus.requestFocusWhenReady()
     }
 
     // 树内弹层（SET-12）：不用 Dialog 窗口 —— 窗口聚焦会吃掉打开后的第一次按键

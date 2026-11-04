@@ -13,7 +13,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
  *   故内核不做可选项，只在此注明。
  *
  * 档位是「用户能懂的词」与「内核能懂的参数」之间的翻译层：UI 只认 [BufferProfile]，
- * 内核只认 `BufferProfile.durationsMs`，谁也不用去背具体毫秒数。
+ * 内核只认 [BufferProfile.loadControl] 吐出来的 `DefaultLoadControl`，谁也不用去背具体毫秒数。
+ * **点播不吃档位**：电影 / 剧集固定走 [BufferProfile.VOD_DURATIONS]（见那里的说明）。
  */
 data class PlaybackSettings(
     val bufferProfile: BufferProfile = BufferProfile.BALANCED,
@@ -53,6 +54,14 @@ enum class PlaybackSpeed(
  *
  * 三档分别服务三种诉求：低延迟给「追实时」，抗卡顿给「网络差」，均衡是默认。
  * 四个时长依次是：最小缓冲 / 最大缓冲 / 起播前攒够 / 卡顿后重新起播。
+ *
+ * ## 只管直播，点播不吃这一档（2026-11-04）
+ *
+ * 档位里的「最大缓冲 30 秒」是被**直播**逼出来的：HLS 直播窗口通常只有 3~6 个分片
+ * （18~36 秒），上限再大，内核就会反复刷播放列表去凑一份根本还不存在的数据，反而更卡。
+ *
+ * 点播没有这个约束 —— playlist 是完整的，想往前缓存多少都行。所以点播走
+ * [VOD_BUFFER] 那一组独立参数（见 [loadControl] 的 `forVod`），不再被直播的上限连累。
  */
 enum class BufferProfile(
     val label: String,
@@ -113,24 +122,75 @@ enum class BufferProfile(
      * Media3 的分配器是「按整段分片」分配的，一个分片就顶满预算之后就不再加载，
      * 而播放器还在等数据，看门狗 3 秒判一次超时，表现为「BUFFERING → IDLE」无限循环。
      * 让 Media3 按码率自己估，只把「尊重字节上限」这个开关打开，才是安全的做法。
+     *
+     * [forVod] 为 true 时改用点播专用的四段参数（[VOD_BUFFER]）：不再是直播那套
+     * 「最多攒 30 秒就停手」。点播要的是**一直往前走**，网络抖一下手里还有几分钟的货。
+     * 单个 ExoPlayer 的 LoadControl 是构造期参数，所以切到点播时内核会重建一次
+     * （见 `Media3PlayerController.ensureKernelFor`）。
      */
-    fun loadControl(level: MemoryLevel = MemoryLevel.NORMAL): DefaultLoadControl =
-        DefaultLoadControl.Builder()
+    fun loadControl(
+        level: MemoryLevel = MemoryLevel.NORMAL,
+        forVod: Boolean = false,
+    ): DefaultLoadControl {
+        val d = if (forVod) VOD_DURATIONS else durations()
+        return DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                minBufferMs,
-                maxBufferMs,
-                bufferForPlaybackMs,
-                bufferAfterRebufferMs,
+                d.minBufferMs,
+                d.maxBufferMs,
+                d.bufferForPlaybackMs,
+                d.bufferAfterRebufferMs,
             )
             // 低配机字节优先：宁可偶尔薄一点，也不能让 4K 码流把进程压垮
             .setPrioritizeTimeOverSizeThresholds(!level.constrained)
             .build()
+    }
+
+    /** 这一档换算出来的四段时长。点播不用它，走 [VOD_DURATIONS] */
+    internal fun durations(): BufferDurations =
+        BufferDurations(minBufferMs, maxBufferMs, bufferForPlaybackMs, bufferAfterRebufferMs)
 
     companion object {
         fun fromName(name: String?): BufferProfile =
             entries.firstOrNull { it.name == name } ?: BALANCED
+
+        /**
+         * 点播专用的四段缓冲（2026-11-04，用户反馈「影视一直要缓冲」）。
+         *
+         * 数值不是拍脑袋：
+         *
+         * - **最小 30 秒**：低于这个数，一次 5 秒的抽风就能把缓冲抽干。点播可以等，
+         *   直播不能 —— 直播的 10 秒下限就是被「换台要快」压下来的。
+         * - **最大 180 秒**：这就是用户说的「一直缓存」。内核会一直往前预读，直到攒够三分钟
+         *   或撞上字节上限。看剧时来回拖进度、切清晰度重开，命中的部分全在手里。
+         *   不设更长的原因：**内存里的 buffer 就是内存**，180 秒 1080p 约 150~200MB，
+         *   2GB 盒子上再加就得跟系统抢。三分钟已覆盖「去倒杯水回来接着看」。
+         * - **起播攒 3 秒**（原来是 1 秒）：1 秒是「赶紧给我出画」的直播思维，
+         *   点播起播慢半秒没人会抱怨，但刚出画就卡一下所有人都会骂。
+         * - **卡后攒 5 秒**（原来是 1.5 秒）：恢复门槛太低就会「卡—放半秒—再卡」，
+         *   反复抖比一次多等两秒难受得多。
+         */
+        internal val VOD_DURATIONS: BufferDurations =
+            BufferDurations(
+                minBufferMs = 30_000,
+                maxBufferMs = 180_000,
+                bufferForPlaybackMs = 3_000,
+                bufferAfterRebufferMs = 5_000,
+            )
     }
 }
+
+/**
+ * 四段缓冲时长的载具。
+ *
+ * 单独抽出来是因为「点播」不需要一整个 [BufferProfile]：档位是给用户选的（直播三档），
+ * 点播只有一套固定参数，拿枚举去 `copy` 也不成立（枚举没有 copy）。
+ */
+internal data class BufferDurations(
+    val minBufferMs: Int,
+    val maxBufferMs: Int,
+    val bufferForPlaybackMs: Int,
+    val bufferAfterRebufferMs: Int,
+)
 
 /** 快进步长（点播用）。档位用「秒数」表达，比毫秒更贴近用户在遥控器上按一下的预期。 */
 enum class SeekStep(

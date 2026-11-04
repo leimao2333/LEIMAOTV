@@ -42,10 +42,10 @@ android {
         minSdk = 21
         targetSdk = 35
 
-        // versionCode 按 RULES §10.2 公式算：0×1000000 + 5×10000 + 5×100 + 0 = 50500
+        // versionCode 按 RULES §10.2 公式算：0×1000000 + 5×10000 + 6×100 + 0 = 50600
         // versionName 必须与 AppVersion.CURRENT_VERSION 逐字符相等（SYS-10，单测钉住）
-        versionCode = 50500
-        versionName = "0.5.5.0"
+        versionCode = 50600
+        versionName = "0.5.6.0"
     }
 
     signingConfigs {

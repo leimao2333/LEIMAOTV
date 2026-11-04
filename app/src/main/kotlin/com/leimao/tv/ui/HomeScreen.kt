@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.AppMode
@@ -390,11 +391,13 @@ fun HomeScreen(
     var exitConfirmSeen by remember { mutableStateOf(false) }
     LaunchedEffect(showExitConfirm) {
         if (!showExitConfirm && !exitConfirmSeen) return@LaunchedEffect
-        withFrameNanos {}
         if (showExitConfirm) {
             exitConfirmSeen = true
-            runCatching { stayFocus.requestFocus() }
+            // 重试到真的拿到焦点：只等一帧在低配盒子上会落空，
+            // 落空的表现是「退出确认框弹出来了，但方向键选不动选项」
+            stayFocus.requestFocusWhenReady()
         } else {
+            withFrameNanos {}
             navExpanded = true
             pendingNavFocus++
         }

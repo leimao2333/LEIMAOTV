@@ -31,7 +31,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +50,7 @@ import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.components.TvKeypad
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.focus.focusRing
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.search.SearchHit
 import com.leimao.tv.core.model.search.SearchKind
@@ -88,11 +88,9 @@ fun SearchScreen(
 ) {
     val inputFocus = remember { FocusRequester() }
 
-    // 首帧还没布局完时 requestFocus 会打空，等一帧再要焦点（与影视首页同一套做法）
+    // 首帧还没布局完时 requestFocus 会打空，必须重试到节点真的挂上
     LaunchedEffect(autoFocus) {
-        if (!autoFocus) return@LaunchedEffect
-        withFrameNanos { }
-        runCatching { inputFocus.requestFocus() }
+        if (autoFocus) inputFocus.requestFocusWhenReady()
     }
 
     // 自绘九宫格默认展开（SEARCH-06）：TV 上「能打字」是可用性的底线，

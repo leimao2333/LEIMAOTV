@@ -119,7 +119,97 @@ class Media3PlayerController(
         val kind: TrackKind,
     )
 
-    private val videoPlayer: ExoPlayer = buildPlayer()
+    /**
+     * 事件监听只注册一次：内核重建时把它挂到新实例上即可。
+     *
+     * 提成字段（原来是 `init` 里的匿名对象）是因为重建内核要重新 `addListener`，
+     * 每重建一次就 new 一个匿名对象，等于每次换类型都多一份悬挂引用。
+     */
+    private val playerListener =
+        object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val current = request ?: return
+                val lines = current.normalizedLines
+                when (playbackState) {
+                    // 只认 BUFFERING：STATE_IDLE 会在出错后紧跟着回调一次，
+                    // 如果把它也当成 Preparing，刚刚设好的 Failed 会被立刻覆盖，
+                    // 用户看到的就是「一直转圈、永远不报错」
+                    Player.STATE_BUFFERING -> {
+                        noteRebuffer()
+                        _state.value =
+                            PlaybackState.Preparing(
+                                url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
+                                item = current.item,
+                                lineIndex = lineIndex,
+                                lineCount = lines.size,
+                            )
+                    }
+
+                    Player.STATE_READY -> {
+                        stopWatchdog()
+                        renderedOnce = true
+                        _state.value =
+                            PlaybackState.Playing(
+                                url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
+                                item = current.item,
+                                lineIndex = lineIndex,
+                                lineCount = lines.size,
+                            )
+                    }
+
+                    Player.STATE_ENDED ->
+                        // 直播流正常不该「播完」，真结束了按断流处理，走同一条重连路径；
+                        // 点播播完是正常结局，交给上层决定下一集（VOD-05）——
+                        // 这里若是也走 handleFailure，每集播完都会重播最后几秒再报错
+                        if (current.kind == PlaybackKind.VOD) {
+                            stopWatchdog()
+                            _state.value =
+                                PlaybackState.Ended(
+                                    url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
+                                    item = current.item,
+                                    lineIndex = lineIndex,
+                                    lineCount = lines.size,
+                                )
+                        } else {
+                            handleFailure(reason = REASON_STREAM_ENDED)
+                        }
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                handleFailure(reason = describe(error))
+            }
+
+            // 换集 / 换线路 / 起播后轨道都会变。INFO 没有内容，不刷（每次都重建列表
+            // 会让「音轨」面板在播放中被无意义地重绘）
+            override fun onTracksChanged(tracks: Tracks) {
+                refreshTracks()
+            }
+        }
+
+    private val videoPlayer: ExoPlayer
+        get() = kernel
+
+    /**
+     * 当前内核。
+     *
+     * 为什么是可变字段：**LoadControl 是 `ExoPlayer.Builder` 的构造期参数**，
+     * 而直播与点播要的缓冲完全是两套（直播受 HLS 窗口限制只能攒 30 秒，
+     * 点播则可以一路预读到三分钟）。同一个 ExoPlayer 无法中途换策略，只能换内核。
+     * 见 [ensureKernelFor]。
+     */
+    private var kernel: ExoPlayer = buildPlayer(PlaybackKind.LIVE)
+
+    /** 当前内核是按哪种播放类型建的。类型变了就得重建，否则缓冲参数不对 */
+    private var playerKind: PlaybackKind = PlaybackKind.LIVE
+
+    /**
+     * 画面出口的代号（见 [surfaceToken]）。
+     *
+     * 重建内核时自增，让 Compose 用新的 key 重建 `AndroidView` —— 否则 factory
+     * 一辈子只跑一次，新内核的 surface 永远没被挂上去，表现为有声音没画面。
+     */
+    private var surfaceVersion = 0
 
     /**
      * 当前的画面出口。
@@ -144,7 +234,23 @@ class Media3PlayerController(
             }.also { playerView = it }
     }
 
-    override val surfaceToken: Any get() = this
+    override val surfaceToken: Any get() = SurfaceToken(this, surfaceVersion)
+
+    /**
+     * 画面出口代号。
+     *
+     * 不能直接用 `this`：重建内核（直播 ↔ 点播换缓冲策略）时同一个 controller 实例
+     * 会换掉底层 ExoPlayer，而 `this` 永远相等 —— Compose 就不会重建 `AndroidView`，
+     * 画面仍然挂在**已释放**的旧内核的 surface 上（有声音、没画面）。
+     * 带上版本号之后，重建一次就换一个代号。
+     *
+     * 带上 owner 是因为兜底链里的 VLC 内核也用 `this` 当代号：
+     * 只用版本号（Int）的话，两个实例的 0 会相等，换内核同样重建不了画面。
+     */
+    private data class SurfaceToken(
+        val owner: Media3PlayerController,
+        val version: Int,
+    )
 
     override fun releaseSurfaceView(view: View) {
         if (view is PlayerView) {
@@ -173,73 +279,11 @@ class Media3PlayerController(
     /** 加载统计的轮询任务。**只在播放期间存在**，见 [startStatsTicker] */
     private var statsTicker: Job? = null
 
-    init {
-        videoPlayer.addListener(
-            object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    val current = request ?: return
-                    val lines = current.normalizedLines
-                    when (playbackState) {
-                        // 只认 BUFFERING：STATE_IDLE 会在出错后紧跟着回调一次，
-                        // 如果把它也当成 Preparing，刚刚设好的 Failed 会被立刻覆盖，
-                        // 用户看到的就是「一直转圈、永远不报错」
-                        Player.STATE_BUFFERING -> {
-                            noteRebuffer()
-                            _state.value =
-                                PlaybackState.Preparing(
-                                    url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                                    item = current.item,
-                                    lineIndex = lineIndex,
-                                    lineCount = lines.size,
-                                )
-                        }
-
-                        Player.STATE_READY -> {
-                            stopWatchdog()
-                            renderedOnce = true
-                            _state.value =
-                                PlaybackState.Playing(
-                                    url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                                    item = current.item,
-                                    lineIndex = lineIndex,
-                                    lineCount = lines.size,
-                                )
-                        }
-
-                        Player.STATE_ENDED ->
-                            // 直播流正常不该「播完」，真结束了按断流处理，走同一条重连路径；
-                            // 点播播完是正常结局，交给上层决定下一集（VOD-05）——
-                            // 这里若是也走 handleFailure，每集播完都会重播最后几秒再报错
-                            if (current.kind == PlaybackKind.VOD) {
-                                stopWatchdog()
-                                _state.value =
-                                    PlaybackState.Ended(
-                                        url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                                        item = current.item,
-                                        lineIndex = lineIndex,
-                                        lineCount = lines.size,
-                                    )
-                            } else {
-                                handleFailure(reason = REASON_STREAM_ENDED)
-                            }
-                    }
-                }
-
-                override fun onPlayerError(error: PlaybackException) {
-                    handleFailure(reason = describe(error))
-                }
-
-                // 换集 / 换线路 / 起播后轨道都会变。INFO 没有内容，不刷（每次都重建列表
-                // 会让「音轨」面板在播放中被无意义地重绘）
-                override fun onTracksChanged(tracks: Tracks) {
-                    refreshTracks()
-                }
-            },
-        )
-    }
-
     override fun play(request: PlaybackRequest) {
         this.request = request
+        // 直播与点播的缓冲策略不同，而 LoadControl 是构造期参数 —— 类型变了先换内核。
+        // 必须在后面的状态清理之前做：重建内核会把旧内核的播放状态一并扔掉
+        ensureKernelFor(request.kind)
         lineIndex = 0
         retriesLeft = retryLimit
         resumeFromMs = request.startPositionMs
@@ -648,14 +692,22 @@ class Media3PlayerController(
         scope.launch { switchLine(delta = 1) }
     }
 
-    private fun buildPlayer(): ExoPlayer =
+    /**
+     * 按播放类型建内核（`kind` 决定缓冲策略，见 [BufferProfile.loadControl]）。
+     *
+     * 直播与点播的缓冲上限天生冲突：直播被 HLS 窗口卡在 30 秒，点播要一路预读到三分钟。
+     * LoadControl 只能在 `ExoPlayer.Builder` 上设，所以两者之间切换时只能换一个内核实例 ——
+     * 见 [ensureKernelFor]。
+     */
+    private fun buildPlayer(kind: PlaybackKind): ExoPlayer =
         ExoPlayer.Builder(context)
             .setRenderersFactory(
                 DefaultRenderersFactory(context)
                     // 硬解初始化失败时退到系统软解，这是 PLAY-02 在 Media3 内能做到的兜底
                     .setEnableDecoderFallback(true),
             )
-            // 缓冲档位由设置页（SET-01）决定，默认均衡档。
+            // 缓冲参数由设置页（SET-01）与播放类型共同决定：
+            // 直播吃档位（低延迟/均衡/抗卡顿），点播固定走「大缓冲」那一套。
             // 设备内存档位在这里注入：同一档在 2GB 盒子上要按字节收紧，
             // 否则 4K 码流会把进程撑到被系统杀掉（见 MemoryLevel 的说明）
             .setLoadControl(
@@ -663,15 +715,44 @@ class Media3PlayerController(
                     MemoryLevel.of(context).also {
                         Log.d(PlaybackDiagnostics.TAG, "内存档位 ${MemoryLevel.describe(context)}")
                     },
+                    forVod = kind == PlaybackKind.VOD,
                 ),
             )
             .build()
             // 诊断日志：解码器是硬解还是软解、分辨率帧率、丢帧数 —— 用户说「卡」时先看这个
             .apply {
+                addListener(playerListener)
                 addAnalyticsListener(PlaybackDiagnostics())
                 // 同一批事件里顺手攒出「已加载多少字节」，喂给加载浮层（PLAY-12）
                 addAnalyticsListener(loadTracker)
             }
+
+    /**
+     * 保证内核是按 [kind] 的缓冲策略建出来的，不是就重建一个。
+     *
+     * 只在**播放类型发生变化**时触发（直播 ↔ 点播），同类型连续换台不会重建。
+     *
+     * 顺序很讲究：
+     * 1. 先把 `PlayerView.player` 摘掉 —— 画面出口还指着旧内核时直接 release，
+     *    下一帧 draw 就会摸到已释放的对象（native 崩溃，Kotlin 侧连栈都拿不到）。
+     * 2. 再 release 旧内核。
+     * 3. 建新内核、把出口接回去。
+     * 4. 最后自增 [surfaceVersion]：UI 侧的 `key(surfaceToken)` 收到新代号后
+     *    会把旧 View 交还（解绑）并让新内核重新造一块 —— 不换代号的话
+     *    `AndroidView` 的 factory 不会重跑，画面就永远缺一块。
+     */
+    private fun ensureKernelFor(kind: PlaybackKind) {
+        if (playerKind == kind) return
+        val old = kernel
+        playerView?.player = null
+        runCatching { old.stop() }
+        old.release()
+        kernel = buildPlayer(kind)
+        playerView?.player = kernel
+        playerKind = kind
+        surfaceVersion++
+        Log.d(PlaybackDiagnostics.TAG, "内核按播放类型重建：$kind")
+    }
 
     companion object {
         /** 单条线路上连续重连的次数上限；再失败就该换线了（PLAY-08） */

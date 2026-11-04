@@ -66,4 +66,47 @@ class PlaybackSettingsTest {
             assertEquals(step, SeekStep.fromMillis(step.millis))
         }
     }
+
+    // ---- 点播缓冲（2026-11-04：影视「一直缓冲」）----
+
+    @Test
+    fun `点播缓冲比任何一个直播档位都厚`() {
+        // 用户要的是「缓存多一点、一直缓存」：点播的下限与上限都必须压过最厚的直播档，
+        // 否则改了等于没改（直播档最大上限 60 秒，点播要 3 分钟）
+        val vod = BufferProfile.VOD_DURATIONS
+        BufferProfile.entries.forEach { live ->
+            assert(vod.minBufferMs > live.minBufferMs) {
+                "点播最小缓冲 ${vod.minBufferMs} 不该低于 ${live.name} 的 ${live.minBufferMs}"
+            }
+        }
+        assert(vod.maxBufferMs > BufferProfile.ANTI_JITTER.maxBufferMs)
+    }
+
+    @Test
+    fun `点播缓冲四段必须自洽_否则内核构造期就会抛异常`() {
+        // Media3 的 DefaultLoadControl 有硬校验：起播门槛不得大于最小缓冲，
+        // 卡后门槛不得大于最小缓冲。写反了是**构造期崩溃**，不是「效果差一点」
+        val vod = BufferProfile.VOD_DURATIONS
+        assert(vod.bufferForPlaybackMs <= vod.minBufferMs)
+        assert(vod.bufferAfterRebufferMs <= vod.minBufferMs)
+        assert(vod.minBufferMs <= vod.maxBufferMs)
+    }
+
+    @Test
+    fun `点播缓冲能一直往前读_上限至少三分钟`() {
+        // 「要一直缓存」的落点就在这个上限：内核攒够它就停手，
+        // 30 秒的老值在 10Mbps 的源上只够 30 秒，一次抽风就抽干了
+        assertEquals(180_000, BufferProfile.VOD_DURATIONS.maxBufferMs)
+        assertEquals(30_000, BufferProfile.VOD_DURATIONS.minBufferMs)
+    }
+
+    @Test
+    fun `点播与直播的缓冲参数不是同一套`() {
+        // 直播被 HLS 窗口卡在 30 秒，点播要 3 分钟 —— 两者共用一个 LoadControl 是不可能的，
+        // 所以 Media3PlayerController 才会按播放类型重建内核。这条测试守住那个前提
+        assertNotEquals(
+            BufferProfile.BALANCED.durations().maxBufferMs,
+            BufferProfile.VOD_DURATIONS.maxBufferMs,
+        )
+    }
 }

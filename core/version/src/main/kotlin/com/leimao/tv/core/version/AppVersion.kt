@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.5.0"
+    const val CURRENT_VERSION: String = "0.5.6.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,18 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.6.0",
+                date = "2026-11-04",
+                changes =
+                    listOf(
+                        "修复：直播按 OK 弹出控制条后方向键怎么按都不动 —— 现在弹出即接住焦点",
+                        "修复：影视播放总是反复缓冲 —— 点播单独用一套更大的缓冲，一路预读到三分钟",
+                        "优化：影视磁盘缓存 512MB → 1GB，看过的片段往回拖不用重新下载",
+                        "修复：控制条在操作过程中会自己消失（5 秒计时没被按键续上）",
+                        "修复：设置页、抽屉、节目单、弹层同样的「弹出来接不住焦点」问题",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.5.0",
                 date = "2026-11-04",

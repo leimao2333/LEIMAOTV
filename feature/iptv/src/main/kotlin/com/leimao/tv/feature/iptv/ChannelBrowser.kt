@@ -24,7 +24,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +37,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.components.RemoteImage
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.Channel
 import com.leimao.tv.core.model.epg.EpgProgramme
@@ -116,12 +116,11 @@ fun ChannelBrowser(
         if (index >= 0) listState.scrollToItem(index)
     }
 
-    // 调用方要「进来就有焦点」时，必须等这一帧布局结束再请求：
-    // 节点还没 attach 就 requestFocus 会抛 IllegalStateException，直接崩在打开抽屉那一刻
+    // 调用方要「进来就有焦点」时，必须等节点真的挂上再请求：
+    // 只等一帧在低配盒子上经常不够（布局还没跑完），requestFocus 抛异常被吞掉之后，
+    // 抽屉是打开了、但方向键一动不动 —— 所以这里重试到拿到焦点为止
     LaunchedEffect(initialFocusRequester, activeGroup) {
-        if (initialFocusRequester == null) return@LaunchedEffect
-        withFrameNanos { }
-        runCatching { initialFocusRequester.requestFocus() }
+        initialFocusRequester?.requestFocusWhenReady()
     }
 
     Row(modifier = modifier.fillMaxSize()) {

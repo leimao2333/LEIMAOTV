@@ -27,7 +27,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -52,6 +51,7 @@ import com.leimao.tv.core.designsystem.components.BufferingOverlay
 import com.leimao.tv.core.designsystem.components.TvTextField
 import com.leimao.tv.core.designsystem.components.rememberBufferingVisible
 import com.leimao.tv.core.designsystem.focus.FocusableCard
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.model.Channel
@@ -315,8 +315,9 @@ fun PlayerScreen(
     val rootFocus = remember { FocusRequester() }
     val firstControlFocus = remember { FocusRequester() }
 
-    // 每个页面必须显式指定初始焦点（RULES §6.2 第 4 条）
-    LaunchedEffect(Unit) { rootFocus.requestFocus() }
+    // 每个页面必须显式指定初始焦点（RULES §6.2 第 4 条）。
+    // 同样走「重试到挂上为止」：冷启动第一帧就进播放页时，根节点可能还没测量完
+    LaunchedEffect(Unit) { rootFocus.requestFocusWhenReady() }
 
     // PLAY-04：控制条 5s 无操作自动隐藏
     LaunchedEffect(controlsVisible, interactionTick) {
@@ -329,11 +330,14 @@ fun PlayerScreen(
     //
     // 不做这一步的话焦点仍然停在根节点上，而根节点没有任何可移动的邻居 ——
     // 方向键过去了什么也不发生，OK 也触发不了按钮，用户只会得出「按钮是死的」这个结论。
-    // 等一帧再请求：控制条刚组合出来时节点还没 attach，直接 requestFocus 会抛异常。
+    //
+    // **必须重试到真的拿到焦点**（2026-11-04 反馈「按 OK 弹出控制条，但怎么按都不动」）：
+    // 原来的写法是 `withFrameNanos {}` 之后请求一次，失败被 `runCatching` 吞掉。
+    // 低配盒子上一帧内还没完成测量，请求必然抛异常，于是焦点根本没进控制条 ——
+    // 之后每一次方向键都落在根节点上，什么也不会发生。现在重试到成功或超时为止。
     LaunchedEffect(controlsVisible) {
         if (!controlsVisible) return@LaunchedEffect
-        withFrameNanos { }
-        runCatching { firstControlFocus.requestFocus() }
+        firstControlFocus.requestFocusWhenReady()
     }
 
     // HUD 自己一个更短的窗口（PLAY-10：切台闪现 2s 后淡出）。
@@ -492,10 +496,17 @@ fun PlayerScreen(
                         return@onPreviewKeyEvent false
                     }
 
-                    // 任何一次按键都算「用户在操作」：HUD 立刻亮起来，计时器归零
+                    // 任何一次按键都算「用户在操作」：HUD 立刻亮起来，计时器归零。
+                    //
+                    // 控制条开着时也要给 `interactionTick` 续命：方向键 / OK 在下面
+                    // 是**放行**给焦点系统的（控制条里的按钮靠它们移动与点击），
+                    // 只有「打开控制条」那一次会自增。不在这里补一刀的话，用户正在
+                    // 按钮之间挑选项时，5 秒一到控制条自己消失了（2026-11-04 反馈
+                    // 「按 OK 出来的东西动不动就没了」）。
                     if (event.type == KeyEventType.KeyDown) {
                         hudVisible = true
                         hudTick++
+                        if (controlsVisible) interactionTick++
                     }
                     handleKey(
                         event = event,
@@ -948,7 +959,7 @@ private fun FailurePanel(
     onBackToLive: () -> Unit = {},
 ) {
     val retryFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { retryFocus.requestFocus() }
+    LaunchedEffect(Unit) { retryFocus.requestFocusWhenReady() }
 
     Column(
         modifier =
@@ -1025,8 +1036,7 @@ private fun TrackOverlay(
     // 初始焦点落在当前选中那条：打开面板十次有九次是「看看现在用的是哪条」
     val focusId = tracks.firstOrNull { it.selected }?.id ?: tracks.firstOrNull()?.id
     LaunchedEffect(kind, tracks.size) {
-        withFrameNanos { }
-        runCatching { firstFocus.requestFocus() }
+        firstFocus.requestFocusWhenReady()
     }
 
     Box(
@@ -1126,8 +1136,7 @@ private fun CatchupOverlay(
     val hasTitles = entries.any { it.title != null }
 
     LaunchedEffect(entries) {
-        withFrameNanos { }
-        runCatching { firstFocus.requestFocus() }
+        firstFocus.requestFocusWhenReady()
     }
 
     Box(

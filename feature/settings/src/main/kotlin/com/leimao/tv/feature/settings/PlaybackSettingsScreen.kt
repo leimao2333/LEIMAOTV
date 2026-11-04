@@ -16,6 +16,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.player.BufferProfile
 import com.leimao.tv.core.player.PlaybackSettings
@@ -38,7 +39,7 @@ fun PlaybackSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val firstFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { firstFocus.requestFocus() }
+    LaunchedEffect(Unit) { firstFocus.requestFocusWhenReady() }
 
     Column(
         modifier =
@@ -72,7 +73,9 @@ fun PlaybackSettingsScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
         Text(
-            text = "缓冲档位更改后下次启动生效。",
+            text =
+                "缓冲档位只影响直播；影视（电影 / 剧集）固定使用更大的缓冲，不受此档限制。" +
+                    "档位更改后下次启动生效。",
             style = TvText.current.hint,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

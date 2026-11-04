@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.0.10"
+    const val CURRENT_VERSION: String = "0.5.0.11"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.0.11",
+                date = "2026-11-02",
+                changes =
+                    listOf(
+                        "修复：从播放页退回首页后，再按返回直接回到刚才那个台的画面 —— " +
+                            "此前会直接问「退出磊毛TV？」，想看回去只能再按一次 OK",
+                        "修复：选「留在应用」关掉退出确认后，焦点回到左侧当前栏目上，" +
+                            "不再跳回内容区",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.0.10",
                 date = "2026-11-02",

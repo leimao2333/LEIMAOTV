@@ -750,6 +750,9 @@ private fun HomeRoute(
                 navController.navigate(TvRoute.player(lastChannelId))
             }
         },
+        // 首屏有「正在直播」那条 = 有台可回（它就是最近观看 / 收藏里挑出来的）。
+        // 没有时返回键不能往播放页送，否则会落到一个没有频道的空播放页
+        canResumeLive = liveCandidates.isNotEmpty(),
         channels = channels,
         favoriteIds = favoriteIds,
         recentChannels = recentChannels,

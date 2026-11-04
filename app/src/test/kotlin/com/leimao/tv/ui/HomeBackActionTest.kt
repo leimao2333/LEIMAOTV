@@ -47,6 +47,55 @@ class HomeBackActionTest {
     }
 
     @Test
+    fun `焦点在内容区时返回先回导航栏而不是问退出`() {
+        // 2026-11-02 走查：直播页焦点停在首屏大卡上，按返回直接弹「退出磊毛TV？」，
+        // 而用户只是想回左边那列导航。返回键是「退一层」，这一层还没退
+        assertEquals(
+            HomeBackAction.FOCUS_NAV,
+            homeBackAction(
+                showExitConfirm = false,
+                section = HomeSection.LIVE,
+                mode = AppMode.LIVE,
+                focusInNav = false,
+            ),
+        )
+        assertEquals(
+            HomeBackAction.FOCUS_NAV,
+            homeBackAction(false, HomeSection.RECOMMEND, AppMode.VOD, focusInNav = false),
+        )
+        // 子栏目优先：在「设置」里按返回直接回默认栏目，不该先回导航栏再按一次
+        assertEquals(
+            HomeBackAction.GO_DEFAULT_SECTION,
+            homeBackAction(false, HomeSection.SETTINGS, AppMode.LIVE, focusInNav = false),
+        )
+    }
+
+    @Test
+    fun `内容区按返回直接回到正在看的直播画面`() {
+        // 用户从播放页退回首页，焦点落在首屏那条「正在直播」上；再按返回应该接着看，
+        // 而不是退到左侧导航（对看电视这件事没有意义）
+        assertEquals(
+            HomeBackAction.RESUME_LIVE,
+            homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = false, canResumeLive = true),
+        )
+        // 焦点已经在导航栏上时绝不能回播放页：否则返回键永远退不出应用
+        assertEquals(
+            HomeBackAction.ASK_EXIT,
+            homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = true, canResumeLive = true),
+        )
+        // 一台都没看过（首次进入）→ 没有可回的画面，退回导航栏
+        assertEquals(
+            HomeBackAction.FOCUS_NAV,
+            homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = false, canResumeLive = false),
+        )
+        // 子栏目仍然优先：在「设置」里按返回回栏目，不把人丢进视频
+        assertEquals(
+            HomeBackAction.GO_DEFAULT_SECTION,
+            homeBackAction(false, HomeSection.SETTINGS, AppMode.LIVE, focusInNav = false, canResumeLive = true),
+        )
+    }
+
+    @Test
     fun `退出确认框开着时再按返回只关框`() {
         val all =
             listOf(

@@ -145,7 +145,13 @@ internal enum class HomeBackAction {
     /** 停在子栏目（设置 / 搜索 / 影视分类）→ 退回默认栏目，**不问退出** */
     GO_DEFAULT_SECTION,
 
-    /** 已经在默认栏目 → 才问「退出吗」 */
+    /** 焦点在内容区、且有一台「最近在看」的直播 → 直接回到那个台的播放画面 */
+    RESUME_LIVE,
+
+    /** 焦点在内容区、但没有可回的直播 → 焦点退回导航栏，**不问退出** */
+    FOCUS_NAV,
+
+    /** 焦点已经在导航栏、栏目也是默认栏目 → 才问「退出吗」 */
     ASK_EXIT,
 }
 
@@ -154,15 +160,32 @@ internal enum class HomeBackAction {
  *
  * 抽成纯函数只为一个目的：这段逻辑错一次，用户在设置页按返回就会被屏幕正中问
  * 「退出磊毛TV？」—— 全应用最伤人的一处反人类，必须能被单测钉死（早先就是无条件的）。
+ *
+ * [focusInNav] 是「焦点此刻在左侧导航栏（含收起后的窄条）里」。
+ * 遥控器的返回键是「退一层」，不是「退到应用外」：焦点在内容区里按返回，
+ * 该回到左边那列导航，而不是直接问「退出吗」—— 2026-11-02 走查：
+ * 直播页焦点停在首屏大卡上，按返回直接弹退出确认，用户只是想回导航。
+ *
+ * [canResumeLive] 是「首页首屏那条『正在直播』还挂着某个台」。
+ * 它比「回导航栏」更近一层：用户刚从播放页退出来，再按返回就该回到那个画面 ——
+ * 那不是「退」，是「回去接着看」。没有可回的台才轮到回导航栏。
  */
 internal fun homeBackAction(
     showExitConfirm: Boolean,
     section: HomeSection,
     mode: AppMode,
+    focusInNav: Boolean = true,
+    canResumeLive: Boolean = false,
 ): HomeBackAction =
     when {
         showExitConfirm -> HomeBackAction.CLOSE_EXIT_CONFIRM
+        // 子栏目优先于焦点层级：在「设置」里按返回，用户要的是回到上一个栏目，
+        // 不是先回导航栏再按一次
         section != defaultSection(mode) -> HomeBackAction.GO_DEFAULT_SECTION
+        // 「回直播画面」只在焦点还在内容区时算：焦点已经在导航栏上按返回，
+        // 那是「退一层」（问退出），不能再把人送回视频里 —— 否则返回键就退不出应用了
+        !focusInNav && canResumeLive -> HomeBackAction.RESUME_LIVE
+        !focusInNav -> HomeBackAction.FOCUS_NAV
         else -> HomeBackAction.ASK_EXIT
     }
 
@@ -218,6 +241,15 @@ fun HomeScreen(
     onSectionChange: (HomeSection) -> Unit,
     onModeChange: (AppMode) -> Unit,
     onOpenPlayer: () -> Unit,
+    /**
+     * 此刻有没有「能回去接着看的直播」。
+     *
+     * 首屏那条「正在直播」是从最近观看 / 收藏里挑的，它存在就说明用户刚在看的台还在那儿。
+     * 返回键在内容区按下去时走 [onOpenPlayer] 把画面接回来 —— 退回导航栏对「看电视」
+     * 这件事没有意义，用户要的是接着看（2026-11-02 需求）。
+     * 一台都没看过（首次进入）时必须为 false：那时 [onOpenPlayer] 会落到一个没有频道的空播放页。
+     */
+    canResumeLive: Boolean = true,
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
@@ -256,6 +288,15 @@ fun HomeScreen(
     val firstNavFocus = remember { FocusRequester() }
     val stayFocus = remember { FocusRequester() }
 
+    // 当前选中栏目那一项的焦点入口。返回键从内容区退回来时，焦点要落回**正在看的这个栏目**，
+    // 而不是永远落到第一个 —— 用户从「设置」退回直播时，焦点跳去别处就是新的迷路
+    val sectionNavFocus = remember { FocusRequester() }
+
+    // 焦点此刻在不在左侧导航栏（含收起后的窄条）里。返回键是「退一层」，
+    // 这一层退没退过只能靠它判断：焦点在内容区时按返回该回导航栏，
+    // 焦点了在导航栏才该问「退出吗」（2026-11-02 走查：直播页大卡上按返回直接弹退出确认）
+    var focusInNav by remember { mutableStateOf(true) }
+
     // 内容区焦点入口：导航项上按 → 时把焦点显式送进内容区 —— 不拦的话焦点搜索会被
     // 几何上更近的 ModeSwitch 抢走，用户按右没反应、导航也不收（2026-10-24 模拟器实测）
     val contentFocus = remember { FocusRequester() }
@@ -285,8 +326,22 @@ fun HomeScreen(
     LaunchedEffect(navExpanded) {
         if (navExpanded) {
             withFrameNanos {}
-            runCatching { firstNavFocus.requestFocus() }
+            // 先落到当前栏目项，挂不上（选中项恰好是第一项时 firstNavFocus 没挂）再退回第一项
+            val landed = runCatching { sectionNavFocus.requestFocus() }.isSuccess
+            if (!landed) runCatching { firstNavFocus.requestFocus() }
         }
+    }
+
+    // 「返回键把焦点送回导航栏」：导航栏本来就已经展开时 navExpanded 不变，
+    // 那个 effect 不会重跑，所以单独用一个计数器触发。
+    // 同样要等两帧：栏目刚切过时导航项是新建的，早一帧请求会落空
+    var pendingNavFocus by remember { mutableIntStateOf(0) }
+    LaunchedEffect(pendingNavFocus) {
+        if (pendingNavFocus == 0) return@LaunchedEffect
+        withFrameNanos {}
+        withFrameNanos {}
+        val landed = runCatching { sectionNavFocus.requestFocus() }.isSuccess
+        if (!landed) runCatching { firstNavFocus.requestFocus() }
     }
 
     // 「点了导航项 → 焦点进内容区」不能同步做。
@@ -320,7 +375,8 @@ fun HomeScreen(
 
     // 退出确认是树内覆盖层（见 [ExitConfirmOverlay]），没有窗口边界，所以焦点要自己看住：
     //   • 打开时把焦点交给「留在应用」（等一帧，新节点还没布局时请求会落空）；
-    //   • 关闭时把焦点送回内容区 —— 底层在覆盖层开着期间是不可聚焦的，焦点不会自己回去。
+    //   • 关闭时把焦点送回**导航栏** —— 能弹出这张框说明焦点当时就在导航栏里，
+    //     「回到打开前的位置」才是对的；底层在覆盖层开着期间不可聚焦，焦点不会自己回去。
     //
     // 「关掉后交焦」只对「真的关过一次」生效：冷启动时 showExitConfirm 也是 false，
     // 不拦的话这里会和首帧接导航焦点（navExpanded 的那个 effect）抢，谁后跑谁赢。
@@ -332,9 +388,8 @@ fun HomeScreen(
             exitConfirmSeen = true
             runCatching { stayFocus.requestFocus() }
         } else {
-            // 先问内容区入口（影视页会落到当前栏目），问不到再退回组首
-            val entered = runCatching { contentEntryFocus.requestFocus() }.isSuccess
-            if (!entered) runCatching { contentFocus.requestFocus() }
+            navExpanded = true
+            pendingNavFocus++
         }
     }
 
@@ -349,9 +404,21 @@ fun HomeScreen(
     // 只能选「留在应用」—— 返回键等于失效，用户被迫用遥控器一路找回去。
     val homeSection = defaultSection(mode)
     BackHandler {
-        when (homeBackAction(showExitConfirm, section, mode)) {
+        when (homeBackAction(showExitConfirm, section, mode, focusInNav, canResumeLive = canResumeLive)) {
             HomeBackAction.CLOSE_EXIT_CONFIRM -> showExitConfirm = false
-            HomeBackAction.GO_DEFAULT_SECTION -> onSectionChange(homeSection)
+            // 退栏目时焦点也要一起回导航栏：内容区要换成另一个页面，旧节点会被销毁，
+            // 不收回来就是「焦点在半空」，下一次方向键被拿去重新找焦点
+            HomeBackAction.GO_DEFAULT_SECTION -> {
+                onSectionChange(homeSection)
+                navExpanded = true
+                pendingNavFocus++
+            }
+            // 回到首屏那条「正在直播」的台：用户刚从播放页退出来，这一下是「接着看」
+            HomeBackAction.RESUME_LIVE -> onOpenPlayer()
+            HomeBackAction.FOCUS_NAV -> {
+                navExpanded = true
+                pendingNavFocus++
+            }
             HomeBackAction.ASK_EXIT -> showExitConfirm = true
         }
     }
@@ -371,7 +438,11 @@ fun HomeScreen(
                                 .width(232.dp)
                                 .fillMaxHeight()
                                 .verticalScroll(rememberScrollState())
-                                .onFocusChanged { if (it.hasFocus) navExpanded = true },
+                                .onFocusChanged {
+                                    if (it.hasFocus) navExpanded = true
+                                    // 焦点离开整列 = 进内容区了，「返回」这一层就还没退
+                                    focusInNav = it.hasFocus
+                                },
                     ) {
                         ModeSwitch(
                             mode = mode,
@@ -392,7 +463,15 @@ fun HomeScreen(
                             NavItem(
                                 section = item,
                                 selected = section == item,
-                                modifier = if (index == 0) Modifier.focusRequester(firstNavFocus) else Modifier,
+                                modifier =
+                                    when {
+                                        // 选中项优先挂：返回键从内容区退回来要落在「正在看的栏目」上。
+                                        // 选中项正好是第一项时 firstNavFocus 没挂，所以两个 requester
+                                        // 的请求都要留一条兜底（见上面的 LaunchedEffect）
+                                        section == item -> Modifier.focusRequester(sectionNavFocus)
+                                        index == 0 -> Modifier.focusRequester(firstNavFocus)
+                                        else -> Modifier
+                                    },
                                 onClick = {
                                     onSectionChange(item)
                                     item.mode?.let { target -> if (target != mode) onModeChange(target) }
@@ -424,6 +503,9 @@ fun HomeScreen(
                                     if (it.isFocused) {
                                         navExpanded = true
                                     }
+                                    // 窄条也是导航栏的形态之一：焦点在它身上时按返回，
+                                    // 该问「退出吗」而不是再往回收一次
+                                    focusInNav = it.isFocused
                                 }
                                 .focusable()
                                 .clickable { navExpanded = true }
@@ -449,7 +531,9 @@ fun HomeScreen(
                             // focusGroup：导航栏点选栏目后 requestFocus 指到这里，
                             // 焦点落进组内首个可聚焦目标（SET-02）
                             .focusRequester(contentFocus)
-                            .focusGroup(),
+                            .focusGroup()
+                            // 焦点进内容区 = 返回键这一层可以退（回到左侧导航）
+                            .onFocusChanged { if (it.hasFocus) focusInNav = false },
                 ) {
                     ContentArea(
                         section = section,

@@ -693,6 +693,18 @@ private fun HomeRoute(
         nowPlaying = loadNowPlaying(container, liveCandidates)
     }
 
+    // 「按返回接着看」要回哪个台 —— 这是唯一真相，判定与导航共用同一份。
+    //
+    // 不能拿 liveCandidates.isNotEmpty() 当判据：它把**收藏**也算进去，而真正导航用的是
+    // history 里的最新一台。用户只收藏、从没看过时前者非空、后者为 null，按返回就落到
+    // 一个没有频道的空播放页（那条路只有「无源引导」才该出现）。
+    // history 为空时退回首屏那条正在直播的台 —— 它本来就是「你可能正在看的那个」。
+    var resumeChannelId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(liveCandidates) {
+        resumeChannelId =
+            container.historyRepository.latestChannelId() ?: liveCandidates.firstOrNull()?.id
+    }
+
     val hero =
         remember(vodState.continueWatching, vodState.recent, liveCandidates, nowPlaying) {
             buildHeroItems(
@@ -743,16 +755,14 @@ private fun HomeRoute(
             container.applicationScope.launch { container.settings.setKeepScreenOn(enabled) }
         },
         onOpenPlayer = {
-            scope.launch {
-                // 回播放页时继续播上次那个台，不重建播放器（§6.4 最后一条）。
-                // 「上次」的真相在 history 表里（LIVE-15），不再另存一份
-                val lastChannelId = container.historyRepository.latestChannelId()
-                navController.navigate(TvRoute.player(lastChannelId))
-            }
+            // 回播放页时继续播上次那个台，不重建播放器（§6.4 最后一条）。
+            // 目标取自 resumeChannelId：它与 canResumeLive 同源，不会再出现
+            // 「判据说有台、导航过去却没有」的错位。
+            // 为 null 时仍导航 —— 导航栏点「直播」时那里显示添加源 / 无频道引导
+            navController.navigate(TvRoute.player(resumeChannelId))
         },
-        // 首屏有「正在直播」那条 = 有台可回（它就是最近观看 / 收藏里挑出来的）。
-        // 没有时返回键不能往播放页送，否则会落到一个没有频道的空播放页
-        canResumeLive = liveCandidates.isNotEmpty(),
+        // 有台可回才有「按返回接着看」这一层。判据与上面的导航目标同源
+        canResumeLive = resumeChannelId != null,
         channels = channels,
         favoriteIds = favoriteIds,
         recentChannels = recentChannels,

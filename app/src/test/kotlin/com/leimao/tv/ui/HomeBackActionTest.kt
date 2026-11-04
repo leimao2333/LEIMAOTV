@@ -78,9 +78,11 @@ class HomeBackActionTest {
             HomeBackAction.RESUME_LIVE,
             homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = false, canResumeLive = true),
         )
-        // 焦点已经在导航栏上时绝不能回播放页：否则返回键永远退不出应用
+        // 焦点在导航栏上时**同样直接回播放页**，不弹退出确认框：
+        // 用户在这个页面按返回就是想看直播画面（2026-11-04 实测反馈，
+        // 早先要求「焦点在内容区才回播放页」，结果焦点在导航栏就弹出「退出磊毛TV？」）
         assertEquals(
-            HomeBackAction.ASK_EXIT,
+            HomeBackAction.RESUME_LIVE,
             homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = true, canResumeLive = true),
         )
         // 一台都没看过（首次进入）→ 没有可回的画面，退回导航栏
@@ -88,10 +90,31 @@ class HomeBackActionTest {
             HomeBackAction.FOCUS_NAV,
             homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = false, canResumeLive = false),
         )
+        // 没有可回画面的情况下，焦点已在导航栏上才问退出 —— 退出这条路不能断
+        assertEquals(
+            HomeBackAction.ASK_EXIT,
+            homeBackAction(false, HomeSection.LIVE, AppMode.LIVE, focusInNav = true, canResumeLive = false),
+        )
         // 子栏目仍然优先：在「设置」里按返回回栏目，不把人丢进视频
         assertEquals(
             HomeBackAction.GO_DEFAULT_SECTION,
             homeBackAction(false, HomeSection.SETTINGS, AppMode.LIVE, focusInNav = false, canResumeLive = true),
+        )
+    }
+
+    @Test
+    fun `影视模式的默认栏目按返回不问直播画面`() {
+        // 「直播 → 返回 → 切到影视 → 推荐 → 返回」不该把用户从影视首页甩进电视台。
+        // canResumeLive 是全局的（最近观看里还有台），但那里没有「回播放页」这层语义，
+        // 影视板块的推荐就是它自己的地板
+        assertEquals(
+            HomeBackAction.FOCUS_NAV,
+            homeBackAction(false, HomeSection.RECOMMEND, AppMode.VOD, focusInNav = false, canResumeLive = true),
+        )
+        // 焦点已经在导航栏时照旧问退出，不受模式影响
+        assertEquals(
+            HomeBackAction.ASK_EXIT,
+            homeBackAction(false, HomeSection.RECOMMEND, AppMode.VOD, focusInNav = true, canResumeLive = true),
         )
     }
 

@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.1.0"
+    const val CURRENT_VERSION: String = "0.5.2.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,19 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.2.0",
+                date = "2026-11-04",
+                changes =
+                    listOf(
+                        "修复：直播首页按返回直接回到正在看的那个台，不再弹「退出磊毛TV？」——" +
+                            "焦点停在左侧导航栏时也一样",
+                        "修复：首页左侧导航与收起窄条切换时，焦点归属判断可能被旧的失焦回调覆盖，" +
+                            "导致返回键误判成「焦点在内容区」",
+                        "修复：只有收藏、从没看过的台时，按返回不再进入没有频道的空播放页",
+                        "修复：影视板块的「推荐」按返回不再被送进电视台",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.1.0",
                 date = "2026-11-04",

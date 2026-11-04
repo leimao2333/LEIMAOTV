@@ -167,8 +167,12 @@ internal enum class HomeBackAction {
  * 直播页焦点停在首屏大卡上，按返回直接弹退出确认，用户只是想回导航。
  *
  * [canResumeLive] 是「首页首屏那条『正在直播』还挂着某个台」。
- * 它比「回导航栏」更近一层：用户刚从播放页退出来，再按返回就该回到那个画面 ——
- * 那不是「退」，是「回去接着看」。没有可回的台才轮到回导航栏。
+ * 有它就把返回直接接到那个画面 —— 用户在直播首页按返回，想的是「接着看」，
+ * 不是「退一层」也不是「退出应用」，**不弹退出确认框**（2026-11-04 用户明确要求）。
+ *
+ * 注意它**只在直播模式生效**：可回的永远是直播播放页，而影视板块的「推荐」是它自己的
+ * 默认栏目，在那里按返回该回导航栏。不加这个限制的话，「直播 → 返回 → 切到影视 → 推荐
+ * → 返回」会把用户从影视首页直接甩进电视台。
  */
 internal fun homeBackAction(
     showExitConfirm: Boolean,
@@ -182,9 +186,10 @@ internal fun homeBackAction(
         // 子栏目优先于焦点层级：在「设置」里按返回，用户要的是回到上一个栏目，
         // 不是先回导航栏再按一次
         section != defaultSection(mode) -> HomeBackAction.GO_DEFAULT_SECTION
-        // 「回直播画面」只在焦点还在内容区时算：焦点已经在导航栏上按返回，
-        // 那是「退一层」（问退出），不能再把人送回视频里 —— 否则返回键就退不出应用了
-        !focusInNav && canResumeLive -> HomeBackAction.RESUME_LIVE
+        // 直播首页只要有台可回就直接回去，**不看焦点在哪**：
+        // 早先还要求「焦点待在内容区」，结果焦点在导航栏上按返回弹的是「退出磊毛TV？」，
+        // 而用户要的只是把画面接回来（2026-11-04 实测反馈）
+        canResumeLive && mode == AppMode.LIVE -> HomeBackAction.RESUME_LIVE
         !focusInNav -> HomeBackAction.FOCUS_NAV
         else -> HomeBackAction.ASK_EXIT
     }
@@ -248,8 +253,10 @@ fun HomeScreen(
      * 返回键在内容区按下去时走 [onOpenPlayer] 把画面接回来 —— 退回导航栏对「看电视」
      * 这件事没有意义，用户要的是接着看（2026-11-02 需求）。
      * 一台都没看过（首次进入）时必须为 false：那时 [onOpenPlayer] 会落到一个没有频道的空播放页。
+     * 默认取 false 而不是 true —— 漏传时的退路应该是「退一层回导航栏」，
+     * 而不是「不问一声就跳进播放页」。
      */
-    canResumeLive: Boolean = true,
+    canResumeLive: Boolean = false,
     channels: List<Channel>,
     favoriteIds: Set<Long>,
     recentChannels: List<Channel>,
@@ -439,9 +446,15 @@ fun HomeScreen(
                                 .fillMaxHeight()
                                 .verticalScroll(rememberScrollState())
                                 .onFocusChanged {
-                                    if (it.hasFocus) navExpanded = true
-                                    // 焦点离开整列 = 进内容区了，「返回」这一层就还没退
-                                    focusInNav = it.hasFocus
+                                    // **只在获焦时置真，失焦不置假**：判「焦点在不在导航栏」
+                                    // 的假只能由内容区获焦来写。导航栏自己失焦时置假会撞上
+                                    // 「窄条展开 → 旧节点销毁的失焦回调晚于新导航项获焦」——
+                                    // 焦点明明已经落回导航栏，状态却还是「在内容区」，返回键
+                                    // 就跳进播放页、退不出应用（RULES §6.4）
+                                    if (it.hasFocus) {
+                                        navExpanded = true
+                                        focusInNav = true
+                                    }
                                 },
                     ) {
                         ModeSwitch(
@@ -500,12 +513,13 @@ fun HomeScreen(
                                 .fillMaxHeight()
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .onFocusChanged {
+                                    // 与宽栏同理：窄条获焦即「在导航栏」，失焦不负责置假。
+                                    // 窄条展开时这个节点会被销毁并收到一次 isFocused=false，
+                                    // 若据此置假，就把新导航项的获焦结果冲掉了
                                     if (it.isFocused) {
                                         navExpanded = true
+                                        focusInNav = true
                                     }
-                                    // 窄条也是导航栏的形态之一：焦点在它身上时按返回，
-                                    // 该问「退出吗」而不是再往回收一次
-                                    focusInNav = it.isFocused
                                 }
                                 .focusable()
                                 .clickable { navExpanded = true }

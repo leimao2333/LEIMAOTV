@@ -48,8 +48,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.components.BufferingOverlay
+import com.leimao.tv.core.designsystem.components.BufferingPill
+import com.leimao.tv.core.designsystem.components.BufferingPresentation
+import com.leimao.tv.core.designsystem.components.REBUFFER_DELAY_MS
 import com.leimao.tv.core.designsystem.components.TvTextField
 import com.leimao.tv.core.designsystem.components.rememberBufferingVisible
+import com.leimao.tv.core.designsystem.components.rememberPlayedOnce
+import com.leimao.tv.core.designsystem.components.resolveBufferingPresentation
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.focus.requestFocusWhenReady
 import com.leimao.tv.core.designsystem.layout.SafeAreaContainer
@@ -300,6 +305,26 @@ fun PlayerScreen(
     var numberBuffer by remember { mutableStateOf("") }
     var interactionTick by remember { mutableIntStateOf(0) }
 
+    // 这个台有没有真的出过画面。决定卡顿时弹「大浮层」还是「小角标」：
+    // 换台后黑着屏要完整信息，看着看着卡一下则不该把画面铺满黑卡。
+    // 判定本身在 resolveBufferingPresentation 里，纯函数、有单测钉着
+    val preparing = state.playback is PlaybackState.Preparing
+    val playedOnce =
+        rememberPlayedOnce(
+            sessionKey = state.channel?.id,
+            playing = state.playback is PlaybackState.Playing,
+            buffering = state.loadStats.buffering,
+        )
+    // 换台 / 换线 / 回看都会回到 Preparing，那是新的起播 —— 一律走完整浮层
+    val presentation = resolveBufferingPresentation(state.showLoading, preparing, playedOnce)
+    val startupVisible = rememberBufferingVisible(presentation == BufferingPresentation.Full)
+    val pillVisible =
+        rememberBufferingVisible(
+            presentation == BufferingPresentation.Pill,
+            showDelayMs = REBUFFER_DELAY_MS,
+            keepMs = 300L,
+        )
+
     // 自动跳台（LIVE-25 第 3 层）：全部线路失败时自动换下一个台，而不是立刻弹失败面板。
     // 计数跨重组保留；成功播放一次清零；连续跳到上限才把失败面板交还给用户。
     var autoSkipCount by remember { mutableIntStateOf(0) }
@@ -528,13 +553,24 @@ fun PlayerScreen(
     ) {
         VideoSurface(surfaceHost = surfaceHost)
 
-        // 加载浮层（PLAY-12）：黑屏期间必须说清楚「在等什么」。
-        // 不铺满、不压暗 —— 缓冲好的一瞬间画面直接露出来，不用先黑一下再亮
+        // 起播浮层（PLAY-12）：黑屏期间必须说清楚「在等什么」。
+        // 不铺满、不压暗 —— 缓冲好的一瞬间画面直接露出来，不用先黑一下再亮。
+        // 只负责「还没出过画面」的那一段；播起来之后的卡顿走下面的角标
         BufferingOverlay(
-            visible = rememberBufferingVisible(state.showLoading),
+            visible = startupVisible,
             title = state.loadingTitle,
             detail = state.loadingDetail,
             modifier = Modifier.align(Alignment.Center),
+        )
+
+        // 播放中途卡顿：顶部中央一行小字，不压暗、不遮中心（直播卡一下很常见，
+        // 每次都盖一张黑卡的话，看球的人会错过进球那一下）
+        BufferingPill(
+            visible = pillVisible,
+            modifier =
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = PILL_TOP_PADDING),
         )
 
         // 文字压在画面上必须有自己的衬底：真实源的画面又亮又白（台标、公告页），
@@ -1490,3 +1526,6 @@ private const val SKIP_TOAST_MS = 2_000L
 
 /** 一天的毫秒数：回看面板判断「今天 / 昨天」用（LIVE-24） */
 private const val DAY_MILLIS = 86_400_000L
+
+/** 卡顿角标离画面顶边的距离：压得太靠上会被电视的 overscan 切掉一截 */
+private val PILL_TOP_PADDING = 24.dp

@@ -53,7 +53,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.leimao.tv.core.designsystem.components.BufferingOverlay
+import com.leimao.tv.core.designsystem.components.BufferingPill
+import com.leimao.tv.core.designsystem.components.BufferingPresentation
+import com.leimao.tv.core.designsystem.components.REBUFFER_DELAY_MS
 import com.leimao.tv.core.designsystem.components.rememberBufferingVisible
+import com.leimao.tv.core.designsystem.components.rememberPlayedOnce
+import com.leimao.tv.core.designsystem.components.resolveBufferingPresentation
 import com.leimao.tv.core.designsystem.focus.FocusableCard
 import com.leimao.tv.core.designsystem.theme.TvText
 import com.leimao.tv.core.player.PlaybackSpeed
@@ -117,6 +122,26 @@ fun VodPlayerScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var panel by remember { mutableStateOf(VodPanel.None) }
     var tick by remember { mutableIntStateOf(0) }
+
+    // 这一集这条线路有没有真的出过画面。决定卡顿时弹「大浮层」还是「小角标」：
+    // 起播时黑着屏、需要完整信息；已经看过一段再卡，遮住画面只会更糟。
+    // 判定本身在 resolveBufferingPresentation 里，纯函数、有单测钉着
+    val preparing = state.playback is PlaybackState.Preparing
+    val playedOnce =
+        rememberPlayedOnce(
+            sessionKey = state.episodeIndex to state.lineIndex,
+            playing = state.playback is PlaybackState.Playing,
+            buffering = state.loadStats.buffering,
+        )
+    val presentation = resolveBufferingPresentation(state.showLoading, preparing, playedOnce)
+    // 可见性在这里算，不放进 if 里 —— 包进 if 会连消失延迟一起撤掉（见 rememberBufferingVisible）
+    val startupVisible = rememberBufferingVisible(presentation == BufferingPresentation.Full)
+    val pillVisible =
+        rememberBufferingVisible(
+            presentation == BufferingPresentation.Pill,
+            showDelayMs = REBUFFER_DELAY_MS,
+            keepMs = 300L,
+        )
 
     val rootFocus = remember { FocusRequester() }
     val progressFocus = remember { FocusRequester() }
@@ -221,18 +246,28 @@ fun VodPlayerScreen(
             )
         }
 
-        // 加载浮层（PLAY-12）：准备 / 连接 / 缓冲三种黑屏，各自说清楚在等什么，
-        // 并带上「已加载多少、多快、什么分辨率」—— 一个字节都没来时那行字就是排查入口
-        if (state.showLoading) {
-            BufferingOverlay(
-                visible = rememberBufferingVisible(state.showLoading),
-                title = state.loadingTitle,
-                detail = state.note ?: state.loadingDetail,
-                // 点播知道全片时长，能给真实百分比；时长还没解析出来时是 null（扫光条）
-                progress = state.bufferFraction,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
+        // 起播浮层（PLAY-12）：准备 / 连接 / 缓冲三种黑屏，各自说清楚在等什么，
+        // 并带上「已加载多少、多快、什么分辨率」—— 一个字节都没来时那行字就是排查入口。
+        // **只在这一集还没出过画面时出现**：已经播起来了再盖这张黑卡，等于把剧情挡掉
+        BufferingOverlay(
+            visible = startupVisible,
+            title = state.loadingTitle,
+            detail = state.note ?: state.loadingDetail,
+            // 点播知道全片时长，能给真实百分比；时长还没解析出来时是 null（扫光条）
+            progress = state.bufferFraction,
+            modifier = Modifier.align(Alignment.Center),
+        )
+
+        // 播放中途卡顿：顶部中央一行「缓冲中 · 已等待 N 秒」，不压暗、不遮中心。
+        // 放顶部而不是底部：底部是控制条的地盘，刚卡顿时控制条往往还开着（起播后 5 秒内），
+        // 叠在一起既难看又可能挡住「下一集」
+        BufferingPill(
+            visible = pillVisible,
+            modifier =
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = PILL_TOP_PADDING),
+        )
 
         if (failed != null) {
             // 「换线路」只在真有第二条线路时出现：内核已经把**同一集在所有线路上的地址**
@@ -1060,3 +1095,6 @@ private const val FAST_SPEED = 2f
 private const val HUD_FADE_MS = 150
 
 private const val PANEL_COLUMNS = 8
+
+/** 卡顿角标离画面顶边的距离：压得太靠上会被电视的 overscan 切掉一截 */
+private val PILL_TOP_PADDING = 24.dp

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +68,10 @@ import kotlin.math.roundToInt
  * 5. **进度条只在知道分母时才画百分比**（见 [progress]）。直播没有「总共多久」，
  *    硬凑一个百分比就是编数据；那种情况退一步画扫光条 + 已等待秒数，
  *    同样能回答「它还在动吗」，但不假装知道进度。
+ * 6. **只管起播，不管播放中途的卡顿**（2026-11-05 用户反馈后收敛）。
+ *    这一层是一张 0xCC 的大黑卡片，压在画面正中 —— 黑屏时它是最好的东西，
+ *    画面**已经在播**时它是最坏的东西：卡一秒弹一张黑卡，用户连刚才演到哪都看不见了。
+ *    中途卡顿改用 [BufferingPill]（角落一行小字）。判据见 [rememberPlayedOnce]。
  *
  * [detail] 由调用方从 `LoadStats.summary()` 取 —— 格式化逻辑放在 core:player，
  * 这样直播页和影视页显示的是同一句话，不会各写一套单位。
@@ -279,6 +285,115 @@ private fun LoadingSpinner(
 }
 
 /**
+ * 播放中途卡顿时的轻量提示：角落一行「⟳ 缓冲中 · 已等待 2 秒」。
+ *
+ * ## 为什么不能复用 [BufferingOverlay]
+ *
+ * 卡顿与黑屏是两种处境。黑屏时用户没得看，把「在等什么、下了多少」摆到画面正中
+ * 是对的；可画面**已经在播**时，同一张卡片会盖住整块画面 —— 2026-11-05 用户截图：
+ * 背景画面清清楚楚，正中却压着一张「正在缓冲…已加载 63%」的黑卡，
+ * 每次网络抖一下就来一次。那几百毫秒里用户既看不见剧情，也看不见刚才演到哪。
+ *
+ * 所以这里只保留「它还在动」这一个信息：小转圈 + 一句读得清的话，
+ * 贴在画面**顶缘**（贴底会撞上控制条），**不压暗、不遮挡中心**。数据行（字节 / 分辨率）
+ * 留给了起播浮层 —— 中途卡顿时它是排查信息，不是用户此刻需要的东西。
+ *
+ * 不接焦点：遥控器的一切操作照常落到播放页。
+ */
+@Composable
+fun BufferingPill(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) return
+
+    val waitedSeconds = rememberWaitSeconds()
+
+    Row(
+        modifier =
+            modifier
+                .clip(CircleShape)
+                .background(PILL_SCRIM)
+                .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        LoadingSpinner(color = MaterialTheme.colorScheme.primary, size = 18.dp)
+        Text(
+            text = "缓冲中 · 已等待 $waitedSeconds 秒",
+            style = TvText.current.hint,
+            color = Color.White,
+        )
+    }
+}
+
+/**
+ * 缓冲期间给用户看什么。见 [resolveBufferingPresentation]。
+ *
+ * 为什么要一个枚举而不是两个 bool：两者互斥（要么大卡片要么小角标要么什么都不显示），
+ * 两个 bool 能组合出「同时显示」这种画不出来的状态，而调用方还得自己保证互斥。
+ */
+enum class BufferingPresentation {
+    /** 什么都不显示（没在加载） */
+    None,
+
+    /** 起播浮层：画面正中一张卡片，带标题、进度与加载数据 */
+    Full,
+
+    /** 中途卡顿：画面顶缘一行小字，不遮挡内容 */
+    Pill,
+}
+
+/**
+ * 决定缓冲时该给什么样的提示。
+ *
+ * 判据只有一条：**画面出过没有**。
+ * - 没出过（起播 / 换台 / 换集 / 换线）→ [BufferingPresentation.Full]：
+ *   这时用户看的是黑屏，把「在等什么、下了多少」摆到正中是帮他；
+ * - 出过之后再卡 → [BufferingPresentation.Pill]：这时画面里是有内容的，
+ *   一张 0xCC 的大黑卡片会把它整块盖掉（2026-11-05 用户截图反馈的场景）。
+ *
+ * [preparing] 单独判一次而不是只看 [playedOnce]：换台 / 换集会回到准备态，
+ * 但 `playedOnce` 是按会话记的，某些路径下（同一集重试）它还留着 true ——
+ * 那时应该回到完整浮层，而不是给一个「看起来只是卡了一下」的小角标。
+ */
+fun resolveBufferingPresentation(
+    showLoading: Boolean,
+    preparing: Boolean,
+    playedOnce: Boolean,
+): BufferingPresentation =
+    when {
+        !showLoading -> BufferingPresentation.None
+        preparing || !playedOnce -> BufferingPresentation.Full
+        else -> BufferingPresentation.Pill
+    }
+
+/**
+ * 本次播放会话里，画面**是不是真的出过**。
+ *
+ * 这是「该弹大浮层还是小角标」的判据 —— 起播（一次都没播起来）需要信息，
+ * 中途卡顿不需要遮挡。用「播放器进入 PLAYING 且不在 buffering」来认定出过画面：
+ * 比按 `positionMs > 0` 可靠（有些源会先给一个非零起始时间），
+ * 也不受「缓冲中但已有画面」这种中间态干扰。
+ *
+ * [sessionKey] 一变就归零：换台 / 换集 / 换线路都是一次新的起播，
+ * 那时又该退回大浮层（哪怕上一集刚播完）。
+ */
+@Composable
+fun rememberPlayedOnce(
+    sessionKey: Any?,
+    playing: Boolean,
+    buffering: Boolean,
+): Boolean {
+    var played by remember(sessionKey) { mutableStateOf(false) }
+    // 组合期写状态会让当前帧的重组结果依赖自己，用 SideEffect 推到帧末
+    SideEffect {
+        if (playing && !buffering) played = true
+    }
+    return played
+}
+
+/**
  * 给「要不要显示加载浮层」加一层防抖。
  *
  * 真机上弱源会一秒内 READY↔BUFFERING 抖好几次（2026-10-26 实测），直接用 `buffering`
@@ -287,6 +402,11 @@ private fun LoadingSpinner(
  * 规则：**出现要等 [showDelayMs]，消失也要等 [keepMs]**。
  * 两个方向的等待都会被下一次状态翻转打断（`LaunchedEffect` 的 key 变了就取消），
  * 所以短暂的真缓冲不会被吞掉，短暂的好转也不会让浮层闪一下又回来。
+ *
+ * **调用方不要再用 `if (...) { BufferingOverlay(...) }` 把它整个包起来**：
+ * 那样 `loading` 变 false 的瞬间组合就被撤掉，下面这段 `keepMs` 的等待根本没机会跑，
+ * 消失延迟等于没写（0.5.6.0 之前一直是这个状态）。直接把可见性交给
+ * [BufferingOverlay] / [BufferingPill] 的 `visible` 参数，它们内部会自行 return。
  */
 @Composable
 fun rememberBufferingVisible(
@@ -307,11 +427,24 @@ fun rememberBufferingVisible(
     return visible
 }
 
-/** 出现延迟：短于这个时长的缓冲，用户根本来不及看见浮层，闪一下反而分心 */
+/** 起播浮层的出现延迟：短于这个时长的缓冲，用户根本来不及看见浮层，闪一下反而分心 */
 private const val SHOW_DELAY_MS = 400L
+
+/**
+ * 中途卡顿角标的出现延迟。
+ *
+ * 比起播那条长得多，因为它面对的是另一种抖动：点播在**播放中**只要缓冲掉到
+ * `bufferAfterRebufferMs` 以下就会进 BUFFERING，慢源上这种几百毫秒的停顿很常见，
+ * 而画面本身还没停（手上还有几帧）。1.2 秒这条线以下的停顿用户根本不会察觉，
+ * 让他看见一个「缓冲中」反而提醒了他「刚才卡了一下」。
+ */
+const val REBUFFER_DELAY_MS = 1_200L
 
 /** 消失延迟：缓冲好后多留一会儿，避免「刚看清写的是什么就没了」 */
 private const val KEEP_MS = 600L
 
 /** 0xCC 的黑：足够把白字托起来，又能看见底下画面还在动 */
 private val SCRIM = Color(0xCC000000)
+
+/** 角标的底色比大浮层更淡：它只托一行小字，压太黑又会变成一块遮挡 */
+private val PILL_SCRIM = Color(0xB3000000)

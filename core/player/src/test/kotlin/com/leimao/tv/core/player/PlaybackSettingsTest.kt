@@ -109,4 +109,17 @@ class PlaybackSettingsTest {
             BufferProfile.VOD_DURATIONS.maxBufferMs,
         )
     }
+
+    @Test
+    fun `点播卡后恢复门槛要低_不再等补到五秒`() {
+        // 2026-11-05 用户截图：底部写着「已缓冲 4.6 秒」，中间还在转圈 —— 因为恢复门槛
+        // 是 5 秒，手上明明还能放 4.6 秒却已经停住了。慢源上每次轻微掉速都要等一次
+        // 半分钟量级的补货，表现就是「一直缓冲」。
+        // 门槛回到 2 秒：既能躲开「卡—放半秒—再卡」，也不至于把一次小抖动拖成长停顿
+        val vod = BufferProfile.VOD_DURATIONS
+        assert(vod.bufferAfterRebufferMs <= 2_500) {
+            "卡后恢复门槛 ${vod.bufferAfterRebufferMs}ms 太高：缓冲掉到它以下就得停住" +
+                "等补到这么多才继续，慢源上每次小抖动都会变成一次明显停顿"
+        }
+    }
 }

@@ -191,6 +191,9 @@ fun VodPlayerScreen(
                     }
                     // 失败 / 播完时焦点在提示里的按钮上，根节点不插手
                     if (failed != null || state.finished) return@onPreviewKeyEvent false
+                    // 控制条开着时的按键要续命，否则用户还在挑「上一集/下一集」，
+                    // 5 秒一到整条自己收起来（与直播页同一个坑）
+                    tick++
                     false
                 },
     ) {
@@ -302,6 +305,7 @@ fun VodPlayerScreen(
                     onOpenAudio = { panel = VodPanel.Audio },
                     onOpenText = { panel = VodPanel.Text },
                     onOpenSpeed = { panel = VodPanel.Speed },
+                    onInteract = { tick++ },
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -535,8 +539,19 @@ private fun ControlButtons(
     onOpenAudio: () -> Unit,
     onOpenText: () -> Unit,
     onOpenSpeed: () -> Unit,
+    onInteract: () -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        // 按钮行是按键的直系祖先：焦点进了按钮之后，根节点那份 preview 收不到事件
+        // （KeyInput 节点挂在 `focusable()` 的内侧，按钮子树不在它的下游）。
+        // 在这里补一刀，保证「正在挑按钮」时控制条不会自己消失
+        modifier =
+            Modifier.onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) onInteract()
+                false
+            },
+    ) {
         ControlButton(text = "上一集", enabled = state.hasPrevious, onClick = actions.onPrevious)
         ControlButton(text = "下一集", enabled = state.hasNext, onClick = actions.onNext)
         ControlButton(text = "选集", enabled = state.episodeCount > 0, onClick = onOpenPanel)

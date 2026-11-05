@@ -636,6 +636,7 @@ fun PlayerScreen(
                         onOpenAudio = { trackPanel = TrackKind.AUDIO },
                         onOpenText = { trackPanel = TrackKind.TEXT },
                         onOpenSourceManager = onOpenSourceManager,
+                        onInteract = { interactionTick++ },
                     )
                 } else if (showHud && !state.loadingChannels) {
                     Text(
@@ -856,6 +857,7 @@ private fun ControlBar(
     onOpenAudio: () -> Unit,
     onOpenText: () -> Unit,
     onOpenSourceManager: () -> Unit,
+    onInteract: () -> Unit,
 ) {
     val isFavorite = state.channel?.let { state.favoriteIds.contains(it.id) } == true
     val lineIndex = state.playback.lineIndex
@@ -865,6 +867,17 @@ private fun ControlBar(
         modifier =
             Modifier
                 .fillMaxWidth()
+                // 控制条里的按键也要给 5 秒自动隐藏续命。
+                //
+                // 根节点的 `onPreviewKeyEvent` 在**焦点已经进了控制条之后**收不到这些按键：
+                // 那里挂的 KeyInput 节点在 `focusable()` 的内侧，只覆盖「焦点在根节点上」
+                // 的那一段，按钮子树不在它的下游。表现就是——按 OK 打开控制条、再按两下方向键，
+                // 5 秒一到整条自己消失（实测 dump：OK 后 1.2 秒还在，连按两次右键的 5.4 秒
+                // 已经没了）。这里在按钮的**直系祖先**上补一刀，跟根节点那条互不冲突。
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) onInteract()
+                    false
+                }
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xCC1A1A1A))
                 .padding(horizontal = 16.dp, vertical = 12.dp),

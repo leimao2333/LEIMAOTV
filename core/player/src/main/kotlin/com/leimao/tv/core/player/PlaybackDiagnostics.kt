@@ -30,6 +30,9 @@ internal class PlaybackDiagnostics(
 ) : AnalyticsListener {
     private var decoder: String? = null
 
+    /** 本次起播的开始时刻（elapsedRealtime）。0 = 还没开始缓冲 */
+    private var startAtMs = 0L
+
     override fun onVideoInputFormatChanged(
         eventTime: AnalyticsListener.EventTime,
         format: Format,
@@ -74,6 +77,10 @@ internal class PlaybackDiagnostics(
         eventTime: AnalyticsListener.EventTime,
         state: Int,
     ) {
+        // 记下这次起播的起点：`onRenderedFirstFrame` 给的 renderTimeMs 是**开机以来的毫秒数**，
+        // 直接打出来是「首帧渲染完成 873819ms」这种谁也看不懂的数字（实测就踩到过），
+        // 真正有用的是「从开始缓冲到出画等了多久」
+        if (state == Player.STATE_BUFFERING && startAtMs == 0L) startAtMs = eventTime.realtimeMs
         val name =
             when (state) {
                 Player.STATE_IDLE -> "IDLE"
@@ -90,7 +97,15 @@ internal class PlaybackDiagnostics(
         output: Any,
         renderTimeMs: Long,
     ) {
-        Log.d(tag, "首帧渲染完成 ${renderTimeMs}ms")
+        val waited = if (startAtMs > 0L) (renderTimeMs - startAtMs).coerceAtLeast(0L) else -1L
+        if (waited >= 0) {
+            Log.d(tag, "首帧渲染完成 等待 ${waited}ms")
+        } else {
+            // 没有起播基准（暂停后恢复、换轨重渲染）：此时 renderTimeMs 是开机以来的毫秒数，
+            // 打出来是「等待 1395540ms」这种纯噪音，不如只说明出了帧
+            Log.d(tag, "首帧渲染完成")
+        }
+        startAtMs = 0L
     }
 
     internal companion object {

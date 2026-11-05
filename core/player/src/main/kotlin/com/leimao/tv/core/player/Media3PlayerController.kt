@@ -66,6 +66,14 @@ class Media3PlayerController(
     /** 当前这条线路的开始时刻（elapsedRealtime），判「有没有响应」的基准 */
     private var lineStartedAt = 0L
 
+    /**
+     * 本轮已经「回到直播边缘」重来了几次。
+     *
+     * 只在直播用：HLS 的滑动窗口会随着我们重连/换线而继续走，理论上可能一直踩到，
+     * 所以给个上限；到上限就老老实实按失败处置，别把用户关在无限重选里。
+     */
+    private var liveRealigns = 0
+
     private val _state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
@@ -177,6 +185,28 @@ class Media3PlayerController(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // 直播窗口滑走（HLS 的 `BehindLiveWindowException`）**不是这条线路坏了**：
+                // 源是活的，只是我们挑的起点掉出了滑动窗口，重选一次直播边缘就能接着放。
+                //
+                // 不区分它会把一整类国内 IPTV 源判成死线。这类源的 playlist 只挂 4~6 个
+                // 绝对命名的分片（`live_3_1_13732458.ts?key=...` 这种），窗口每 5 秒滑一格，
+                // 起播/重连稍微慢一点就必然踩到。实测这条路径的表现是：M3U8 明明 200 拿到了，
+                // 播放在 1 秒内抛错 → 被当成线路失败 → 换线 → 再抛 → 最后落到
+                // 「连续 N 个台不可用」，而每一条线路其实都是好的。
+                //
+                // 只给直播用：点播的 HLS 也有这个错误码，但点播掉出窗口意味着这一集真的过期了，
+                // 重选起点会悄悄跳剧情，交给失败处置更诚实。
+                if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW &&
+                    request?.kind != PlaybackKind.VOD &&
+                    liveRealigns < MAX_LIVE_REALIGNS
+                ) {
+                    liveRealigns++
+                    Log.d(PlaybackDiagnostics.TAG, "直播窗口滑走，回到直播边缘重来（第 $liveRealigns 次）")
+                    videoPlayer.seekToDefaultPosition()
+                    videoPlayer.prepare()
+                    startWatchdog()
+                    return
+                }
                 handleFailure(reason = describe(error))
             }
 
@@ -296,6 +326,7 @@ class Media3PlayerController(
         rebuffers.clear()
         autoSwitchCount = 0
         deadLines = 0
+        liveRealigns = 0
         suppressRebufferUntil = 0L
         startStatsTicker()
         startCurrentLine()
@@ -457,6 +488,9 @@ class Media3PlayerController(
         // 探针按**时间戳**比对，所以上一条线路的迟到响应不会被算到这一条头上
         networkMonitor.reset()
         lineStartedAt = SystemClock.elapsedRealtime()
+        // 直播窗口对齐的次数也按线路重算：看两小时碰上几次窗口滑走是正常的，
+        // 不重置的话第四次起就会被当成线路坏了
+        liveRealigns = 0
 
         _state.value =
             PlaybackState.Preparing(
@@ -516,15 +550,23 @@ class Media3PlayerController(
      *    （握手慢、首包慢）不该被当成死线掐掉。
      */
     private fun startWatchdog() {
+        // 点播放宽：电影一集是几百兆的 1080p，起播要先攒 [BufferProfile.VOD_BUFFER]
+        // 的 3 秒数据再解码，慢源上首帧常常要十几秒。用直播那套 9 秒预算的结果是
+        // 「明明在正常下载，却在第 9 秒被判成没出画面 → 切到 VLC 重头再来一遍」——
+        // 用户看到的就是「影视一直缓冲」，而且比不切还慢（实测 2026-11-05：
+        // 19 秒时切内核，VLC 又要从 0 开始加载）。
+        val forVod = request?.kind == PlaybackKind.VOD
+        val firstByteBudget = if (forVod) VOD_FIRST_BYTE_BUDGET_MS else FIRST_BYTE_BUDGET_MS
+        val lineBudget = if (forVod) VOD_LINE_BUDGET_MS else LINE_BUDGET_MS
         watchdog?.cancel()
         watchdog =
             scope.launch {
-                delay(FIRST_BYTE_BUDGET_MS)
+                delay(firstByteBudget)
                 if (_state.value is PlaybackState.Preparing && !networkMonitor.respondedSince(lineStartedAt)) {
                     handleFailure(reason = REASON_TIMEOUT)
                     return@launch
                 }
-                delay((LINE_BUDGET_MS - FIRST_BYTE_BUDGET_MS).coerceAtLeast(0L))
+                delay((lineBudget - firstByteBudget).coerceAtLeast(0L))
                 if (_state.value is PlaybackState.Preparing) {
                     handleFailure(reason = REASON_TIMEOUT)
                 }
@@ -806,6 +848,9 @@ class Media3PlayerController(
 
                 PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "源地址不存在"
 
+                // 正常路径里会被 onPlayerError 拦下来重选直播边缘，走到这里说明重选次数用完了
+                PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> "直播缓冲窗口已滑走"
+
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                 PlaybackException.ERROR_CODE_DECODING_FAILED,
                 PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
@@ -923,6 +968,22 @@ class Media3PlayerController(
         private const val FIRST_BYTE_BUDGET_MS = 4_000L
 
         /**
+         * 点播的「连首字节都没来」预算（2026-11-05）。
+         *
+         * 比直播宽一倍：点播源经常是同一台服务器上挂着几十个片子，连接排队是常态，
+         * 4 秒对它们太苛刻；而点播本来就不追求「换台要快」。
+         */
+        private const val VOD_FIRST_BYTE_BUDGET_MS = 8_000L
+
+        /**
+         * 点播的单线路总预算（2026-11-05）。
+         *
+         * 25 秒：3 秒起播缓冲 + 1080p 首帧解码，慢源上 12~18 秒是见过的。
+         * 再长就不该等了 —— 那说明这条线路真的不行，换线路比继续等划算。
+         */
+        private const val VOD_LINE_BUDGET_MS = 25_000L
+
+        /**
          * 连续多少条线路「一个字节都没回」就直接认输。
          *
          * 5 条：源里线路质量参差是常态，偶尔撞上两三条死线很正常；连着五条都不理人，
@@ -930,6 +991,15 @@ class Media3PlayerController(
          * 而不是陪用户转满一分钟。
          */
         private const val DEAD_LINE_LIMIT = 5
+
+        /**
+         * 同一条线路最多「回到直播边缘」几次。
+         *
+         * 3 次够覆盖两种情况：起播时窗口刚好滑走、重连时又滑走一次。再多就是源那边
+         * 的窗口短到跟不上（比如只剩 2 个分片的极端 playlist），继续重选也只是把
+         * 转圈拉长，不如老实认输换线路。
+         */
+        private const val MAX_LIVE_REALIGNS = 3
 
         /** 「连续多条线路没有任何响应」的失败措辞 */
         private const val REASON_NO_RESPONSE = "这个源连续多条线路都没有响应"

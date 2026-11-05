@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.6.0"
+    const val CURRENT_VERSION: String = "0.5.6.1"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.6.1",
+                date = "2026-11-05",
+                changes =
+                    listOf(
+                        "修复：播放中途卡顿时整屏被「正在缓冲…」的大黑卡盖住 —— 现在只在顶部显示一行小提示，画面不再被遮挡",
+                        "修复：明明已经缓冲了好几秒，画面却还在转圈 —— 卡住后恢复的门槛从 5 秒降到 2 秒",
+                        "修复：缓冲提示该消失时总是慢半拍（消失延迟此前从未真正生效）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.6.0",
                 date = "2026-11-05",

@@ -360,6 +360,7 @@ internal fun channelFocusAnchorIndex(
 }
 
 private val MATERIAL_GOLD = Color(0xFFE6B422)
+
 /** 分组栏宽度：够放「XX频道」四个字加计数，再宽就吃内容区 */
 private val GROUP_COLUMN_WIDTH = 200.dp
 

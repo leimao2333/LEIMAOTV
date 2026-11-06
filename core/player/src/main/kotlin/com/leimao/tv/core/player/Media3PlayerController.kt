@@ -144,13 +144,22 @@ class Media3PlayerController(
                     // 用户看到的就是「一直转圈、永远不报错」
                     Player.STATE_BUFFERING -> {
                         noteRebuffer()
-                        _state.value =
-                            PlaybackState.Preparing(
-                                url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
-                                item = current.item,
-                                lineIndex = lineIndex,
-                                lineCount = lines.size,
-                            )
+                        // **播放中重新缓冲不是一次新的起播**：画面出过一次之后，
+                        // 状态继续留在 Playing，缓冲这件事交给 loadStats.buffering 表达。
+                        //
+                        // 原来这里无条件写成 Preparing，于是网速抖一下（哪怕只缓冲 0.2 秒）
+                        // 播放页就按 `preparing` 判定成「重新起播」，弹出正中那张大卡片，
+                        // 整幅画面被盖住 —— 用户看到的就是「动不动就卡一下」（2026-11-06 截图）。
+                        // 只有一次都没出过画面（起播 / 换集 / 换线后的第一次缓冲）才需要 Preparing。
+                        if (!renderedOnce) {
+                            _state.value =
+                                PlaybackState.Preparing(
+                                    url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
+                                    item = current.item,
+                                    lineIndex = lineIndex,
+                                    lineCount = lines.size,
+                                )
+                        }
                     }
 
                     Player.STATE_READY -> {

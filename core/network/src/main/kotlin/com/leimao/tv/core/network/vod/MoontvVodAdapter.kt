@@ -7,10 +7,13 @@ import com.leimao.tv.core.model.vod.VodPage
 import com.leimao.tv.core.network.FetchOutcome
 import com.leimao.tv.core.network.HttpClient
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * MoonTV / LunaTV 加密订阅源的聚合适配器。
@@ -75,6 +78,9 @@ class MoontvVodAdapter(
     }
 
     override suspend fun categories(): VodFetchResult<List<VodCategory>> {
+        // 聚合层只认九类，一次问出来就一直用。不加这层缓存的话，首页每次刷新、
+        // 每次翻页都会重新去问第一个站「你有哪些分类」
+        categoryListCache?.let { return VodFetchResult.Success(it) }
         val sites =
             when (val r = siteListCache.sites()) {
                 is VodFetchResult.Failed -> return r
@@ -91,6 +97,7 @@ class MoontvVodAdapter(
                             val type = cat.type ?: return@mapNotNull null
                             VodCategory(typeId = type.name, name = type.displayName, type = type)
                         }.distinctBy { it.typeId }
+                    categoryListCache = mapped
                     return VodFetchResult.Success(mapped)
                 }
                 is VodFetchResult.Failed -> lastFailure = result.reason
@@ -98,6 +105,9 @@ class MoontvVodAdapter(
         }
         return VodFetchResult.Failed(lastFailure ?: VodFailure.NOT_VOD_SOURCE)
     }
+
+    /** 聚合层分类表（九类）。见 [categories] */
+    private var categoryListCache: List<VodCategory>? = null
 
     override suspend fun list(
         typeId: String,
@@ -111,32 +121,32 @@ class MoontvVodAdapter(
                 is VodFetchResult.Failed -> return r
                 is VodFetchResult.Success -> r.value
             }
-        val gate = Semaphore(maxConcurrency)
-        val pages =
-            coroutineScope {
-                sites.map { site -> async { gate.withPermit { listOne(site, type, page) } } }.awaitAll()
-            }
+        val pages = fanOut(sites, LIST_BUDGET_MS) { site -> listOne(site, type, page) }
         return mergePages(pages, page)
     }
 
+    /**
+     * 单个站点在第 [page] 页该取「第几个子分类、那个子分类的第几页」（2026-11-06）。
+     *
+     * 原来所有站点都用同一个 `page`：第 2 页就是「每个站的第 2 页」。
+     * 可采集站**普遍忽略 `pg`**（第 2 页还是第 1 页那批），于是第 2 页开始各站回的都是
+     * 已经给过的内容，去重后一条不剩 —— 用户看到的正是「翻几页就没有了」。
+     *
+     * 换成二维推进后，深度从「页码」变成「页码 × 该站该类型的子分类数」：
+     * 28 个站、每站每类十来个子分类（动作片 / 喜剧片 / 科幻片…），怎么翻都够。
+     * 而且不吃额外请求 —— 每页仍然只问每个站一次，只是问的东西往后挪了。
+     */
     private suspend fun listOne(
         site: MoontvSite,
         type: ContentType,
         page: Int,
     ): VodFetchResult<VodPage> {
         val adapter = adapterFor(site)
-        val siteCategories =
-            categoryCache.getOrPut(site.key) {
-                when (val r = adapter.categories()) {
-                    is VodFetchResult.Success -> r.value
-                    is VodFetchResult.Failed -> emptyList()
-                }
-            }
-        val siteTypeId =
-            siteCategories.firstOrNull { it.type == type }?.typeId ?: return VodFetchResult.Failed(
-                VodFailure.NOT_VOD_SOURCE,
-            )
-        return when (val result = adapter.list(siteTypeId, page)) {
+        val ofType = categoriesOfSite(site, adapter).filter { it.type == type }
+        if (ofType.isEmpty()) return VodFetchResult.Failed(VodFailure.NOT_VOD_SOURCE)
+        val index = (page - 1) % ofType.size
+        val roundPage = (page - 1) / ofType.size + 1
+        return when (val result = adapter.list(ofType[index].typeId, roundPage)) {
             is VodFetchResult.Success ->
                 VodFetchResult.Success(result.value.prefixKeys(site.key))
             is VodFetchResult.Failed -> result
@@ -180,12 +190,59 @@ class MoontvVodAdapter(
                 is VodFetchResult.Failed -> return r
                 is VodFetchResult.Success -> r.value
             }
-        val gate = Semaphore(maxConcurrency)
-        val pages =
-            coroutineScope {
-                sites.map { site -> async { gate.withPermit { searchOne(site, keyword, page) } } }.awaitAll()
-            }
+        val pages = fanOut(sites, SEARCH_BUDGET_MS) { site -> searchOne(site, keyword, page) }
         return mergePages(pages, page)
+    }
+
+    /**
+     * 扇出到所有站点，**在预算内能收多少收多少**（2026-11-06）。
+     *
+     * ## 为什么不能再用 `awaitAll()`
+     *
+     * 一个聚合源有几十个站（实测 28 个），而这类采集站的生命周期很不稳定：
+     * 实测十个站里只有四个能正常返回搜索结果，其余要么 TLS 握手就断、要么回一段网页。
+     * 原来的实现是 `sites.map { async { ... } }.awaitAll()` —— 一个站慢就全体等到它，
+     * 而外层 `SearchRepository` 只给 8 秒，超时后**连已经回来的那几个站的结果一起丢掉**。
+     * 用户看到的就是「搜什么都搜不到」，但其实是四个站明明已经搜到了。
+     *
+     * 现在的语义分三层：
+     * 1. **单站限时**（[SITE_TIMEOUT_MS]）：坏站到点就放弃，不拖累别人；
+     * 2. **整轮限时**（[budgetMs]）：到点返回已经收到的结果，部分成功也算成功；
+     * 3. **够用即停**（[ENOUGH_ITEMS]）：已经凑够一屏多，没必要为了更全而让用户多等。
+     *
+     * 这与 [mergePages] 早已声明的语义一致（「单站失败不算整源失败」）—— 之前只是
+     * 停在注释里，没落到代码上。
+     */
+    private suspend fun fanOut(
+        sites: List<MoontvSite>,
+        budgetMs: Long,
+        block: suspend (MoontvSite) -> VodFetchResult<VodPage>,
+    ): List<VodFetchResult<VodPage>> {
+        val gate = Semaphore(maxConcurrency)
+        val out = mutableListOf<VodFetchResult<VodPage>>()
+        val mutex = Mutex()
+        val enough = AtomicBoolean(false)
+        var collected = 0
+        coroutineScope {
+            val jobs =
+                sites.map { site ->
+                    async {
+                        if (enough.get()) return@async
+                        val result = withTimeoutOrNull(SITE_TIMEOUT_MS) { gate.withPermit { block(site) } }
+                        if (result != null) {
+                            mutex.withLock {
+                                out += result
+                                if (result is VodFetchResult.Success) collected += result.value.items.size
+                                if (collected >= ENOUGH_ITEMS) enough.set(true)
+                            }
+                        }
+                    }
+                }
+            // 预算用完就把还没回来的掐掉，已收到的结果照样返回
+            withTimeoutOrNull(budgetMs) { jobs.forEach { it.join() } }
+            jobs.forEach { it.cancel() }
+        }
+        return out
     }
 
     private suspend fun searchOne(
@@ -198,6 +255,26 @@ class MoontvVodAdapter(
             is VodFetchResult.Success ->
                 VodFetchResult.Success(result.value.prefixKeys(site.key))
             is VodFetchResult.Failed -> result
+        }
+    }
+
+    /**
+     * 单个站点的分类表。
+     *
+     * **失败不写缓存**：原来 `getOrPut` 在失败时写入 `emptyList()`，等于把这个站永久判死 ——
+     * 而适配器现在会被缓存复用（见 [VodAdapterCache]），一次网络抖动就变成「这个站以后都不出片」。
+     */
+    private suspend fun categoriesOfSite(
+        site: MoontvSite,
+        adapter: VodSourceAdapter,
+    ): List<VodCategory> {
+        categoryCache[site.key]?.let { return it }
+        return when (val r = adapter.categories()) {
+            is VodFetchResult.Success -> {
+                categoryCache[site.key] = r.value
+                r.value
+            }
+            is VodFetchResult.Failed -> emptyList()
         }
     }
 
@@ -249,6 +326,39 @@ class MoontvVodAdapter(
         const val KEY_SEPARATOR = "::"
 
         /** fan-out 并发上限：够快，又不至于把几十个站同时打爆 */
-        const val DEFAULT_SITE_CONCURRENCY = 6
+        const val DEFAULT_SITE_CONCURRENCY = 8
+
+        /**
+         * 单个站点的限时（2026-11-06）。
+         *
+         * 这类采集站里有相当一部分是死的：实测十个站里四个能搜出结果，
+         * 其余要么 TLS 握手就断、要么回一段 HTML。给活站 3 秒足够（实测 0.6~2.2 秒），
+         * 死站到点就放弃 —— 让死站决定整次搜索的成败，是原来「什么都搜不出」的直接原因。
+         */
+        const val SITE_TIMEOUT_MS = 3_000L
+
+        /**
+         * 搜索的总预算。
+         *
+         * 外层 `SearchRepository` 给 8 秒，这里留 2 秒给「解订阅 → 建适配器 → 解析」的余量。
+         * 预算到点就带着已收到的结果返回，而不是把整次搜索判成超时。
+         */
+        const val SEARCH_BUDGET_MS = 6_000L
+
+        /**
+         * 列表（首页翻页）的总预算。
+         *
+         * 比搜索宽（翻页没有「盯着输入框」的紧迫感，收得太早一页会稀稀拉拉），
+         * 但不能无限等：28 个站、并发 8，跑完要 4 轮，一轮按 3 秒算就是 12 秒 ——
+         * 用户划到底等 12 秒早划走了。8 秒能把两轮多的结果收进来，够铺满一屏。
+         */
+        const val LIST_BUDGET_MS = 8_000L
+
+        /**
+         * 收到这么多条就不再等剩下的站（够铺一屏还有富余）。
+         *
+         * 冷门关键词下永远到不了这个数，那就老老实实等满预算 —— 两者不冲突。
+         */
+        const val ENOUGH_ITEMS = 60
     }
 }

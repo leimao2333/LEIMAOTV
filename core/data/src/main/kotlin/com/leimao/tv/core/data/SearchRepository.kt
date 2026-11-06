@@ -286,7 +286,9 @@ class SearchRepository(
             )
 
         return when (
-            val result = withTimeoutOrNull(perSourceTimeoutMs) { gate.withPermit { adapter.search(keyword) } }
+            // 超时只包「真正在搜」这一段。原来包在 gate 外面，排队等并发许可的时间
+            // 也算进了 8 秒预算 —— 源一多，排在后面的源还没轮到就被判超时
+            val result = gate.withPermit { withTimeoutOrNull(perSourceTimeoutMs) { adapter.search(keyword) } }
         ) {
             null -> SourceResult.TimedOut
             is VodFetchResult.Failed -> SourceResult.Failed(result.reason)

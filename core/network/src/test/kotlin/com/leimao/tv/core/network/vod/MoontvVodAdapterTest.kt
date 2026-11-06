@@ -7,6 +7,8 @@ import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.RequestHeaders
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -145,6 +147,81 @@ class MoontvVodAdapterTest {
 
             assertTrue(result is VodFetchResult.Failed)
         }
+
+    // ---------------------------------------------------------------- 2026-11-06 修复
+
+    @Test
+    fun `一个站失败不影响其余站点的结果`() =
+        runBlocking {
+            val http = ScriptedHttp()
+            http.respond("https://example.com/sub.txt", FetchOutcome.Success(encodedConfig))
+            // 站 A 一切正常
+            http.respond(
+                "https://site-a.example.com/api.php/provide/vod?ac=list",
+                FetchOutcome.Success(categoriesJson(listOf("电影" to "1"))),
+            )
+            http.respond(
+                "https://site-a.example.com/api.php/provide/vod?ac=detail&t=1&pg=1",
+                FetchOutcome.Success(listJson(listOf("100" to "测试影片甲"))),
+            )
+            // 站 B 连分类都拿不到（模拟实测里那六成 TLS 就断的站）
+            http.respond(
+                "https://site-b.example.com/api.php/provide/vod?ac=list",
+                FetchOutcome.Failure(FetchErrorKind.NETWORK),
+            )
+
+            val adapter = MoontvVodAdapter(http, source)
+            val result = adapter.list("MOVIE", page = 1)
+
+            // 关键：站 B 死了，站 A 的内容照样要出来。
+            // 原来这里是 awaitAll + 外层 8 秒超时，慢站会把整次结果一起拖没。
+            assertTrue(result is VodFetchResult.Success)
+            val page = (result as VodFetchResult.Success).value
+            assertEquals(1, page.items.size)
+            assertEquals("测试影片甲", page.items.first().name)
+        }
+
+    @Test
+    fun `翻页按子分类逐格推进 而不是让所有站翻同一个页码`() =
+        runBlocking {
+            val http = ScriptedHttp()
+            http.respond("https://example.com/sub.txt", FetchOutcome.Success(encodedConfig))
+            // 站点 A 的三个子分类都映射到电影
+            http.respond(
+                "https://site-a.example.com/api.php/provide/vod?ac=list",
+                FetchOutcome.Success(
+                    categoriesJson(listOf("动作片" to "1", "喜剧片" to "2", "科幻片" to "3")),
+                ),
+            )
+            http.respond(
+                "https://site-a.example.com/api.php/provide/vod?ac=detail&t=2&pg=1",
+                FetchOutcome.Success(listJson(listOf("201" to "第二类影片"))),
+            )
+
+            val adapter = MoontvVodAdapter(http, source)
+            // 第 2 页应当去问第 2 个子分类的第 1 页，而不是同一个分类的第 2 页
+            // （采集站普遍忽略 pg，那样问回来的还是第 1 页那批，去重后一条不剩）
+            val result = adapter.list("MOVIE", page = 2)
+
+            assertTrue(result is VodFetchResult.Success)
+            assertEquals("第二类影片", (result as VodFetchResult.Success).value.items.first().name)
+        }
+
+    @Test
+    fun `适配器缓存对同一个源复用同一实例`() {
+        val http = ScriptedHttp()
+        val cache = VodAdapterCache(http)
+
+        val first = cache.get(source)
+        val again = cache.get(source)
+
+        // 复用是这次修复的前提：站点清单与站点分类都挂在实例上，
+        // 每次现造等于把「下载订阅 + Base58 + 问几十个站分类」重做一遍
+        assertSame(first, again)
+
+        // 地址一改就该换新实例，不能拿着旧地址的站点清单继续用
+        assertNotSame(first, cache.get(source.copy(baseUrl = "https://example.com/other.txt")))
+    }
 
     // ---------------------------------------------------------------- 假数据构造
 

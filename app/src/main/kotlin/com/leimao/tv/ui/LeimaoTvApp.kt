@@ -654,10 +654,9 @@ private fun HomeRoute(
                             vodLoadMoreFailed = true
                             break
                         }
-                        result.items.isEmpty() -> {
-                            vodNoMore = true
-                            break
-                        }
+                        // 空页**不当到底**（2026-11-06）：采集站偶尔会漏一页（分类换页时
+                        // 正好赶上它自己的空档），一页空就宣布「没有更多了」太急。
+                        // 交给外面的 MAX_EMPTY_PAGES 计数：连续几页都拿不出新东西才算到底。
                         else -> {
                             page = next
                             val added = result.items.filter { (it.sourceId to it.sourceKey) !in seen }

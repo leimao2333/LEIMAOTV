@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.6.1"
+    const val CURRENT_VERSION: String = "0.5.6.2"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,17 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.6.2",
+                date = "2026-11-06",
+                changes =
+                    listOf(
+                        "修复：影视源搜什么都搜不到 —— 源底下的站点有一半连不上，却要全部等齐才算搜完，超时后连已经搜到的结果也一起丢掉了",
+                        "修复：影视「推荐」翻几页就没有新内容了 —— 可翻的深度从 9 页提到一百多页",
+                        "修复：搜索和翻页每次都要重新解析一遍源清单，明明可以只做一次",
+                        "修复：某个站偶尔一次没响应，以后就一直不出片",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.6.1",
                 date = "2026-11-05",

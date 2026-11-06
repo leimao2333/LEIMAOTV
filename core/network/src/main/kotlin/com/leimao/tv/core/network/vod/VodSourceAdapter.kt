@@ -161,6 +161,57 @@ object VodAdapters {
         }
 }
 
+/**
+ * 适配器缓存（2026-11-06）。
+ *
+ * ## 为什么必须缓存
+ *
+ * 适配器不是无状态的：`MoontvVodAdapter` 里存着**解出来的站点清单**和**每个站点的分类表**。
+ * 而调用方原来每次都是 `VodAdapters.forSource(...)` 现造一个 —— 于是：
+ *
+ * - 每搜一次，就要重新下载一遍加密订阅、再做一次 Base58 解码；
+ * - 每翻一页，就要重新问一遍几十个站点「你有哪些分类」。
+ *
+ * 一个 28 站的聚合源，光是把分类问一圈就是 28 次网络往返，翻页时每页都重来一遍 ——
+ * 这不是「慢一点」，是慢到外层超时、看起来像「搜不出东西」。
+ *
+ * ## 缓存键带上地址
+ *
+ * 键是 `id|format|url`：用户改了源的地址就换新实例，不会拿着旧地址的站点清单继续用。
+ * headers 不进键 —— 改请求头把它当新源重建，收益太小，代价是多一次反射式失效。
+ *
+ * ## 用 LRU 而不是裸 Map
+ *
+ * 和 `VodPager.categoryCache` 同一个理由：源会被删、会被停用，而这是进程级单例。
+ * 一个聚合源适配器身上挂着几十个站点的分类表，无限留着在 2GB 机器的堆里不是小事。
+ */
+class VodAdapterCache(
+    private val http: HttpClient,
+    private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
+) {
+    private val cache =
+        object : LinkedHashMap<String, VodSourceAdapter>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, VodSourceAdapter>?,
+            ): Boolean = size > maxEntries
+        }
+
+    fun get(ref: VodSourceRef): VodSourceAdapter =
+        synchronized(cache) {
+            cache.getOrPut("${ref.id}|${ref.format}|${ref.baseUrl}") { VodAdapters.forSource(http, ref) }
+        }
+
+    /** 源被删 / 改了地址后调用，免得内存里留着一份用不上的站点清单 */
+    fun forget(sourceId: Long) {
+        synchronized(cache) { cache.keys.removeAll { it.startsWith("$sourceId|") } }
+    }
+
+    private companion object {
+        /** 一个用户真正在用的影视源很少超过十来个；16 足够，且兜得住来回切换 */
+        const val DEFAULT_MAX_ENTRIES = 16
+    }
+}
+
 internal fun FetchErrorKind.toVodFailure(): VodFailure =
     when (this) {
         FetchErrorKind.TIMEOUT -> VodFailure.TIMEOUT

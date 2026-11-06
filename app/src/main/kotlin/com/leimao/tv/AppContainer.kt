@@ -46,6 +46,7 @@ import com.leimao.tv.core.network.HttpClient
 import com.leimao.tv.core.network.MirrorHttpClient
 import com.leimao.tv.core.network.OkHttpHttpClient
 import com.leimao.tv.core.network.buildNetworkClient
+import com.leimao.tv.core.network.vod.VodAdapterCache
 import com.leimao.tv.core.player.FallbackPlayerController
 import com.leimao.tv.core.player.Media3PlayerController
 import com.leimao.tv.core.player.PlayerController
@@ -129,6 +130,16 @@ class AppContainer(context: Context) {
      * 非 GitHub 地址候选列表只有它自己，等于没有额外开销。
      */
     val httpClient: HttpClient = MirrorHttpClient(OkHttpHttpClient(okHttpClient))
+
+    /**
+     * 影视源适配器缓存（2026-11-06）。
+     *
+     * 适配器身上有状态：聚合源（MoonTV）里存着**解出来的站点清单**和每个站点的分类表。
+     * 原来每次搜索 / 每次翻页都现造一个，等于把「下载订阅 + Base58 解码 + 问几十个站分类」
+     * 这套最贵的活儿反反复复做 —— 28 个站的源光问分类就是 28 次往返，而且每翻一页重来一次。
+     * 缓存之后这些只做一次，搜索和翻页剩下的时间才真正花在「取内容」上。
+     */
+    private val vodAdapterCache: VodAdapterCache = VodAdapterCache(httpClient)
 
     /**
      * 图片专用 client（VOD-14）：在共享 client 基础上补 UA + Referer。
@@ -252,6 +263,7 @@ class AppContainer(context: Context) {
             sources = sourceRepository,
             media = mediaRepository,
             http = httpClient,
+            adapterFactory = vodAdapterCache::get,
             maxConcurrency = networkSettings.concurrency.refreshPermits,
         )
 
@@ -265,6 +277,7 @@ class AppContainer(context: Context) {
         VodPager(
             sources = sourceRepository,
             http = httpClient,
+            adapterFactory = vodAdapterCache::get,
             maxConcurrency = networkSettings.concurrency.permits,
         )
 
@@ -273,6 +286,7 @@ class AppContainer(context: Context) {
         VodDetailLoader(
             sources = sourceRepository,
             http = httpClient,
+            adapterFactory = vodAdapterCache::get,
         )
 
     /**
@@ -310,6 +324,7 @@ class AppContainer(context: Context) {
             http = httpClient,
             perSourceTimeoutMs = networkSettings.timeout.searchTimeoutMs,
             maxConcurrency = networkSettings.concurrency.permits,
+            adapterFactory = vodAdapterCache::get,
             pinyin = pinyinTable,
             ime = pinyinIme,
         )

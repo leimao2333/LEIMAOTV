@@ -138,6 +138,32 @@ class Media3PlayerController(
     private val bufferingWindow = ArrayDeque<Boolean>()
 
     /**
+     * 出画之后的冷静期计数（2026-11-06）。
+     *
+     * 起播阶段的 BUFFERING 是**必然**的：首帧还没解码出来，内核当然在缓冲。
+     * 把这些拍算进 `bufferingWindow`，后果是**每条线路一出画就被判「供不上」** ——
+     * 出画的瞬间窗口里已经攒了十来拍缓冲，占比直接过半，3 秒后自己把自己换掉。
+     * 设备实测（2026-11-06）：第 1 条线路已经出画、1080p 软解正常，9 秒后仍被换走，
+     * 接着换到 11 条真·不通的兜底线路，最后落到「12 条线路没一条好的」。
+     *
+     * 所以窗口只在**出画之后**才记账，起播那几拍一笔勾销。
+     */
+    private var renderedTicks = 0
+
+    /**
+     * 本次起播里**出过画面**的那条线路下标（-1 = 还没有）。
+     *
+     * 它的用途只有一个：走到「全部线路都试完」要落失败面板时，先回到这条再试一次。
+     * 一条能出画的线路，永远比后面那些连响应头都没回的兜底线路更值得看 ——
+     * 用户的原话是「12 条线路难道没一条好的？」，而实际情况是第 1 条是好的，
+     * 只是被换走了就再没回头。
+     */
+    private var renderedLineIndex = -1
+
+    /** 回退到「曾出画」的线路只允许一次，否则会在「能出画但卡」与「完全不通」之间来回弹 */
+    private var returnedToRendered = false
+
+    /**
      * 轨道 id → (track group, 组内第几条)。
      *
      * UI 只认 [PlaybackTrack.id]，真正的定位靠这张表 —— 见 `PlaybackTrack` 的注释。
@@ -188,7 +214,17 @@ class Media3PlayerController(
 
                     Player.STATE_READY -> {
                         stopWatchdog()
+                        // 第一次出画：把这条线路记成「能看的」，并把起播阶段的缓冲拍全部作废
+                        // —— 起播必然在缓冲，那是首帧还没解码，不是线路喂不饱。
+                        // 不作废的话，出画的瞬间缓冲占比就已经过半，3 秒后这条**好线路**
+                        // 会被自己的起播缓冲判成「供不上」（2026-11-06 实测）
+                        val firstRender = !renderedOnce
                         renderedOnce = true
+                        if (firstRender) {
+                            renderedLineIndex = lineIndex
+                            renderedTicks = 0
+                            bufferingWindow.clear()
+                        }
                         _state.value =
                             PlaybackState.Playing(
                                 url = lines[lineIndex.coerceIn(0, lines.lastIndex)],
@@ -382,6 +418,10 @@ class Media3PlayerController(
         suppressRebufferUntil = 0L
         starvedTicks = 0
         unsupportedSkips = 0
+        renderedOnce = false
+        renderedTicks = 0
+        renderedLineIndex = -1
+        returnedToRendered = false
         bufferingWindow.clear()
         startStatsTicker()
         startCurrentLine()
@@ -571,6 +611,10 @@ class Media3PlayerController(
         // 直播窗口对齐的次数也按线路重算：看两小时碰上几次窗口滑走是正常的，
         // 不重置的话第四次起就会被当成线路坏了
         liveRealigns = 0
+        // 「出过画」按线路重算：每一条线路都有自己的起播缓冲，不能把上一条的算到它头上
+        renderedOnce = false
+        renderedTicks = 0
+        bufferingWindow.clear()
 
         // 起播/换线的轨迹（2026-11-06）：用户反馈「加载半天出不来」时，第一件要回答的事是
         // 「它到底试到第几条了」。只记下标与协议，不记地址（RULES §2.5）
@@ -746,6 +790,7 @@ class Media3PlayerController(
         // 用户不知道发生了什么。到 [DEAD_LINE_LIMIT] 就认输，把失败出口交出去。
         if (nothingArrived) deadLines++
         if (nothingArrived && deadLines >= DEAD_LINE_LIMIT && retriesLeft <= 0) {
+            if (returnToRenderedLine()) return
             stopWatchdog()
             _state.value =
                 PlaybackState.Failed(
@@ -771,6 +816,7 @@ class Media3PlayerController(
             return
         }
 
+        if (returnToRenderedLine()) return
         stopWatchdog()
         _state.value =
             PlaybackState.Failed(
@@ -780,6 +826,33 @@ class Media3PlayerController(
                 lineIndex = lineIndex,
                 lineCount = lines.size,
             )
+    }
+
+    /**
+     * 全部线路都试完了，但其中有一条曾经出过画面 —— 回到那条，别直接认输。
+     *
+     * 这是「12 条线路难道没一条好的？」的直接答复：兜底线路（跨源同名捞来的、
+     * 上游清单里早失效的）往往连响应头都不回，而**第一条**其实已经 1080p 出画了，
+     * 只是被换线链一路换走、再也不回头。一条能出画的线路比十条连不通的都值。
+     *
+     * 只允许回退一次（[returnedToRendered]）：回退后仍失败就是真失败，
+     * 再来回弹只会让用户看着画面反复重头。
+     */
+    private fun returnToRenderedLine(): Boolean {
+        if (returnedToRendered) return false
+        val target = renderedLineIndex
+        if (target < 0 || target == lineIndex) return false
+        val lines = request?.normalizedLines ?: return false
+        if (target > lines.lastIndex) return false
+
+        returnedToRendered = true
+        lineIndex = target
+        retriesLeft = retryLimit
+        deadLines = 0
+        autoSwitchCount = 0
+        Log.d(PlaybackDiagnostics.TAG, "全线都试过了 → 回到曾出过画面的第 ${target + 1}/${lines.size} 条")
+        startCurrentLine()
+        return true
     }
 
     /**
@@ -825,9 +898,17 @@ class Media3PlayerController(
 
                     // 缓冲窗口：最近 20 个周期（约 10 秒）里有几个在缓冲。
                     // 这是「码率未知」时唯一可靠的判据 —— 实测 HLS 直播的 Format.bitrate
-                    // 常常是 0，那时候比值判据失效，占比判据接着干活
-                    bufferingWindow.addLast(buffering)
-                    while (bufferingWindow.size > REBUFFER_RATIO_MIN_TICKS) bufferingWindow.removeFirst()
+                    // 常常是 0，那时候比值判据失效，占比判据接着干活。
+                    //
+                    // **只在出画之后才记账**：起播那几拍必然在缓冲，一起算进来的话，
+                    // 每条线路刚出画就被自己的起播缓冲判成「供不上」（见 renderedTicks）。
+                    if (renderedOnce) {
+                        renderedTicks++
+                        bufferingWindow.addLast(buffering)
+                        while (bufferingWindow.size > REBUFFER_RATIO_MIN_TICKS) {
+                            bufferingWindow.removeFirst()
+                        }
+                    }
 
                     // 「供不上」判据（2026-11-06）：**正在饿着**、且这一秒拿到的字节数
                     // 明显低于流自己声明的码率（或最近 10 秒一直在缓冲）——
@@ -837,7 +918,9 @@ class Media3PlayerController(
                         buffering = buffering,
                         speed = speed,
                         requiredBits = current.bitrateBps,
-                        played = videoPlayer.currentPosition > 0L,
+                        // 冷静期：出画后先看 4 秒再下结论。起播刚结束时的抖动（索引文件、
+                        // 首分片、解码器热身）都会让缓冲忽有忽无，那不是线路的问题
+                        played = renderedOnce && renderedTicks >= RENDER_GRACE_TICKS,
                     )
                 }
             }
@@ -1007,6 +1090,14 @@ class Media3PlayerController(
 
         /** 加载统计的轮询间隔（PLAY-12）。见 startStatsTicker 的说明 */
         private const val STATS_TICK_MS = 500L
+
+        /**
+         * 出画之后先观察几个统计周期才允许「供不上」判据开火（2026-11-06）。
+         *
+         * 8 拍 = 4 秒。刚出画那几秒里，解码器在热身、首分片在补、索引文件在拉，
+         * 缓冲忽有忽无是常态 —— 那不是线路的问题，按它换线就是**把好线路换掉**。
+         */
+        private const val RENDER_GRACE_TICKS = 8
 
         /**
          * 判定「这条线路供不上」的观察窗口（PLAY-13）。

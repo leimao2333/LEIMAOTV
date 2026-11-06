@@ -36,11 +36,20 @@ import com.leimao.tv.ui.LeimaoTvApp
  * 每调一次界面都要来回摸鼠标。统一成「小键盘方向 + 小键盘回车 + ESC」，一只手就能走完全部交互，
  * 测试成本降下来，验收才会真的逐条做。
  *
+ * 布局按小键盘的物理摆位来（用户 2026-11-06 指定，与电视盒子遥控器的九宫格一致）：
+ *
+ * ```
+ *   8 上      7 无
+ * 4 左 5 OK 6 右
+ *   2 下      1 返回   3 菜单
+ * ```
+ *
  * | 键盘 | 等价遥控器键 |
  * |---|---|
  * | 小键盘 8 / 2 / 4 / 6 | ↑ / ↓ / ← / → |
- * | 小键盘 Enter | OK |
- * | ESC | 返回 |
+ * | 小键盘 5 或 Enter | OK |
+ * | 小键盘 1 或 ESC | 返回 |
+ * | 小键盘 3 | 菜单 |
  *
  * 只映射这几类，别的键原样放行 —— 输入订阅地址时还得靠它们。
  */
@@ -52,7 +61,13 @@ internal object KeyRemap {
             KeyEvent.KEYCODE_NUMPAD_2 -> KeyEvent.KEYCODE_DPAD_DOWN
             KeyEvent.KEYCODE_NUMPAD_4 -> KeyEvent.KEYCODE_DPAD_LEFT
             KeyEvent.KEYCODE_NUMPAD_6 -> KeyEvent.KEYCODE_DPAD_RIGHT
+            // 5 在九宫格正中，按下去就该是「确认」。原来只认小键盘 Enter，
+            // 用户按中间那颗键完全没反应（2026-11-06 反馈「按键盘没反应」）
+            KeyEvent.KEYCODE_NUMPAD_5 -> KeyEvent.KEYCODE_DPAD_CENTER
             KeyEvent.KEYCODE_NUMPAD_ENTER -> KeyEvent.KEYCODE_DPAD_CENTER
+            // 1 / 3 与 ESC 一样是「退出/菜单」语义，见 dispatchKeyEvent 里的分派
+            KeyEvent.KEYCODE_NUMPAD_1 -> KeyEvent.KEYCODE_BACK
+            KeyEvent.KEYCODE_NUMPAD_3 -> KeyEvent.KEYCODE_MENU
             KeyEvent.KEYCODE_ESCAPE -> KeyEvent.KEYCODE_BACK
             else -> null
         }
@@ -215,9 +230,22 @@ class MainActivity : ComponentActivity() {
         val target = KeyRemap.targetOf(event.keyCode) ?: return super.dispatchKeyEvent(event)
         Log.d(TAG, "REMAP ${event.keyCode} -> $target action=${event.action}")
 
-        if (target == KeyEvent.KEYCODE_BACK) {
-            if (event.action == KeyEvent.ACTION_UP) onBackPressedDispatcher.onBackPressed()
+        // 小键盘 3 映射成菜单键。必须和上面原生 MENU 走同一条路 —— 交给 super 分发的话
+        // 事件会进按键分发链，而全局菜单靠的是 menuSignal 这个信号量，那边收不到
+        if (target == KeyEvent.KEYCODE_MENU) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                Log.d(TAG, "MENU key -> toggle global menu (remapped)")
+                menuSignal.intValue += 1
+            }
             return true
+        }
+
+        if (target == KeyEvent.KEYCODE_BACK) {
+            // 不自己调 onBackPressedDispatcher：那等于越过窗口系统直接戳 Activity 的回调，
+            // 而全局菜单 / 源弹层这些 Dialog 的「返回收起」是它们自己窗口处理的，
+            // 绕过去就收不起来（2026-11-06 实测：小键盘 1 按下去菜单纹丝不动）。
+            // 还原成真正的 BACK 事件往下发，等于用户按了遥控器的返回键
+            return super.dispatchKeyEvent(KeyRemap.translate(event, target))
         }
 
         return super.dispatchKeyEvent(KeyRemap.translate(event, target))

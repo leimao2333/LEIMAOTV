@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -221,6 +222,29 @@ class VlcPlayerController(
                 lineCount = lines.size,
             )
 
+        // 交给 libVLC 之前先看一眼 playlist（2026-11-06 实测闪退）：
+        // 分片时长缺失/为 0 时，VLC 的 adaptive demux 会 `assertion "duration" failed`
+        // → native abort → 整个进程被 SIGABRT 打死。那不是「这条线路播不了」，
+        // 是应用直接没了，Kotlin 侧连异常都接不到，所以只能在喂进去之前挡掉。
+        if (looksLikeHls(url)) {
+            val expectLine = lineIndex
+            scope.launch {
+                val unplayable = withContext(Dispatchers.IO) { playlistRejected(url, current.headers) }
+                // 等待期间可能已经换台 / 换线，别把结论套到别的线路上
+                if (request !== current || lineIndex != expectLine) return@launch
+                if (unplayable) {
+                    DeadLines.mark(url)
+                    handleFailure(REASON_BAD_PLAYLIST)
+                    return@launch
+                }
+                attachAndPlay(current, url, lines)
+            }
+            return
+        }
+        attachAndPlay(current, url, lines)
+    }
+
+    private fun attachAndPlay(current: PlaybackRequest, url: String, lines: List<String>) {
         val media =
             Media(libVlc, Uri.parse(vlcLocation(url))).apply {
                 // 每个源有自己的 UA / Referer，VLC 用 :http-user-agent 与 :http-referrer 选项
@@ -249,6 +273,39 @@ class VlcPlayerController(
         mediaPlayer.play()
         startWatchdog()
     }
+
+    /** 只有 m3u8 才值得预检；`…/x.smil`、`.ts`、`rtsp://` 都走原路 */
+    private fun looksLikeHls(url: String): Boolean =
+        url.contains(".m3u8", ignoreCase = true) || url.contains("m3u8", ignoreCase = true)
+
+    /**
+     * 拉一小段 playlist 看它会不会把 VLC 弄崩。
+     *
+     * 只读前 128KB：直播 playlist 通常几 KB，读到上限说明不是正常清单，
+     * 那时候没有可判的东西，交回给内核自己处理（它的失败路径是可控的）。
+     * 网络失败一律返回 `false`（不拦）：这条判据的职责是**防崩溃**，
+     * 不是判线路好坏，网络问题交给失败处理那条链。
+     */
+    private fun playlistRejected(url: String, headers: Map<String, String>): Boolean =
+        runCatching {
+            val connection =
+                (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = PLAYLIST_PROBE_TIMEOUT_MS
+                    readTimeout = PLAYLIST_PROBE_TIMEOUT_MS
+                    headers["User-Agent"]?.let { setRequestProperty("User-Agent", it) }
+                    headers["Referer"]?.let { setRequestProperty("Referer", it) }
+                }
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(PLAYLIST_PROBE_LIMIT)
+                var total = 0
+                while (total < buffer.size) {
+                    val read = input.read(buffer, total, buffer.size - total)
+                    if (read <= 0) break
+                    total += read
+                }
+                isPlaylistRejectedByVlc(String(buffer, 0, total, Charsets.UTF_8))
+            }
+        }.getOrDefault(false)
 
     private fun onPlaying() {
         stopWatchdog()
@@ -318,7 +375,7 @@ class VlcPlayerController(
         // 超时 = 这条线路一直没出画面，原地重试只会把用户再关在转圈里一个预算周期。
         // Media3 那边对「一个字节都没来」也是直接换线（`nothingArrived`），
         // 两个内核的失败观感要对齐，否则降级之后忽然变慢，用户以为是换了个 App
-        if (reason == REASON_TIMEOUT) {
+        if (reason == REASON_TIMEOUT || reason == REASON_BAD_PLAYLIST) {
             retriesLeft = 0
             deadLines++
         }
@@ -380,6 +437,20 @@ class VlcPlayerController(
 
         /** 超时的统一措辞：`handleFailure` 靠它判「不值得原地重试」 */
         private const val REASON_TIMEOUT = "这条线路一直没出画面"
+
+        /**
+         * 播放列表残缺、喂给软解内核会直接崩进程（2026-11-06）。
+         *
+         * 与「超时」区分开：它针对的是**内容**问题，重试同一条毫无意义，
+         * 所以进失败处理时也按「直接换线」走。
+         */
+        private const val REASON_BAD_PLAYLIST = "这条线路的播放列表缺分片时长，软解内核会崩"
+
+        /** 预检 playlist 的超时：只做防止崩溃的判断，不追求探测完整 */
+        private const val PLAYLIST_PROBE_TIMEOUT_MS = 4_000
+
+        /** 预检最多读这么多字节：正常直播 playlist 几 KB，读满说明不是清单，交回内核 */
+        private const val PLAYLIST_PROBE_LIMIT = 128 * 1024
 
         /**
          * 兜底内核连几条超时就认输。

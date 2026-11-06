@@ -505,6 +505,10 @@
         时内核必然在转圈，于是每条线路**一出画就占比过半**，3 秒后被自己换走。改为只在出画
         之后记账（`renderedTicks` + `RENDER_GRACE_TICKS` 4 秒冷静期），并记住
         `renderedLineIndex`：全线试完要落失败面板前先回到那条再试一次（`returnToRenderedLine`）
+  - [x] **软解兜底被残缺 playlist 打崩（实测闪退）**：libVLC 的 adaptive demux 对分片时长
+        做断言（`SegmentList.cpp:133 assertion "duration"` → abort → SIGABRT），Kotlin 接不住；
+        `isPlaylistRejectedByVlc` 起流前预检（HttpURLConnection，128KB / 4s，网络失败不拦），
+        不合格按「这条线路播不了」换下一条；`HlsPlaylistSanityTest` 8 条
   - [x] 真源实测（`leimaotv-sources` 的 `dist/live.txt`，852 频道 / 3668 条线路）：
         湖南经视第 4/14 条线路出画 1080p、首帧 4.0s，之后 30 秒稳定不再换线；
         宿主直连探测前 150 条里 34 条返回合法 `#EXTM3U`（其余超时/302 到失效地址），

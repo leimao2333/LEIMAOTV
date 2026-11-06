@@ -341,6 +341,12 @@
 - **建 `MediaSource` 必须 `runCatching`（PLAY-16）**：`DefaultMediaSourceFactory` 遇到 `rtsp://`
   会反射加载 `RtspMediaSource$Factory`，没打包那个扩展就是 `ClassNotFoundException` 直接崩主线程
   —— 报错点在构造数据源，跟播放失败完全不是一条路径，救不了。
+- **喂给 libVLC 的 m3u8 必须先过一遍预检（PLAY-16，2026-11-06 实测闪退）**：它的 adaptive
+  demux 对分片时长做 `assert`，`#EXTINF:` 没写正数时长就 `abort()` → SIGABRT，进程直接消失，
+  Kotlin 侧连异常都接不到。判定走 `isPlaylistRejectedByVlc`（纯函数，有单测），
+  在起流前拉 ≤128KB / 4s 的清单检查；**不通过就按线路失败换下一条**，
+  少一条线路可以，少一个 App 不行。主列表（`#EXT-X-STREAM-INF`）与缺
+  `#EXT-X-TARGETDURATION` 的国产源不算坏，别误伤。
 - **缓冲上限按内存档位定，不写死一个数**（PLAY-03 / SET-01，2026-11-04 修订）：
   常规设备 30~60 秒，基准低配机（见下方 §7.1）30 秒。两个理由：
   ① 直播 HLS 窗口通常只有 18~36 秒，上限给到 60 秒会让内核反复刷新 playlist 去凑一份

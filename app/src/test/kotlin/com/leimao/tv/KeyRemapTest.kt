@@ -43,6 +43,26 @@ class KeyRemapTest {
     }
 
     @Test
+    fun `主键盘区那排数字同样是九宫格`() {
+        // 2026-11-06 第二次「按还是没反应」：上一版只认 NUMPAD_*，笔记本键盘上没有独立
+        // 小键盘，顶上那排是 1..9 的另一组键码，一条 REMAP 都没有
+        assertEquals(DPAD_UP, KeyRemap.targetOf(KEY_8))
+        assertEquals(DPAD_DOWN, KeyRemap.targetOf(KEY_2))
+        assertEquals(DPAD_LEFT, KeyRemap.targetOf(KEY_4))
+        assertEquals(DPAD_RIGHT, KeyRemap.targetOf(KEY_6))
+        assertEquals(DPAD_CENTER, KeyRemap.targetOf(KEY_5))
+        assertEquals(BACK, KeyRemap.targetOf(KEY_1))
+        assertEquals(MENU, KeyRemap.targetOf(KEY_3))
+    }
+
+    @Test
+    fun `主键盘的 0 7 9 仍然可以当数字用`() {
+        assertNull(KeyRemap.targetOf(KEY_0))
+        assertNull(KeyRemap.targetOf(KEY_7))
+        assertNull(KeyRemap.targetOf(KEY_9))
+    }
+
+    @Test
     fun `不参与布局的键原样放行`() {
         // 7 / 9 / 0 不在九宫格里 —— 输入订阅地址、频道号时还得靠它们
         assertNull(KeyRemap.targetOf(NUMPAD_7))
@@ -65,6 +85,18 @@ class KeyRemapTest {
         const val NUMPAD_ENTER = 160
         const val ESCAPE = 111
         const val KEY_A = 29
+
+        // 主键盘区数字：KEYCODE_0..KEYCODE_9 = 7..16
+        const val KEY_0 = 7
+        const val KEY_1 = 8
+        const val KEY_2 = 9
+        const val KEY_3 = 10
+        const val KEY_4 = 11
+        const val KEY_5 = 12
+        const val KEY_6 = 13
+        const val KEY_7 = 14
+        const val KEY_8 = 15
+        const val KEY_9 = 16
 
         const val BACK = 4
         const val DPAD_UP = 19

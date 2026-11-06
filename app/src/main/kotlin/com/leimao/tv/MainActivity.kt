@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -68,6 +69,25 @@ internal object KeyRemap {
             // 1 / 3 与 ESC 一样是「退出/菜单」语义，见 dispatchKeyEvent 里的分派
             KeyEvent.KEYCODE_NUMPAD_1 -> KeyEvent.KEYCODE_BACK
             KeyEvent.KEYCODE_NUMPAD_3 -> KeyEvent.KEYCODE_MENU
+
+            // 主键盘区那排数字，同一套九宫格布局。
+            //
+            // 这一组是 2026-11-06 第二次反馈「按还是没反应」的根因：上一版只认
+            // NUMPAD_*（小键盘），而普通键盘顶上那排是 KEYCODE_1..KEYCODE_9，
+            // **两组是不同的键码**，所以按下去只有一行 KEY 日志、一条 REMAP 都没有。
+            // 用户笔记本 / 无线键盘上没有独立数字小键盘，只能按这排。
+            //
+            // 代价：这七个数字键在整个应用里不再当字符用（直播页的「数字键输频道号」
+            // 因此退化，换台仍可用 ↑↓ / CH+ / CH−）。有输入法正在接收文字时
+            // dispatchKeyEvent 会整段放行，搜索框里照样能打数字，见 isTextEntryActive()。
+            KeyEvent.KEYCODE_8 -> KeyEvent.KEYCODE_DPAD_UP
+            KeyEvent.KEYCODE_2 -> KeyEvent.KEYCODE_DPAD_DOWN
+            KeyEvent.KEYCODE_4 -> KeyEvent.KEYCODE_DPAD_LEFT
+            KeyEvent.KEYCODE_6 -> KeyEvent.KEYCODE_DPAD_RIGHT
+            KeyEvent.KEYCODE_5 -> KeyEvent.KEYCODE_DPAD_CENTER
+            KeyEvent.KEYCODE_1 -> KeyEvent.KEYCODE_BACK
+            KeyEvent.KEYCODE_3 -> KeyEvent.KEYCODE_MENU
+
             KeyEvent.KEYCODE_ESCAPE -> KeyEvent.KEYCODE_BACK
             else -> null
         }
@@ -227,6 +247,15 @@ class MainActivity : ComponentActivity() {
             return true
         }
 
+        // 只在「输入法正在接收文字」时把**数字键**还回去。搜索页用的是系统输入法
+        // （SearchScreen 的 BasicTextField），把 1~6/8 换成方向键的话，搜「1921」
+        // 会一个字都打不出来。方向键 / ESC / 小键盘不在这个例外里 ——
+        // 它们没有字符语义，输入法也用不上。
+        if (isRemappedNumberKey(event.keyCode) && isTextEntryActive()) {
+            Log.d(TAG, "TEXT-INPUT active, pass keyCode=${event.keyCode}")
+            return super.dispatchKeyEvent(event)
+        }
+
         val target = KeyRemap.targetOf(event.keyCode) ?: return super.dispatchKeyEvent(event)
         Log.d(TAG, "REMAP ${event.keyCode} -> $target action=${event.action}")
 
@@ -253,5 +282,19 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val TAG = "KeyRemap"
+
+        /** 会被换成遥控器键的那几个主键盘数字（1~6、8），只有它们需要避让文字输入 */
+        fun isRemappedNumberKey(keyCode: Int): Boolean =
+            keyCode == KeyEvent.KEYCODE_1 ||
+                keyCode == KeyEvent.KEYCODE_2 ||
+                keyCode == KeyEvent.KEYCODE_3 ||
+                keyCode == KeyEvent.KEYCODE_4 ||
+                keyCode == KeyEvent.KEYCODE_5 ||
+                keyCode == KeyEvent.KEYCODE_6 ||
+                keyCode == KeyEvent.KEYCODE_8
     }
+
+    /** 系统输入法是否正在接收文字（= 用户此刻在搜索框里打字） */
+    private fun isTextEntryActive(): Boolean =
+        (getSystemService(InputMethodManager::class.java))?.isAcceptingText == true
 }

@@ -88,17 +88,19 @@ fun GlobalMenuOverlay(
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when (event.key) {
-                            Key.NumPad1, Key.NumPad3, Key.Escape -> {
+                            // 1 / 3 = 返回 / 菜单，两套键盘（小键盘 + 主键盘区那排数字）
+                            // 都要认：Dialog 有自己的窗口，Activity 的 KeyRemap 管不到这里
+                            Key.NumPad1, Key.One, Key.NumPad3, Key.Three, Key.Escape -> {
                                 onDismiss()
                                 true
                             }
 
-                            Key.NumPad8 -> {
+                            Key.NumPad8, Key.Eight -> {
                                 focusIndex = (focusIndex - 1).coerceAtLeast(0)
                                 true
                             }
 
-                            Key.NumPad2 -> {
+                            Key.NumPad2, Key.Two -> {
                                 focusIndex = (focusIndex + 1).coerceAtMost(MENU_ITEM_COUNT - 1)
                                 true
                             }
@@ -199,7 +201,10 @@ private fun MenuItem(
                 // NumPad5 / NumPadEnter 是另外的键码，不补这一下，菜单里按 5 毫无反应
                 .onPreviewKeyEvent { event ->
                     val confirm =
-                        event.key == Key.NumPad5 || event.key == Key.NumPadEnter
+                        event.key == Key.NumPad5 ||
+                            event.key == Key.Five ||
+                            event.key == Key.NumPadEnter ||
+                            event.key == Key.Enter
                     // 用 KeyUp 而不是 KeyDown：跟 `clickable` 的触发时机一致，
                     // 按住不放时不会因为连发 KeyDown 而连点好几下
                     if (event.type == KeyEventType.KeyUp && confirm) {

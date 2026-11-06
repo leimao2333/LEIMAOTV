@@ -118,6 +118,37 @@ interface ChannelDao {
     suspend fun countBySource(): List<SourceEntryCount>
 
     /**
+     * **同名台在别的源里的线路**（2026-11-06，跨源兜底）。
+     *
+     * 聚合源里「CCTV5」几乎每条源都有一份，而它们的质量天差地别：实测同一个台，
+     * A 源那条线路只给 0.8 Mbps（流要 10.7 Mbps，画面动一秒停两秒），
+     * B 源那条给 27 Mbps。两份在不同的 channel 行里，各自只有自己的线路 ——
+     * 于是「换线路」在那个台上无从换起，只能眼睁睁卡着。
+     *
+     * 按名称精确匹配（不归一化）：归一化会漏掉源里的写法差异，但也可能把
+     * 「CCTV5」和「CCTV5+」并成一台 —— 串台比不并严重得多，所以这里只认同名。
+     *
+     * `GROUP BY l.url` 去重：多条源可能挂着同一个地址（实测聚合源里很常见）。
+     */
+    @Query(
+        """
+        SELECT l.url AS url
+        FROM channel c
+        INNER JOIN channel_line l ON l.channelId = c.id
+        INNER JOIN source s ON s.id = c.sourceId
+        WHERE s.enabled = 1 AND c.name = :name AND c.id != :excludeId
+        GROUP BY l.url
+        ORDER BY MIN(c.number) ASC, MIN(l.position) ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun sameNameLines(
+        name: String,
+        excludeId: Long,
+        limit: Int,
+    ): List<String>
+
+    /**
      * 刻意用 ABORT 而不是 REPLACE。
      *
      * REPLACE 的语义是「删掉冲突行再插入」，主键会变；而 favorite / history 靠外键级联挂在

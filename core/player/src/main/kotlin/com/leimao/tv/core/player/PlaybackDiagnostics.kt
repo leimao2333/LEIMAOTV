@@ -41,7 +41,10 @@ internal class PlaybackDiagnostics(
         Log.d(
             tag,
             "视频流 ${format.width}x${format.height} ${format.sampleMimeType} " +
-                "${format.frameRate.takeIf { it > 0 } ?: "?"}fps",
+                "${format.frameRate.takeIf { it > 0 } ?: "?"}fps " +
+                // 码率是「供不上」判据的分母（见 isLineStarved）。容器不声明时这里是 0，
+                // 那种情况判据不生效 —— 日志里能一眼看出是哪一种
+                "码率 ${if (format.bitrate > 0) "${format.bitrate / 1000} kbps" else "未声明"}",
         )
     }
 
@@ -130,9 +133,15 @@ internal class LoadStatsTracker(
 ) : AnalyticsListener {
     private var bytes = 0L
 
+    /** 视频 / 音频各自的声明码率（bps）。分开存是因为**音轨通常比视频轨晚到** */
+    private var videoBitrate = 0
+    private var audioBitrate = 0
+
     /** 换台/换集时清零：新的一路流从 0 开始算，否则浮层会挂着上一路的数字 */
     fun reset() {
         bytes = 0L
+        videoBitrate = 0
+        audioBitrate = 0
         sink.value = LoadStats.None
     }
 
@@ -152,7 +161,32 @@ internal class LoadStatsTracker(
         format: Format,
         decoderReuseEvaluation: DecoderReuseEvaluation?,
     ) {
-        sink.update { it.copy(width = format.width, height = format.height) }
+        // bitrate <= 0 表示容器没声明码率。保留上一次的值没意义（换台已经 reset 过），
+        // 直接写 0 让下游走「不知道就不判断」那条路
+        videoBitrate = format.bitrate.takeIf { it > 0 } ?: 0
+        sink.update {
+            it.copy(
+                width = format.width,
+                height = format.height,
+                bitrateBps = videoBitrate + audioBitrate,
+            )
+        }
+    }
+
+    /**
+     * 音轨码率也要算进来。
+     *
+     * 一路 1080p 直播是「视频 10 Mbps + 音频 192 kbps」，只拿视频码率当下限，
+     * 判断会偏乐观 2%；更要紧的是**纯音频流**（广播台）没有视频轨，只认视频的话
+     * 码率永远是 0，判据直接失效。
+     */
+    override fun onAudioInputFormatChanged(
+        eventTime: AnalyticsListener.EventTime,
+        format: Format,
+        decoderReuseEvaluation: DecoderReuseEvaluation?,
+    ) {
+        audioBitrate = format.bitrate.takeIf { it > 0 } ?: 0
+        sink.update { it.copy(bitrateBps = videoBitrate + audioBitrate) }
     }
 
     override fun onVideoDecoderInitialized(

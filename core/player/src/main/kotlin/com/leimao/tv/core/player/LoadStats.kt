@@ -33,6 +33,16 @@ data class LoadStats(
     val height: Int = 0,
     /** 解码器名。软解/硬解的判据见 [PlaybackDiagnostics.isSoftware] */
     val decoder: String? = null,
+    /**
+     * 这一路流的理论码率（bps，视频 + 音频之和）。
+     *
+     * 它和 [bytesPerSecond] 是一对：**「实测」对「该给的」**。只报实测是没用的数字 ——
+     * 400 KB/s 对一条 2 Mbps 的流绰绰有余，对一条 12 Mbps 的 4K HDR 就是远远不够。
+     * 两者的比值才是「这条线路供不供得上」的判据（见 `isLineStarved`）。
+     *
+     * 0 = 还不知道（容器没声明码率）。这时不做判断，交给「反复缓冲」那条判据。
+     */
+    val bitrateBps: Int = 0,
 ) {
     /** 「1920×1080」；没解析到流信息时为 null（UI 不显示这一段） */
     val resolution: String?

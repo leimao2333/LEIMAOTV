@@ -45,6 +45,18 @@ interface ChannelRepository {
     suspend fun playbackConfig(channelId: Long): PlaybackConfig?
 
     /**
+     * 同名台在**其它源**里的线路（2026-11-06）。
+     *
+     * 只用来扩充「换线路」的候选集，不改列表、不改归属：播放的还是原来那个台，
+     * 变的是「这条线路不行时还能试谁」。详细理由见 `ChannelDao.sameNameLines`。
+     */
+    suspend fun sameNameLines(
+        channelId: Long,
+        name: String,
+        limit: Int = CROSS_SOURCE_LINE_LIMIT,
+    ): List<String>
+
+    /**
      * 按名称搜索频道（SEARCH-01），只搜启用的源。
      *
      * [keyword] 必须**已经归一化**（`normalizeSearchQuery`），这里的 SQL 只去空格、不处理全角半角 ——
@@ -66,6 +78,14 @@ interface ChannelRepository {
     companion object {
         /** 单次搜索最多返回多少条频道：再多用户也不会翻，只是把焦点顺序拖长 */
         const val SEARCH_LIMIT = 40
+
+        /**
+         * 跨源兜底最多借几条线路。
+         *
+         * 聚合源里同名台可能有十几个（每个源一条），全借过来等于「换线路」要试一分钟。
+         * 12 条 × 3 秒判定 ≈ 36 秒的上限；再多的源本来也是同一批中转站。
+         */
+        const val CROSS_SOURCE_LINE_LIMIT = 12
     }
 }
 
@@ -101,6 +121,12 @@ class RoomChannelRepository(
     }
 
     override suspend fun firstChannelId(): Long? = channelDao.firstChannelId()
+
+    override suspend fun sameNameLines(
+        channelId: Long,
+        name: String,
+        limit: Int,
+    ): List<String> = channelDao.sameNameLines(name = name, excludeId = channelId, limit = limit)
 
     override suspend fun search(
         keyword: String,

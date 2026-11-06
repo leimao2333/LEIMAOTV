@@ -35,6 +35,12 @@ internal class FakeChannelRepository(
 
     override suspend fun playbackConfig(channelId: Long): PlaybackConfig? = null
 
+    override suspend fun sameNameLines(
+        channelId: Long,
+        name: String,
+        limit: Int,
+    ): List<String> = emptyList()
+
     override suspend fun search(
         keyword: String,
         limit: Int,

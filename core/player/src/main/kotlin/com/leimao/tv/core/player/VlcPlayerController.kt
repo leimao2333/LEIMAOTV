@@ -371,8 +371,12 @@ class VlcPlayerController(
          *
          * 2026-11-04 从 20s 压到 10s：VLC 只在 Media3 全轮失败后才接管，那时每条线路
          * 已经被证明过一次不可用，再给 20 秒只是把失败出口往后推。
+         *
+         * 2026-11-06 再从 10s 压到 6s：走到这里说明 Media3 已经把候选线路走了一遍，
+         * 每条都至少被否过一次；再按 10 秒一条排队，12 条就是两分钟 —— 用户看到的正是
+         * 「加载半天也加载不出来」。6 秒足够软连上并吐出首帧。
          */
-        private const val LINE_BUDGET_MS = 10_000L
+        private const val LINE_BUDGET_MS = 6_000L
 
         /** 超时的统一措辞：`handleFailure` 靠它判「不值得原地重试」 */
         private const val REASON_TIMEOUT = "这条线路一直没出画面"

@@ -933,10 +933,22 @@ private fun PlayerRoute(
         // **只用历史，不在起播路径上探测**：旧实现在没有历史时会先并发探测每条线路
         // （单条 4 秒），第一次看一个台要在黑屏上多等最多 4 秒（真机实测换台 2.7s 才出画）。
         // 探测的结论只影响「下次先试哪条」，所以挪到 play() 之后的 [learnLines] 里后台跑。
+        //
+        // **同名台跨源兜底**（2026-11-06）：聚合源里同一个台每条源都有一份，质量天差地别，
+        // 而它们的线路在各自那条 channel 行里 —— 只用自己的线路，碰到一条 0.8 Mbps 的线
+        // 就彻底没得换，「换线路」形同虚设。这里把同名台在其它源的线路接在后面当候选，
+        // 顺序仍然是自己源优先（[orderByHistory] 只重排传入的列表，不会把它们提上来）。
+        val crossLines =
+            runCatching {
+                container.channelRepository.sameNameLines(channelId = channel.id, name = channel.name)
+            }.getOrDefault(emptyList())
+                // 只借 http(s)：聚合源里 `rtsp://` 的线路是运营商内网专供，
+                // 内核里没带 RTSP 模块，借过来只会在建流时崩（2026-11-06 实测闪退）
+                .filter { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
         val orderedLines =
             container.lineScheduler.orderByHistory(
                 channelId = channel.id,
-                lines = config.lines,
+                lines = (config.lines + crossLines).distinct(),
             )
         container.player.play(
             PlaybackRequest(

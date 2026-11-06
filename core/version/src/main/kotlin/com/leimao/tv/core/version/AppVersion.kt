@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.6.3"
+    const val CURRENT_VERSION: String = "0.5.6.4"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,20 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.6.4",
+                date = "2026-11-06",
+                changes =
+                    listOf(
+                        "修复：播放页按两下 OK 打开频道列表后，方向键与 OK 全都没反应（焦点落在没显示的列表第一行上）",
+                        "修复：选中分组后同样会「方向键失灵」",
+                        "修复：换线路换到 rtsp 地址时 App 直接闪退",
+                        "修复：无响应的线路每次都要重新等一遍 —— 现在记住它，下次从后面的线路开始试",
+                        "修复：加载太慢 —— 有候选线路时每条只等 2.5 秒（原来 4 秒），超时不重试同一条",
+                        "修复：线路明明喂不动这路流（实测只有 0.8 Mbps，流要 10.4 Mbps）时画面一直「动一秒停两秒」，现在几秒内自动换线",
+                        "新增：同名频道在其它源里的线路也会被拿来当备选，能换的线路从 1 条变成十几条",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.6.3",
                 date = "2026-11-06",

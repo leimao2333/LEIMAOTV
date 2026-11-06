@@ -8,7 +8,7 @@
 
 图例：`- [ ]` 待办 / `- [x]` 已完成（末尾标版本）/ `⏸` 暂缓（标原因）
 
-当前进度：**83 / 87 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，LIVE-27/28、PLAY-11、SET-10、SET-14 按聚合订阅仓库与用户反馈补齐，剩 LIVE-21 / VOD-09 / PLAY-06 / SYS-06 与验收）
+当前进度：**84 / 88 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，LIVE-27/28、PLAY-11、SET-10、SET-14 按聚合订阅仓库与用户反馈补齐，剩 LIVE-21 / VOD-09 / PLAY-06 / SYS-06 与验收）
 
 ---
 
@@ -175,8 +175,8 @@
         重来（每条线路最多 3 次）。实测同一路频道 4 分钟踩了 13 次全部自愈（v0.5.6.0）
   - [x] 断流（`STATE_ENDED`）重连时续播点必须归零：停在片尾会被当成续播点，
         新流一秒内又播完，表现为画面一闪一闪最后黑住（v0.5.3.0）
-  - [x] 纯死线路快速认输：连续 5 条「连响应头都没回」即给失败出口（兜底内核 3 条），
-        不再逐条等满时间预算（v0.5.3.0）
+  - [x] 纯死线路快速认输：连续 12 条「连响应头都没回」即给失败出口（兜底内核 3 条），
+        不再逐条等满时间预算（v0.5.3.0 为 5 条；v0.5.6.4 提到 12 条并把单条预算砍到 2.5s）
 - [x] **PLAY-09** 启动秒开 ｜ P0
   - [x] 先出画面，再异步补频道名 / 台标 / EPG
   - [x] 起播不等全量频道列表：`PlayerRoute` 先用已知 id / 最近观看起播，列表随后补上（v0.5.3.0）
@@ -482,6 +482,27 @@
   - [x] 只包点播数据源；直播直连（live playlist 每轮都变，命中旧的那份会卡死）
   - [x] `CacheManager` 增 `clearPlayerCache`：先 release 再删目录（SimpleCache 带索引库）
   - [x] 缓冲档位：均衡 10s/30s、抗卡顿 20s/60s（0.5.3.0 从 60s/120s 收敛）；RULES §7 保留「低于 10s 按回归缺陷处理」，上限改为按内存档位定
+- [x] **PLAY-16** 供不上就换线 / 无响应不重等 ｜ P0（v0.5.6.4）
+  - [x] 卡顿先查源再改代码：抽真实库实测 `gmxw.7766.org:808/hls/93` 一个 4.2s 分片 5.45MB
+        （≈10.4 Mbps），下载 0.82 Mbps —— **13 倍缺口**；同台 `223.78.65.165:9901` 实测 27 Mbps
+        不卡。结论：缓冲参数治不了带宽不足，唯一解法是换线
+  - [x] `LineStarvation.kt` 双轨判据：码率已知 → `实测 B/s < 码率/8 × 1.15`；码率未知
+        （HLS 直播 `Format.bitrate` 实测恒为 0）→ 近 20 个 500ms 周期缓冲占比 ≥ 40%；
+        均需**连续 6 拍（3 秒）**成立
+  - [x] `DeadLines.kt`：进程级「一个字节都没回」名单（`LinkedHashSet` 上限 256），
+        只降级不拉黑（全判死则退回原样），`firstLiveLineIndex` 跳过死线选起始线路
+  - [x] 首字节预算分档：有候选 2.5s / 只有一条 4s / 点播 8s；`DEAD_LINE_LIMIT` 5→12、
+        `AUTO_SWITCH_LIMIT` 3→5；直播超时**不重试同一条**
+  - [x] 跨源同名兜底：`ChannelDao.sameNameLines`（`GROUP BY l.url`、`LIMIT 12`），
+        `startChannel` 合并进候选前滤掉 `rtsp://` —— 全库 CCTV5(id=2) 只有一条 0.82 Mbps 的线，
+        不兜底就必然黑屏
+  - [x] 建流 `runCatching`：`DefaultMediaSourceFactory` 遇 `rtsp://` 反射加载
+        `RtspMediaSource$Factory` → `ClassNotFoundException` 崩主线程；配 `unsupportedSkips` 限次防递归
+  - [x] 起流轨迹日志「起流：第 k/N 条线路（http）」+ 浮层「第 k/12 条 · 已等待 N 秒」，
+        实测一轮 12 条从 40s+ 降到约 20s
+  - [x] 单测：`LineStarvationTest` 12 条、`DeadLinesTest` 6 条、`ChannelFocusAnchorTest` 4 条
+  - [ ] 在确实有可用线路的台上复验「几秒内自动换线」（本机 CCTV5 全部候选均不可用，
+        仅验到「走完一轮后落失败面板」）
 - [x] **SET-03** 补：导入去重 + 导入后自动刷新 ｜ P0（未发版）
   - [x] `SourceJson.filterNew` 按**地址**去重（含文件内部重复）；`importJson` 返回 `SourceImportSummary`
   - [x] 源管理页导入后自动刷新增的直播源，状态行报「导入 N 个源（M 个已存在，跳过）；刷新完成…」

@@ -114,6 +114,30 @@ class Media3PlayerController(
     private var suppressRebufferUntil = 0L
 
     /**
+     * 连续几个统计周期判「这条线路喂不饱这路流」（2026-11-06）。
+     *
+     * 判据本身是纯函数 [isLineStarved]，这里只负责计数：**连续**才是证据，
+     * 中间只要有一秒不饿就清零（广告/静止镜头掉码率是正常现象）。
+     */
+    private var starvedTicks = 0
+
+    /**
+     * 这次起播里「协议根本解不了」跳过了几条（2026-11-06）。
+     *
+     * 只用于防死循环：聚合源里 `rtsp://` 的线路往往连续挂一排，全都解不了时
+     * 「换下一条 → 又解不了」会在同一帧里空转。到线路总数就认输，把失败面板交出去。
+     */
+    private var unsupportedSkips = 0
+
+    /**
+     * 最近 [REBUFFER_RATIO_MIN_TICKS] 个统计周期的「是否在缓冲」（2026-11-06）。
+     *
+     * 队列长度固定，所以它天然是「最近 10 秒」的滑动窗口。只在 [startStatsTicker]
+     * 里读写，不需要加锁。
+     */
+    private val bufferingWindow = ArrayDeque<Boolean>()
+
+    /**
      * 轨道 id → (track group, 组内第几条)。
      *
      * UI 只认 [PlaybackTrack.id]，真正的定位靠这张表 —— 见 `PlaybackTrack` 的注释。
@@ -342,7 +366,7 @@ class Media3PlayerController(
         // 直播与点播的缓冲策略不同，而 LoadControl 是构造期参数 —— 类型变了先换内核。
         // 必须在后面的状态清理之前做：重建内核会把旧内核的播放状态一并扔掉
         ensureKernelFor(request.kind)
-        lineIndex = 0
+        lineIndex = firstLiveLineIndex(request.normalizedLines, 0)
         retriesLeft = retryLimit
         resumeFromMs = request.startPositionMs
         firstStart = true
@@ -356,6 +380,9 @@ class Media3PlayerController(
         deadLines = 0
         liveRealigns = 0
         suppressRebufferUntil = 0L
+        starvedTicks = 0
+        unsupportedSkips = 0
+        bufferingWindow.clear()
         startStatsTicker()
         startCurrentLine()
     }
@@ -372,7 +399,14 @@ class Media3PlayerController(
         val lines = current.normalizedLines
         if (lines.size <= 1) return false
 
-        val next = (lineIndex + delta).coerceIn(0, lines.lastIndex)
+        val next =
+            if (delta > 0) {
+                // 往后换时跳过本进程里已经「一个字节都没回」的线路：那类地址再等一个预算
+                // 也是同样的结果，用户要的是「下一条能看的」，不是「下一条编号」
+                firstLiveLineIndex(lines, (lineIndex + delta).coerceIn(0, lines.lastIndex))
+            } else {
+                (lineIndex + delta).coerceIn(0, lines.lastIndex)
+            }
         if (next == lineIndex) return false
 
         lineIndex = next
@@ -519,6 +553,12 @@ class Media3PlayerController(
         _tracks.value = emptyList()
     }
 
+    /** 从 [from] 起第一条没被判死的线路。规则与理由见 [firstLiveLineIndex] */
+    private fun firstLiveLineIndex(
+        lines: List<String>,
+        from: Int,
+    ): Int = firstLiveLineIndex(lines = lines, from = from, isDead = DeadLines::isDead)
+
     private fun startCurrentLine() {
         val current = request ?: return
         val lines = current.normalizedLines
@@ -531,6 +571,13 @@ class Media3PlayerController(
         // 直播窗口对齐的次数也按线路重算：看两小时碰上几次窗口滑走是正常的，
         // 不重置的话第四次起就会被当成线路坏了
         liveRealigns = 0
+
+        // 起播/换线的轨迹（2026-11-06）：用户反馈「加载半天出不来」时，第一件要回答的事是
+        // 「它到底试到第几条了」。只记下标与协议，不记地址（RULES §2.5）
+        Log.d(
+            PlaybackDiagnostics.TAG,
+            "起流：第 ${lineIndex + 1}/${lines.size} 条线路（${url.substringBefore("://")}）",
+        )
 
         _state.value =
             PlaybackState.Preparing(
@@ -568,7 +615,39 @@ class Media3PlayerController(
         val startAt = if (atEnd) 0L else rawStart.coerceAtLeast(0L)
         firstStart = false
 
-        videoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)), startAt)
+        // 建流本身就会抛（2026-11-06 实测崩溃）：`DefaultMediaSourceFactory` 遇到
+        // `rtsp://` 会去反射加载 `RtspMediaSource$Factory`，而这个模块没打包进来 ——
+        // 抛的是 `IllegalStateException: ClassNotFoundException`，直接冒到主线程把 App 干掉。
+        // 聚合源里 `rtsp://` 的线路很多（运营商内网专供），用户只是按了几下「换线路」就闪退。
+        //
+        // 这类线路**再试也一样**：记进 DeadLines 跳过去，按「这条线路播不了」的常规路径换线。
+        // 用协程而不是直接调 handleFailure：它会再走回本函数，同步递归在所有线路都解不了时
+        // 会一路戳到栈底；[unsupportedSkips] 再兜一层，防止「跳不动」时空转。
+        val source =
+            runCatching { mediaSourceFactory.createMediaSource(MediaItem.fromUri(url)) }
+                .getOrElse {
+                    DeadLines.mark(url)
+                    unsupportedSkips++
+                    Log.d(
+                        PlaybackDiagnostics.TAG,
+                        "这条线路的协议解不了，跳过（第 $unsupportedSkips 条）：${it.javaClass.simpleName}",
+                    )
+                    if (unsupportedSkips >= lines.size) {
+                        stopWatchdog()
+                        _state.value =
+                            PlaybackState.Failed(
+                                url = url,
+                                item = current.item,
+                                reason = REASON_UNSUPPORTED,
+                                lineIndex = lineIndex,
+                                lineCount = lines.size,
+                            )
+                    } else {
+                        scope.launch { handleFailure(reason = REASON_UNSUPPORTED) }
+                    }
+                    return
+                }
+        videoPlayer.setMediaSource(source, startAt)
         videoPlayer.prepare()
         videoPlayer.playWhenReady = true
 
@@ -596,7 +675,17 @@ class Media3PlayerController(
         // 用户看到的就是「影视一直缓冲」，而且比不切还慢（实测 2026-11-05：
         // 19 秒时切内核，VLC 又要从 0 开始加载）。
         val forVod = request?.kind == PlaybackKind.VOD
-        val firstByteBudget = if (forVod) VOD_FIRST_BYTE_BUDGET_MS else FIRST_BYTE_BUDGET_MS
+        val candidateCount = request?.normalizedLines?.size ?: 1
+        val firstByteBudget =
+            when {
+                forVod -> VOD_FIRST_BYTE_BUDGET_MS
+                // 只有一条线时没有退路：宁可多等 1.5 秒，也不要因为握手慢就把这个台判死
+                candidateCount <= 1 -> FIRST_BYTE_BUDGET_MS
+                // 有候选就快试（2026-11-06「加载慢、无响应的源还在费时间」）：
+                // 聚合源里一个台常有十条以上线路，按 4 秒一条走完要 40 秒，
+                // 而其中绝大多数是**一次都没通过**的死链 —— 开头几次换台就被这些拖住了
+                else -> FAST_FIRST_BYTE_BUDGET_MS
+            }
         val lineBudget = if (forVod) VOD_LINE_BUDGET_MS else LINE_BUDGET_MS
         watchdog?.cancel()
         watchdog =
@@ -635,6 +724,11 @@ class Media3PlayerController(
         // 只是把用户多关在转圈里（3 次重试 + 本轮）。直接交给下一条线路。
         // 只有**传输层真的报错**（IO/HTTP）才值得原地重试 —— 那种多半是瞬时抖动。
         //
+        // 直播看门狗超时**不重试同一条线**（2026-11-06「加载半天出不来」）：
+        // 一条直播线路 9 秒还没出画，同一条再来一轮也是 9 秒 —— 三次就是 27 秒，
+        // 而聚合源里等着试的线路还有十几条。点播相反（慢但能通的源值得等），保留重试。
+        if (reason == REASON_TIMEOUT && current.kind != PlaybackKind.VOD) retriesLeft = 0
+
         // 判据是「这次请求有没有收到响应头」：字节数要等整个分片下完（可能好几秒），
         // 而服务器只要活着，响应头几十毫秒就到。
         val nothingArrived = !networkMonitor.respondedSince(lineStartedAt)
@@ -642,6 +736,9 @@ class Media3PlayerController(
         // 不会有别的结果，只是把用户多关在转圈里几个预算周期。直接换下一条线路。
         if (nothingArrived) {
             retriesLeft = 0
+            // 记进进程级「不回包」名单：换台再切回来、或别的台也挂着同一台中转站时，
+            // 直接从它后面开始试，不再为它重等一个预算（见 DeadLines）
+            DeadLines.mark(lines[lineIndex.coerceIn(0, lines.lastIndex)])
         }
 
         // 连续几条线路都「一个字节没来」= 不是线路的问题，是源或网络整体不可用。
@@ -668,7 +765,7 @@ class Media3PlayerController(
         }
 
         if (lineIndex + 1 < lines.size) {
-            lineIndex++
+            lineIndex = firstLiveLineIndex(lines, lineIndex + 1)
             retriesLeft = retryLimit
             startCurrentLine()
             return
@@ -718,14 +815,82 @@ class Media3PlayerController(
 
                     val buffered =
                         (videoPlayer.bufferedPosition - videoPlayer.currentPosition).coerceAtLeast(0L)
+                    val buffering = videoPlayer.playbackState == Player.STATE_BUFFERING
                     _loadStats.value =
                         current.copy(
-                            buffering = videoPlayer.playbackState == Player.STATE_BUFFERING,
+                            buffering = buffering,
                             bufferedMs = buffered,
                             bytesPerSecond = speed,
                         )
+
+                    // 缓冲窗口：最近 20 个周期（约 10 秒）里有几个在缓冲。
+                    // 这是「码率未知」时唯一可靠的判据 —— 实测 HLS 直播的 Format.bitrate
+                    // 常常是 0，那时候比值判据失效，占比判据接着干活
+                    bufferingWindow.addLast(buffering)
+                    while (bufferingWindow.size > REBUFFER_RATIO_MIN_TICKS) bufferingWindow.removeFirst()
+
+                    // 「供不上」判据（2026-11-06）：**正在饿着**、且这一秒拿到的字节数
+                    // 明显低于流自己声明的码率（或最近 10 秒一直在缓冲）——
+                    // 这不是抖动，是线路天生喂不饱。3 秒没缓过来就换线，
+                    // 不再等 45 秒里凑够 3 次缓冲（那种节奏下用户已经看完半场卡顿了）。
+                    noteStarvation(
+                        buffering = buffering,
+                        speed = speed,
+                        requiredBits = current.bitrateBps,
+                        played = videoPlayer.currentPosition > 0L,
+                    )
                 }
             }
+    }
+
+    /**
+     * 累计「饿」的连续周期，够久就换线。
+     *
+     * [buffering] 为 false 时清零：**不饿的时候速率低是正常的**（缓冲已满，内核干脆不下载），
+     * 拿它当依据会把好线路判成坏的 —— 这是这条判据最容易写错的地方。
+     */
+    private fun noteStarvation(
+        buffering: Boolean,
+        speed: Long,
+        requiredBits: Int,
+        played: Boolean,
+    ) {
+        // 两条判据取并集：
+        // 1. 码率已知 → 实测速率 vs 码率（准，且能秒级判定）；
+        // 2. 码率未知（HLS 直播的常态）→ 最近 10 秒的缓冲时间占比。
+        val starved =
+            buffering &&
+                played &&
+                (
+                    isLineStarved(measuredBytesPerSecond = speed, requiredBitsPerSecond = requiredBits) ||
+                        isRebufferHeavy(
+                            bufferingTicks = bufferingWindow.count { it },
+                            totalTicks = bufferingWindow.size,
+                        )
+                )
+        if (!starved) {
+            starvedTicks = 0
+            return
+        }
+        starvedTicks++
+        if (starvedTicks < STARVED_SWITCH_TICKS) return
+        starvedTicks = 0
+
+        val description = if (requiredBits > 0) starvedDescription(requiredBits, speed) else "这条线路供不上：一直缓冲"
+        Log.d(PlaybackDiagnostics.TAG, description)
+
+        val lines = request?.normalizedLines ?: return
+        // 只有一条线时没什么可换的：继续播（用户可能就想先看着），
+        // 真断流了还有 onPlayerError 与看门狗那条链兜底
+        if (lines.size <= 1) return
+        if (autoSwitchCount >= AUTO_SWITCH_LIMIT) return
+
+        autoSwitchCount++
+        rebuffers.clear()
+        suppressRebufferUntil = SystemClock.elapsedRealtime() + REBUFFER_SILENCE_MS
+        Log.d(PlaybackDiagnostics.TAG, "判定这条线路供不上 → 换下一条（第 $autoSwitchCount 次）")
+        // 从统计协程里直接 prepare 会重入播放器，挪到下一个循环再换
+        scope.launch { switchLine(delta = 1) }
     }
 
     /** 停掉统计轮询。[stop]/[release] 调用；重复调用无副作用 */
@@ -861,8 +1026,13 @@ class Media3PlayerController(
          *
          * 3 而不是 2：聚合源里同一个台常有 4~6 条线路，只试 2 条就放弃，
          * 很容易停在同样慢的那几条上（实测 CCTV-8 有 5 条线路，质量差别很大）。
+         *
+         * 2026-11-06 提到 5：现在有了「供不上」这条**基于实测速率**的判据
+         * （见 `isLineStarvation`），换线不再靠运气，而是「这条确实喂不饱」才换。
+         * 一次换线约 3.5 秒，5 次 ≈ 18 秒 —— 这是「这个台的线路都不行」该有的代价，
+         * 总比让用户在一条 0.8 Mbps 的线路上看十分钟「动一秒停两秒」强。
          */
-        private const val AUTO_SWITCH_LIMIT = 3
+        private const val AUTO_SWITCH_LIMIT = 5
 
         /** 换线后的静默期：这段时间的缓冲不计入统计 */
         private const val REBUFFER_SILENCE_MS = 8_000L
@@ -905,6 +1075,7 @@ class Media3PlayerController(
 
         private const val REASON_STREAM_ENDED = "直播流已结束"
         private const val REASON_TIMEOUT = "这条线路一直没出画面"
+        private const val REASON_UNSUPPORTED = "这条线路的协议播不了（rtsp 等）"
 
         /**
          * 轨道菜单上那一行字（PLAY-07）。
@@ -1008,6 +1179,19 @@ class Media3PlayerController(
         private const val FIRST_BYTE_BUDGET_MS = 4_000L
 
         /**
+         * 「还有别的线路可试」时的首字节预算（2026-11-06）。
+         *
+         * 3 秒是握手慢的正常源的下限（见上一条），比它再短会误杀；而 4 秒一条 ×
+         * 十几条候选就是用户说的「加载半天也加载不出来」。取舍是：
+         * **有候选就快速试错**，反正试错成本只有 2.5 秒；**没有候选就老实等着**。
+         *
+         * 2.5 秒足够完成「DNS + TCP + TLS + 首包」：活着的直播服务器响应头通常在
+         * 100ms 量级，连上却 2.5 秒吐不出一个字节的线路，即便最后出画也撑不住一路
+         * 10 Mbps 的 1080p（2026-11-06 实测的死链全是这个样子）。
+         */
+        private const val FAST_FIRST_BYTE_BUDGET_MS = 2_500L
+
+        /**
          * 点播的「连首字节都没来」预算（2026-11-05）。
          *
          * 比直播宽一倍：点播源经常是同一台服务器上挂着几十个片子，连接排队是常态，
@@ -1026,11 +1210,16 @@ class Media3PlayerController(
         /**
          * 连续多少条线路「一个字节都没回」就直接认输。
          *
+         * 2026-11-06 从 5 提到 12：候选里现在混着同名台在**别的源**的线路（见
+         * `ChannelRepository.sameNameLines`），其中好线常常排在末尾 —— 5 条的额度
+         * 会在摸到它之前就认输。而「没回包」的线路现在是**秒级**判死的（2.5 秒或
+         * 直接 HTTP 报错），走完 12 条的代价是几秒，比漏掉那条能看的线路小得多。
+         *
          * 5 条：源里线路质量参差是常态，偶尔撞上两三条死线很正常；连着五条都不理人，
          * 基本可以断定是订阅地址失效或整网不通。按 3 秒一条算，最坏 15 秒给出失败出口，
          * 而不是陪用户转满一分钟。
          */
-        private const val DEAD_LINE_LIMIT = 5
+        private const val DEAD_LINE_LIMIT = 12
 
         /**
          * 同一条线路最多「回到直播边缘」几次。

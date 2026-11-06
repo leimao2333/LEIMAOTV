@@ -109,17 +109,31 @@ fun ChannelBrowser(
     val activeChannels = allGroups.firstOrNull { it.name == activeGroup }?.channels ?: allGroups.first().channels
     val listState = rememberLazyListState()
 
-    // 播放页呼出抽屉时，焦点应该直接落在「正在看的台」上，而不是列表顶部
-    LaunchedEffect(activeGroup) {
-        if (!autoFocus) return@LaunchedEffect
-        val index = activeChannels.indexOfFirst { it.id == selectedChannelId }
-        if (index >= 0) listState.scrollToItem(index)
-    }
+    // 焦点落点 = **正在看的那个台**那一行；没有在播的台才落第一行。
+    //
+    // 为什么不能固定挂第一行（2026-11-06 实测）：抽屉打开时列表已经滚到正在看的台，
+    // 第一行（频道号 001）根本不在组合里 —— `Modifier.focusRequester` 从没被应用过，
+    // FocusRequester 一直没初始化，`requestFocusWhenReady` 重试 30 帧全抛异常，
+    // 于是焦点留在已被移除的控制条上、回落到根容器：抽屉是打开的，
+    // **方向键一动不动、OK 也点不了任何台**（用户截图「上下左右没反应了」）。
+    //
+    // 锚点行一定是组合里的：下面那个 LaunchedEffect 会先把它滚进可视区。
+    val focusAnchorIndex =
+        remember(activeChannels, selectedChannelId) {
+            channelFocusAnchorIndex(activeChannels, selectedChannelId)
+        }
+    val focusAnchorId = activeChannels.getOrNull(focusAnchorIndex)?.id
 
-    // 调用方要「进来就有焦点」时，必须等节点真的挂上再请求：
-    // 只等一帧在低配盒子上经常不够（布局还没跑完），requestFocus 抛异常被吞掉之后，
-    // 抽屉是打开了、但方向键一动不动 —— 所以这里重试到拿到焦点为止
+    // 播放页呼出抽屉时，焦点应该直接落在「正在看的台」上，而不是列表顶部。
+    // **先滚再请求焦点**：顺序反过来的话锚点行还没进组合，requestFocus 必然失败。
+    //
+    // 换分组（activeGroup 变化）时同样要滚：分组切过去之后，列表还停在上一个分组的
+    // 滚动位置上（LazyColumn 的 state 是同一个），而锚点行在新分组的第一行 ——
+    // 不滚过去的话锚点根本没被组合，焦点又一次落空，表现为「选了分组之后方向键又不动了」。
     LaunchedEffect(initialFocusRequester, activeGroup) {
+        if (autoFocus) listState.scrollToItem(focusAnchorIndex.coerceAtLeast(0))
+        // 调用方要「进来就有焦点」时必须等节点真的挂上再请求：只等一帧在低配盒子上
+        // 经常不够，所以这里按「拿没拿到」重试（见 requestFocusWhenReady）
         initialFocusRequester?.requestFocusWhenReady()
     }
 
@@ -207,9 +221,10 @@ fun ChannelBrowser(
                             .fillMaxWidth()
                             .height(CHANNEL_ROW_HEIGHT)
                             // 交给调用方指定「进来先落在哪个台上」：抽屉打开时如果不给焦点，
-                            // 焦点会留在被移除的控制条上并回落到根容器，方向键就再也进不了列表
+                            // 焦点会留在被移除的控制条上并回落到根容器，方向键就再也进不了列表。
+                            // 挂的是 focusAnchorId（正在看的台），不是第一行 —— 理由见上面的注释
                             .then(
-                                if (channel == activeChannels.first() && initialFocusRequester != null) {
+                                if (channel.id == focusAnchorId && initialFocusRequester != null) {
                                     Modifier.focusRequester(initialFocusRequester)
                                 } else {
                                     Modifier
@@ -322,8 +337,29 @@ fun ChannelLogo(
     )
 }
 
-private val MATERIAL_GOLD = Color(0xFFE6B422)
+/**
+ * 打开列表时焦点落在第几行（2026-11-06「上下左右没反应」的根因，抽成纯函数便于钉住）。
+ *
+ * 优先「正在看的台」——列表正好会滚到它，那一行一定在组合里，焦点请求才可能成功；
+ * 没有在播的台（或它不在这一个分组里）就落到第一行。
+ *
+ * 为什么不能固定返回 0：**LazyColumn 不组合可视区外的行**，而抽屉一打开就滚到了
+ * 正在看的台，第一行早就不在组合里了 —— `Modifier.focusRequester` 没被应用过，
+ * FocusRequester 是未初始化状态，`requestFocus()` 必抛异常，重试 30 帧也拿不到焦点，
+ * 表现为「抽屉开着，方向键与 OK 全部无响应」。
+ *
+ * @return 行下标；空列表返回 -1（调用方据此跳过焦点请求）
+ */
+internal fun channelFocusAnchorIndex(
+    channels: List<Channel>,
+    selectedChannelId: Long?,
+): Int {
+    if (channels.isEmpty()) return -1
+    val current = channels.indexOfFirst { it.id == selectedChannelId }
+    return if (current >= 0) current else 0
+}
 
+private val MATERIAL_GOLD = Color(0xFFE6B422)
 /** 分组栏宽度：够放「XX频道」四个字加计数，再宽就吃内容区 */
 private val GROUP_COLUMN_WIDTH = 200.dp
 

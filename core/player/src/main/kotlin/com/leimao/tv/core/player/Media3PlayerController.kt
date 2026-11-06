@@ -162,6 +162,10 @@ class Media3PlayerController(
                                 item = current.item,
                                 lineIndex = lineIndex,
                                 lineCount = lines.size,
+                                // 回到 READY 有两种来路：正常起播（isPlaying 已经为 true），
+                                // 以及「暂停中缓冲够了」（isPlaying 仍是 false，必须保住暂停位，
+                                // 否则缓冲一结束 UI 就以为在播，OK 键又只发 pause）
+                                paused = !videoPlayer.isPlaying,
                             )
                     }
 
@@ -181,6 +185,21 @@ class Media3PlayerController(
                         } else {
                             handleFailure(reason = REASON_STREAM_ENDED)
                         }
+                }
+            }
+
+            /**
+             * 暂停 / 继续是**横切**事件：它不改 `playbackState`（暂停时仍是 READY），
+             * 只翻 `isPlaying`。所以只能在这里同步，靠 `onPlaybackStateChanged` 是看不见的。
+             *
+             * 只在已经 [PlaybackState.Playing] 时改写，其它状态（起播前 / 失败 / 播完）
+             * 不该被一个「谁按了暂停」翻出新状态。
+             */
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                val current = _state.value
+                // paused 与 isPlaying 应当互补，相等就说明这一位是旧的
+                if (current is PlaybackState.Playing && current.paused == isPlaying) {
+                    _state.value = current.copy(paused = !isPlaying)
                 }
             }
 
@@ -363,10 +382,22 @@ class Media3PlayerController(
 
     override fun pause() {
         videoPlayer.pause()
+        // 不等 onIsPlayingChanged：遥控器一次按键到 UI 刷新要走一帧，
+        // 中间的这段时间里再按一次会读到旧状态（连按两下等于什么也没发生）
+        markPaused(paused = true)
     }
 
     override fun resume() {
         videoPlayer.play()
+        markPaused(paused = false)
+    }
+
+    /** 只在「已经就绪」时翻暂停位；起播前 / 失败 / 播完都没有暂停这个概念 */
+    private fun markPaused(paused: Boolean) {
+        val current = _state.value
+        if (current is PlaybackState.Playing && current.paused != paused) {
+            _state.value = current.copy(paused = paused)
+        }
     }
 
     /** 位置与时长直接问内核。时长未知（直播 / 还没拿到 manifest）时 Media3 返回 0 或负数 */

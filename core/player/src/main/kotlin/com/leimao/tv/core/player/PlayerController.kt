@@ -125,11 +125,24 @@ sealed interface PlaybackState {
         override val lineCount: Int,
     ) : PlaybackState
 
+    /**
+     * 已经就绪、画面可以出（或者正停在某一帧）。
+     *
+     * [paused] 是**同一个状态里的一个维度**，不是新状态。理由是暂停与「就绪」并不互斥：
+     * 暂停时内核仍然 READY、`currentPosition` 仍然有效、seek 仍然要能生效，唯一不同的是
+     * 时间不往前走。拆成 `Paused` 状态会把「这一条片子就绪了吗」这个问题变成两个状态各答一半，
+     * 每个读状态的地方都得写 `is Playing || is Paused`。
+     *
+     * 但**必须有这一位**（2026-11-06 修复）：原来没有它，UI 只能拿 `is Playing` 当
+     * 「正在播」用，而暂停后内核状态不变、依旧是 `Playing`，于是「按 OK 暂停/继续」
+     * 永远判定为「在播」→ 永远只发 pause() → 按下暂停就再也播不动了。
+     */
     data class Playing(
         val url: String,
         val item: PlaybackItem,
         override val lineIndex: Int,
         override val lineCount: Int,
+        val paused: Boolean = false,
     ) : PlaybackState
 
     /**
@@ -291,3 +304,33 @@ interface VideoSurfaceHost {
  */
 private val IDLE_LOAD_STATS: StateFlow<LoadStats> =
     MutableStateFlow(LoadStats.None).asStateFlow()
+
+/** 按 OK 键那一刻应该对内核做什么（[resolvePauseAction] 的结果）。 */
+enum class PauseAction {
+    /** 正在播 → 暂停 */
+    Pause,
+
+    /** 已暂停 / 还在起播 → 继续 */
+    Resume,
+
+    /** 没东西可暂停（空闲、失败、播完）→ 不接管这个键 */
+    Ignore,
+}
+
+/**
+ * 「在进度条上按 OK」到底该暂停还是继续。
+ *
+ * 单独提成纯函数，是因为这条判定的出错方式极其隐蔽：暂停之后内核**仍然是 READY**，
+ * 状态也仍然是 [PlaybackState.Playing]，唯一变化的是 `paused` 这一位。
+ * 早先直接用 `state is Playing` 当「正在播」，于是第二次按 OK 又发了一次 pause，
+ * 用户看到的就是「一按暂停就再也播不动」（2026-11-06 反馈）。
+ *
+ * [PlaybackState.Preparing] 一律当「继续」：那时画面还没出来，压一个 pause 只会让
+ * 起播卡在半路，用户还得再按一次键把它救回来。
+ */
+fun resolvePauseAction(state: PlaybackState): PauseAction =
+    when (state) {
+        is PlaybackState.Playing -> if (state.paused) PauseAction.Resume else PauseAction.Pause
+        is PlaybackState.Preparing -> PauseAction.Resume
+        else -> PauseAction.Ignore
+    }

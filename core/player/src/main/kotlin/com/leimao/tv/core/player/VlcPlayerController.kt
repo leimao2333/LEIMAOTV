@@ -88,6 +88,9 @@ class VlcPlayerController(
                 override fun onEvent(event: MediaPlayer.Event) {
                     when (event.type) {
                         MediaPlayer.Event.Playing -> onPlaying()
+                        // 软解的暂停同样是「READY 但时间不走」，靠 Playing 事件看不出来，
+                        // 必须单独接 Paused（2026-11-06 修：暂停后按 OK 再也播不动）
+                        MediaPlayer.Event.Paused -> markPaused(paused = true)
                         MediaPlayer.Event.EncounteredError -> onError()
                         MediaPlayer.Event.EndReached -> onEndReached()
                         else -> Unit
@@ -166,10 +169,12 @@ class VlcPlayerController(
 
     override fun pause() {
         mediaPlayer.pause()
+        markPaused(paused = true)
     }
 
     override fun resume() {
         mediaPlayer.play()
+        markPaused(paused = false)
     }
 
     override fun seekTo(positionMs: Long) {
@@ -255,7 +260,18 @@ class VlcPlayerController(
                 item = current.item,
                 lineIndex = lineIndex,
                 lineCount = lines.size,
+                // libVLC 在「暂停中重新起播/回缓冲」时也会补一次 Playing 事件，
+                // 这时候其实还是暂停态，按内核当前真实的 isPlaying 取
+                paused = !mediaPlayer.isPlaying,
             )
+    }
+
+    /** 只在「已经就绪」时翻暂停位，理由同 Media3 侧 */
+    private fun markPaused(paused: Boolean) {
+        val current = _state.value
+        if (current is PlaybackState.Playing && current.paused != paused) {
+            _state.value = current.copy(paused = paused)
+        }
     }
 
     private fun onError() {

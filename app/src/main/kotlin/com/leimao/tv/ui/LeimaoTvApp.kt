@@ -62,6 +62,7 @@ import com.leimao.tv.core.model.vod.previousEpisode
 import com.leimao.tv.core.network.BasicAuth
 import com.leimao.tv.core.network.RequestHeaders
 import com.leimao.tv.core.network.vod.VodFailure
+import com.leimao.tv.core.player.PauseAction
 import com.leimao.tv.core.player.PlaybackItem
 import com.leimao.tv.core.player.PlaybackKind
 import com.leimao.tv.core.player.PlaybackRequest
@@ -69,6 +70,7 @@ import com.leimao.tv.core.player.PlaybackSettings
 import com.leimao.tv.core.player.PlaybackState
 import com.leimao.tv.core.player.TrackKind
 import com.leimao.tv.core.player.VideoSurfaceHost
+import com.leimao.tv.core.player.resolvePauseAction
 import com.leimao.tv.core.version.AppVersion
 import com.leimao.tv.data.ApkInstaller
 import com.leimao.tv.feature.iptv.PlayerScreen
@@ -1642,9 +1644,14 @@ private fun VodPlayRoute(
     }
 
     // 进度轮询：500ms 一次。内核没有位置回调，而进度条只需要「肉眼看着在走」，
-    // 再密就是在为看不见的精度烧 CPU
-    LaunchedEffect(playback) {
-        if (playback !is PlaybackState.Playing) return@LaunchedEffect
+    // 再密就是在为看不见的精度烧 CPU。
+    //
+    // key 用「是否就绪」这个布尔，而不是整个 playback 对象：暂停/继续会让 playback
+    // 变成新实例（paused 位翻了），拿整个对象当 key 等于每按一次暂停就把这条循环
+    // 拆了重建一次 —— 而它要的东西（内核还在不在播）根本没变。
+    val playerReady = playback is PlaybackState.Playing
+    LaunchedEffect(playerReady) {
+        if (!playerReady) return@LaunchedEffect
         while (true) {
             positionMs = container.player.positionMs()
             durationMs = container.player.durationMs()
@@ -1687,7 +1694,13 @@ private fun VodPlayRoute(
         actions =
             VodPlayerActions(
                 onTogglePause = {
-                    if (playback is PlaybackState.Playing) container.player.pause() else container.player.resume()
+                    // 暂停后内核状态仍然是 Playing（READY 只是说「能出画」），
+                    // 判断「在不在播」必须看 paused 这一位（判定逻辑在 resolvePauseAction，有单测钉着）
+                    when (resolvePauseAction(playback)) {
+                        PauseAction.Pause -> container.player.pause()
+                        PauseAction.Resume -> container.player.resume()
+                        PauseAction.Ignore -> Unit
+                    }
                 },
                 onSeekBy = { delta ->
                     val target = (positionMs + delta).coerceIn(0L, maxOf(durationMs, 0L))

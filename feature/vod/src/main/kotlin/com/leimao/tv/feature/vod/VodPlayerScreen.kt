@@ -127,6 +127,8 @@ fun VodPlayerScreen(
     // 起播时黑着屏、需要完整信息；已经看过一段再卡，遮住画面只会更糟。
     // 判定本身在 resolveBufferingPresentation 里，纯函数、有单测钉着
     val preparing = state.playback is PlaybackState.Preparing
+    // 「暂停了」不是一个独立状态：内核 READY 之后暂停只是时间不走（见 PlaybackState.Playing.paused）
+    val paused = (state.playback as? PlaybackState.Playing)?.paused == true
     val playedOnce =
         rememberPlayedOnce(
             sessionKey = state.episodeIndex to state.lineIndex,
@@ -151,8 +153,10 @@ fun VodPlayerScreen(
 
     // 5s 无操作自动收起（与直播页同一个窗口，PLAY-04 的约定）。
     // 面板开着时不计时：用户正在挑集，把控制条收掉是帮倒忙。
-    LaunchedEffect(controlsVisible, tick, panel) {
-        if (!controlsVisible || panel != VodPanel.None) return@LaunchedEffect
+    // 暂停时也不收：暂停之后要做的几乎都是「选集 / 换线 / 拖进度」，
+    // 控制条自己消失等于让人再按一次键把它叫回来
+    LaunchedEffect(controlsVisible, tick, panel, paused) {
+        if (!controlsVisible || panel != VodPanel.None || paused) return@LaunchedEffect
         delay(CONTROLS_AUTO_HIDE_MS)
         controlsVisible = false
     }
@@ -203,6 +207,18 @@ fun VodPlayerScreen(
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     // 面板开着时按键全交给面板的焦点系统（放行，不消费）
                     if (panel != VodPanel.None) return@onPreviewKeyEvent false
+                    // 遥控器上的播放/暂停实体键（KEYCODE_MEDIA_PLAY_PAUSE / PLAY / PAUSE）。
+                    // 不少电视盒子只有这一个键，用户按它暂停之后**再按它必然要继续**——
+                    // 这条路径原来完全没接，按下去毫无反应（2026-11-06 反馈「暂停不能继续」）
+                    if (event.key == Key.MediaPlayPause ||
+                        event.key == Key.MediaPlay ||
+                        event.key == Key.MediaPause
+                    ) {
+                        actions.onTogglePause()
+                        controlsVisible = true
+                        tick++
+                        return@onPreviewKeyEvent true
+                    }
                     // 控制条收起时，任意键只负责「叫出来」，不执行动作 ——
                     // 否则用户想看一眼进度，结果顺手切走了一集。
                     // **BACK 必须放行**：它是「退出」语义而不是「操作」，吞掉它会让用户
@@ -268,6 +284,23 @@ fun VodPlayerScreen(
                     .align(Alignment.TopCenter)
                     .padding(top = PILL_TOP_PADDING),
         )
+
+        // 暂停标记。暂停之后画面就定在那一帧，和「卡死」在屏幕上长得一模一样，
+        // 而这个页面上又没有播放/暂停按钮可以看图标 —— 所以必须给一句话。
+        // 放正中而不是顶缘：这一刻画面是静止的，正中的字不会挡掉任何正在发生的内容
+        if (paused) {
+            Text(
+                text = "已暂停 · 按 OK 继续",
+                style = TvText.current.hint,
+                color = Color.White,
+                modifier =
+                    Modifier
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xCC000000))
+                        .padding(horizontal = 22.dp, vertical = 12.dp),
+            )
+        }
 
         if (failed != null) {
             // 「换线路」只在真有第二条线路时出现：内核已经把**同一集在所有线路上的地址**

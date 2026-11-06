@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.6.2"
+    const val CURRENT_VERSION: String = "0.5.6.3"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.6.3",
+                date = "2026-11-06",
+                changes =
+                    listOf(
+                        "修复：影视播放按 OK 暂停之后再也播不动 —— 暂停后系统仍认为「在播」，于是每次按 OK 都是一次暂停",
+                        "新增：暂停时画面正中显示「已暂停 · 按 OK 继续」，暂停期间控制条不再自动收起",
+                        "新增：遥控器上的播放/暂停实体键也能用了（此前这些键完全没有响应）",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.6.2",
                 date = "2026-11-06",

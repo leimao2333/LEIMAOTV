@@ -211,45 +211,109 @@ jobs:
 
           # 三个拆包 + 三个 sha256，一次传完
           ASSETS=("$ARM64" "$ARM64.sha256" "$V7A" "$V7A.sha256" "$UNIVERSAL" "$UNIVERSAL.sha256")
+          TAG="$GITHUB_REF_NAME"
 
-          # 重跑时释放已存在：改成覆盖附件，而不是报 "release already exists" 就停在那儿，
-          # 让人去手工点上传（最容易传错文件的一步）
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release 已存在，覆盖附件"
-            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
-          else
-            if [ -n "$NOTES" ]; then
-              gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
-                --title "LEIMAOTV v$VERSION" --notes "$NOTES" --verify-tag
-            else
-              gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
-                --title "LEIMAOTV v$VERSION" --generate-notes --verify-tag
+          # 不能只靠 `gh release view` 的退出码判断「Release 在不在」：同名 Release 可能已经
+          # 跟 tag 脱钩（tag 被删过重建、或它还是 draft），这时 view 照样返回 0、upload 照样
+          # 报成功，但 releases/download/<tag>/... 已经 404。
+          # 2026-11-06 v0.5.6.4 连挂四次就是这个状态：第 10 步全绿，第 11 步下载全失败，
+          # 而 Releases 页上根本没有这一版。改成显式读 API，把异常状态的 Release 删掉重建
+          # —— 只删 Release 对象，绝不动 tag（gh release delete --cleanup-tag 会连 tag 一起删）。
+          REL=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)
+          if [ -n "$REL" ]; then
+            DRAFT=$(jq -r '.draft' <<<"$REL")
+            RTAG=$(jq -r '.tag_name' <<<"$REL")
+            if [ "$DRAFT" = "true" ] || [ "$RTAG" != "$TAG" ]; then
+              RID=$(jq -r '.id' <<<"$REL")
+              echo "::warning::同名 Release 状态异常（draft=$DRAFT tag_name=$RTAG），删掉重建（保留 tag）"
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$RID" >/dev/null
+              REL=""
             fi
           fi
 
+          if [ -z "$REL" ]; then
+            if [ -n "$NOTES" ]; then
+              gh release create "$TAG" --title "LEIMAOTV v$VERSION" --notes "$NOTES" --verify-tag
+            else
+              gh release create "$TAG" --title "LEIMAOTV v$VERSION" --generate-notes --verify-tag
+            fi
+            echo "Release 已创建：$TAG"
+          else
+            echo "Release 已存在，覆盖附件"
+          fi
+
+          # 新建的 Release 在 API 侧偶有秒级延迟，upload 之前先等到可见
+          for i in 1 2 3 4 5 6; do
+            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null 2>&1; then break; fi
+            echo "Release 还没在 API 侧可见，等 3 秒（第 $i 次）"
+            sleep 3
+          done
+
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+
+          # 上传完立刻按 API 清单自检：缺一个附件就别往下走，免得第 11 步报一堆看不懂的 404
+          LIST=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.assets[].name')
+          for A in "${ASSETS[@]}"; do
+            if ! grep -qxF "$A" <<<"$LIST"; then
+              echo "::error::Release 里缺附件 $A。当前清单："
+              echo "$LIST"
+              exit 1
+            fi
+          done
+          echo "附件自检通过：6 个文件齐全"
+
       # RULES §10.4 第 7 条：发布后回下载一次，确认附件没被截断。
-      # 比的是「CI 刚签出来的包」与「CDN 上的附件」—— 本地产物与 CI 产物天然不等价
-      # （实测 v0.2.9.8 相差 1046 字节，签名与大小都正常），拿本地包当基准只会永远对不上
+      # 比的是「CI 刚签出来的包」与「GitHub 存的那份附件」—— 本地产物与 CI 产物天然不等价
+      # （实测 v0.2.9.8 相差 1046 字节，签名与大小都正常），拿本地包当基准只会永远对不上。
+      #
+      # 2026-11-06 的教训：下载必须走 asset API（按 asset id），不能拼
+      # releases/download/<tag>/<name> 的 CDN 路径 —— tag 被删过重建时 CDN 会缓存旧的 404，
+      # 附件明明在却一直下载失败。CDN 那条路径降级为「只观察、不判死」，因为它是用户实际
+      # 点的入口，有传播延迟很正常，不该让整次发版判失败。
       - name: 回下载比对（防上传截断）
         env:
+          GH_TOKEN: ${{ github.token }}
           ARM64: ${{ steps.verify.outputs.arm64 }}
           V7A: ${{ steps.verify.outputs.v7a }}
           UNIVERSAL: ${{ steps.verify.outputs.universal }}
         run: |
           set -euo pipefail
 
+          TAG="$GITHUB_REF_NAME"
+          API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+
+          # 刚上传完 assets 列表偶有秒级延迟，先等 6 个附件都在 API 侧可见
+          LIST=""
+          for i in 1 2 3 4 5 6; do
+            LIST=$(gh api "$API" --jq '.assets[] | [.name, .url, (.size|tostring)] | @tsv' 2>/dev/null || true)
+            if [ "$(grep -c . <<<"$LIST")" -ge 6 ]; then break; fi
+            echo "附件清单还没齐（第 $i 次），等 5 秒"
+            sleep 5
+          done
+          if [ "$(grep -c . <<<"$LIST")" -lt 6 ]; then
+            echo "::error::Release 里只有 $(grep -c . <<<"$LIST") 个附件，应为 6 个。"
+            gh api "$API" --jq '{tag_name, draft, assets: [.assets[].name]}' || true
+            exit 1
+          fi
+
           # 三个包都要回下载对一遍：任何一个被截断都不能当没看见
           for APK in "$ARM64" "$V7A" "$UNIVERSAL"; do
             EXPECT=$(cut -d' ' -f1 "$APK.sha256")
-            URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$APK"
+            ASSET_URL=$(awk -F'\t' -v n="$APK" '$1==n {print $2}' <<<"$LIST")
+            if [ -z "$ASSET_URL" ]; then
+              echo "::error::Release 里没有 $APK 这个附件。"
+              exit 1
+            fi
 
-            # 刚建好的 Release 在 CDN 上可能晚几秒才可取，所以重试而不是一次失败就认栽
             ACTUAL=""
             for i in 1 2 3 4; do
-              if curl -sSfL --retry 2 --retry-delay 3 -o /tmp/downloaded.apk "$URL"; then
+              if curl -sSfL --retry 2 --retry-delay 3 \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H "Accept: application/octet-stream" \
+                  -o /tmp/downloaded.apk "$ASSET_URL"; then
                 ACTUAL=$(sha256sum /tmp/downloaded.apk | cut -d' ' -f1)
                 if [ "$EXPECT" = "$ACTUAL" ]; then
-                  echo "回下载比对通过：$APK $EXPECT"
+                  echo "✅ 回下载比对通过（asset API）：$APK $EXPECT"
                   continue 2
                 fi
               fi
@@ -258,6 +322,22 @@ jobs:
             done
 
             echo "::error::$APK 上传后的附件与构建产物 sha256 不一致（期望 $EXPECT，实际 ${ACTUAL:-下载失败}）。"
-            echo "::error::多半是上传被截断。别手动重传：删掉这个 Release 重打 tag，让流水线重跑一遍。"
+            echo "::error::多半是上传被截断。别手动重传：查清原因后删 Release 重跑流水线。"
             exit 1
+          done
+
+          # 用户真正点的是 CDN 路径，单独观察一次；传播延迟只告警，不改发版结论
+          for APK in "$ARM64" "$V7A" "$UNIVERSAL"; do
+            EXPECT=$(cut -d' ' -f1 "$APK.sha256")
+            URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$APK"
+            if curl -sSfL --retry 1 -o /tmp/cdn.apk "$URL" 2>/dev/null; then
+              CDN=$(sha256sum /tmp/cdn.apk | cut -d' ' -f1)
+              if [ "$CDN" = "$EXPECT" ]; then
+                echo "✅ CDN 下载路径也通过：$APK"
+              else
+                echo "::warning::CDN 上 $APK 还是旧内容（$CDN）；API 侧已校验通过，等 CDN 刷新即可"
+              fi
+            else
+              echo "::warning::CDN 路径 $APK 暂不可达；asset API 已校验通过，不影响发版结论"
+            fi
           done

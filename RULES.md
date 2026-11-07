@@ -587,8 +587,15 @@ tag 是「版本号 ↔ 提交」的唯一可追溯锚点，少了它，事后�
 7. 发布后**回下载一次附件**，比对 sha256 与**本次构建产物**一致（防上传截断）。
    比对必须在**同一个 job 里**做：本地产物与 CI 产物天然不逐字节相同（AGP 会往 APK 里写构建元数据，
    两台机器的工具链产物也不等价），拿本地包的 sha256 去对远端附件，只会得到一个永远对不上的结果 ——
-   实测 v0.2.9.8 相差 1046 字节，签名与大小都正常，纯粹是构建环境不同。这一步由流水线自动完成；
+   实测 v0.2.9.8 相差 1046 字节，签名与大小都正常，纯粹是构建环境不同。这一步由流水线自动完成。
+   **回下载必须按 asset id 走 GitHub 的 asset API**（`repos/{owner}/{repo}/releases/assets/{id}`
+   + `Accept: application/octet-stream`），不能只拼 `releases/download/<tag>/<name>` 的 CDN 路径：
+   tag 被删过重建时 CDN 会缓存旧的 404，附件明明在却一直下载失败
+   （2026-11-06 v0.5.6.4 连挂四次就是这个）。CDN 那条路径仍要观察一次（用户实际点的就是它），
+   但**只告警、不判发版成败** —— 它有传播延迟，不是附件坏了；
 8. 发版后**不允许**再改该版本的 CHANGELOG 条目 —— 发现问题就出修订版（`x.y.z.1`）。
+   唯一例外：**Release 根本没建成**（Releases 页查不到该版本）时，允许补发同一版本号，
+   不改功能、不抬版号，只在该条目末尾追加一段「补发记录」说明发版基建改了什么。
 
 ### 10.5 版本迭代闭环
 
@@ -627,6 +634,8 @@ tag 是「版本号 ↔ 提交」的唯一可追溯锚点，少了它，事后�
 | `CHANGELOG.md` 有该版本条目 | 「先改版本号、日志回头补」（§10.5 反模式） |
 | `apksigner verify -v` 的 v2 = true | 未签名包被当正式包发出去（§10.4 第 4 条） |
 | `aapt2 dump badging` 的包名 | 构建配置出错编出了别的 applicationId |
+| Release 状态自检（非 draft、tag_name 匹配、6 个附件齐全） | **同名 Release 已和 tag 脱钩**：附件传上去了，下载路径却 404 |
+| 回下载比对按 asset API 取附件 | CDN 缓存旧 404 把一次正常发版判成「上传截断」 |
 
 签名材料**随仓库走**（`keystore/leimao-tv.jks` 与 `keystore.properties` 都提交，
 `.gitignore` 只放行这一个密钥文件）：发版不需要配任何 secret，换机器也能签，
@@ -638,6 +647,14 @@ tag 是「版本号 ↔ 提交」的唯一可追溯锚点，少了它，事后�
 仓库若公开，风险由仓库主人承担。详见 `docs/发布流程.md`。
 
 失败时**不产出半个 Release**：所有校验都在上传之前，任何一条不达标直接失败，附件一个都不会多出来。
+
+**补发时不要反复删 tag 重打**（2026-11-06 的教训）。GitHub 在 tag 被删除又重建后，
+可能留下一个同名但已和 tag 脱钩的 Release：`gh release view` 仍返回成功、`gh release upload`
+也报成功，可 `releases/download/<tag>/...` 一路 404，Releases 页上还看不到这一版。
+因此流水线要显式用 API 读 Release 对象（`draft` / `tag_name` / `assets`），
+异常就只删 Release 对象重建，**绝不用 `gh release delete --cleanup-tag`（会连 tag 一起删）**。
+补发只重打一次 tag，让它指向含修复的提交 —— `push: tags` 触发的 workflow 取自
+**tag 指向的那个 commit**，光把修复推到 `main` 而不动 tag，CI 跑的还是旧 workflow。
 
 ---
 

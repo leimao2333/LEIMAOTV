@@ -116,6 +116,32 @@ class MainActivity : ComponentActivity() {
      */
     private val menuSignal = mutableIntStateOf(0)
 
+    /**
+     * 电视端禁止后台播放（2026-11-07 用户反馈：「退出后还以为真退了，突然在后台响起声音」）。
+     *
+     * 播放器是 Application 容器里的单例（架构设计 §2），**不随 Activity 销毁**。
+     * 而 `finish()` 只结束 Activity，电视上进程往往还活着 —— 没有这两行的话，
+     * ExoPlayer / libVLC 会继续解码音频：按 HOME、按「退出」、锁屏、切到别的应用，
+     * 声音都留在后台。影视页只有「按返回」那条路径自己调了 `stop()`，其余全是漏的。
+     *
+     * 交给编排器而不是在这里直接 `player.stop()`：控制器还要挡住后台期间所有
+     * 异步起播（重连、换线、下一集、延迟的 resume），光停一次拦不住它们。
+     * 回前台**不自动续播**，等用户按 OK —— 回来自己响起来同样会吓到人。
+     */
+    override fun onStart() {
+        super.onStart()
+        // debug 包靠这两行验「离前台到底停没停」；release 由 R8 裁掉 Log.d
+        Log.d("LeimaoPlay", "宿主进前台（不自动续播）")
+        (application as LeimaoTvApplication).container.player.setHostForeground(true)
+    }
+
+    override fun onStop() {
+        // 先断流再走 super：窗口一失去前台就该静音，不该等系统慢慢收拾
+        Log.d("LeimaoPlay", "宿主离前台：停流")
+        (application as LeimaoTvApplication).container.player.setHostForeground(false)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as LeimaoTvApplication).container
@@ -168,7 +194,12 @@ class MainActivity : ComponentActivity() {
                             container = container,
                             startDestination = resolved,
                             menuSignal = menuSignal.intValue,
-                            onExitApp = { finish() },
+                            onExitApp = {
+                                // 显式断一次流：部分 TV launcher 会把整个任务直接移走，
+                                // 不保证走到 onStop。「退出」在电视上必须是真的停。
+                                container.player.setHostForeground(false)
+                                finish()
+                            },
                         )
                 }
             }

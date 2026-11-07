@@ -73,6 +73,14 @@ class FallbackPlayerController(
     /** 当前正在服务的那个内核；切内核就切它 */
     private var active: PlayerController = primary
 
+    /**
+     * 宿主（Activity）是否在前台（2026-11-07）。
+     *
+     * 默认 `true`：容器在 Application 里构造，早于第一个 `onStart`，冷启动起播不能被拦。
+     * 播放器不随 Activity 销毁，光 `finish()` 停不住它 —— 必须有人显式把前后台告诉它。
+     */
+    private var hostForeground = true
+
     /** 本请求是否已经用过兜底内核；每个 `play()` 重置 */
     private var fallbackUsed = false
 
@@ -144,6 +152,13 @@ class FallbackPlayerController(
     }
 
     override fun play(request: PlaybackRequest) {
+        // 后台一律不起播。自愈 / 下一集 / 重连 / 定时刷新都收敛到 play()，
+        // 只在 Activity 里 stop() 一次是拦不住它们的：stop 之后异步路径照样能重新拉起。
+        // 这道闸门是「后台不许出声」的最后一道，也是最要紧的一道。
+        if (!hostForeground) {
+            stop()
+            return
+        }
         currentRequest = request
         // rtsp / rtmp 直接交给软解内核（PLAY-11）：Media3 侧没引 RTSP 数据源，
         // 拿它去试只会白等一轮「播放失败」再切内核。电信/联通的 IPTV 单播源
@@ -168,10 +183,22 @@ class FallbackPlayerController(
         url.startsWith("rtsp://", ignoreCase = true) || url.startsWith("rtmp://", ignoreCase = true)
 
     override fun retry() {
+        if (!hostForeground) return
         active.retry()
     }
 
-    override fun switchLine(delta: Int): Boolean = active.switchLine(delta)
+    override fun switchLine(delta: Int): Boolean {
+        if (!hostForeground) return false
+        return active.switchLine(delta)
+    }
+
+    override fun pause() = active.pause()
+
+    override fun resume() {
+        // 后台的 resume 多半来自延迟回调（控制条自动隐藏、焦点回归之类），一样拦掉
+        if (!hostForeground) return
+        active.resume()
+    }
 
     override fun stop() {
         primary.stop()
@@ -181,9 +208,14 @@ class FallbackPlayerController(
         _tracks.value = emptyList()
     }
 
-    override fun pause() = active.pause()
-
-    override fun resume() = active.resume()
+    /**
+     * 宿主前后台切换。进后台立刻 `stop()`（含两个内核、watchdog、统计轮询）；
+     * 回前台**刻意不自动恢复** —— 见 [HostPlaybackAction.NO_AUTO_RESUME]。
+     */
+    override fun setHostForeground(foreground: Boolean) {
+        hostForeground = foreground
+        if (playbackActionOnHostChange(foreground) == HostPlaybackAction.STOP_ALL) stop()
+    }
 
     override fun seekTo(positionMs: Long) = active.seekTo(positionMs)
 

@@ -8,7 +8,7 @@
 
 图例：`- [ ]` 待办 / `- [x]` 已完成（末尾标版本）/ `⏸` 暂缓（标原因）
 
-当前进度：**84 / 88 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，LIVE-27/28、PLAY-11、SET-10、SET-14 按聚合订阅仓库与用户反馈补齐，剩 LIVE-21 / VOD-09 / PLAY-06 / SYS-06 与验收）
+当前进度：**85 / 89 条功能，4 / 4 项决策** ｜ 当前版本以 `AppVersion.CURRENT_VERSION` 为准（不硬编码，见 RULES §10.2）｜ **M3 已完成**，当前在 **M4 打磨**（§5.1 六条全部完成，LIVE-24 回看已补，LIVE-27/28、PLAY-11、SET-10、SET-14 按聚合订阅仓库与用户反馈补齐，剩 LIVE-21 / VOD-09 / PLAY-06 / SYS-06 与验收）
 
 ---
 
@@ -515,6 +515,15 @@
         CCTV1 的 20 条在本机 `curl` 全超时 —— 那是源不可达，不是判据判错
   - [ ] 在确实有可用线路的台上复验「几秒内自动换线」（本机 CCTV5 全部候选均不可用，
         仅验到「走完一轮后落失败面板」）
+- [x] **PLAY-17** 电视端禁止后台播放 ｜ P0（v0.5.6.4）
+  - [x] 根因：播放器是 Application 级单例，`finish()` / HOME 都停不住它；影视页只有
+        「按返回」那条路径自己 `stop()` 了，其余退出路径全漏
+  - [x] `HostPlaybackPolicy` 纯函数：进后台 `STOP_ALL`（用 `stop()` 而非 `pause()` ——
+        后者会被异步自愈路径里的 `play()` 重新打开）、回前台 `NO_AUTO_RESUME`
+  - [x] `PlayerController.setHostForeground` + `FallbackPlayerController` 闸门：
+        进后台两个内核一起停，后台的 `play` / `retry` / `switchLine` / `resume` 一律拒绝
+  - [x] `MainActivity.onStart/onStop` 与「退出应用」两处显式断流；`HostPlaybackGuardTest` 6 条
+  - [ ] 真机盒子复验：播放中按 HOME 后静置 30 秒无声音、回前台不自动响（RULES §9.2 第 8 条）
 - [x] **SET-03** 补：导入去重 + 导入后自动刷新 ｜ P0（未发版）
   - [x] `SourceJson.filterNew` 按**地址**去重（含文件内部重复）；`importJson` 返回 `SourceImportSummary`
   - [x] 源管理页导入后自动刷新增的直播源，状态行报「导入 N 个源（M 个已存在，跳过）；刷新完成…」

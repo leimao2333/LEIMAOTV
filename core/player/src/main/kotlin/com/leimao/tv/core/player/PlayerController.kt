@@ -255,6 +255,18 @@ interface PlayerController {
     fun stop()
 
     fun release()
+
+    /**
+     * 宿主（Activity）是否在前台（2026-11-07）。
+     *
+     * 电视端没有后台播放：宿主一离开前台，编排器必须立刻彻底停流，并拒绝后台期间任何
+     * 起播 / 重连 / 换线 / 续播。见 [HostPlaybackAction] 的理由。
+     *
+     * 给默认空实现是因为契约测试里的 stub 内核不需要生命周期；容器注入的真实编排器
+     * （[FallbackPlayerController]）会覆盖它。默认 `true` 由编排器自己保证 ——
+     * 容器构造早于 `Activity.onStart`，冷启动第一次起播不能被拦。
+     */
+    fun setHostForeground(foreground: Boolean) = Unit
 }
 
 /**

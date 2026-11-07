@@ -194,6 +194,7 @@ jobs:
           ls -l "$ARM64" "$V7A" "$UNIVERSAL"
 
       - name: 发布到 GitHub Release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.verify.outputs.version }}
@@ -213,46 +214,51 @@ jobs:
           ASSETS=("$ARM64" "$ARM64.sha256" "$V7A" "$V7A.sha256" "$UNIVERSAL" "$UNIVERSAL.sha256")
           TAG="$GITHUB_REF_NAME"
 
-          # 不能只靠 `gh release view` 的退出码判断「Release 在不在」：同名 Release 可能已经
-          # 跟 tag 脱钩（tag 被删过重建、或它还是 draft），这时 view 照样返回 0、upload 照样
-          # 报成功，但 releases/download/<tag>/... 已经 404。
-          # 2026-11-06 v0.5.6.4 连挂四次就是这个状态：第 10 步全绿，第 11 步下载全失败，
-          # 而 Releases 页上根本没有这一版。改成显式读 API，把异常状态的 Release 删掉重建
-          # —— 只删 Release 对象，绝不动 tag（gh release delete --cleanup-tag 会连 tag 一起删）。
-          REL=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)
-          if [ -n "$REL" ]; then
-            DRAFT=$(jq -r '.draft' <<<"$REL")
-            RTAG=$(jq -r '.tag_name' <<<"$REL")
-            if [ "$DRAFT" = "true" ] || [ "$RTAG" != "$TAG" ]; then
-              RID=$(jq -r '.id' <<<"$REL")
-              echo "::warning::同名 Release 状态异常（draft=$DRAFT tag_name=$RTAG），删掉重建（保留 tag）"
-              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$RID" >/dev/null
-              REL=""
-            fi
+          # 同名 Release 一律删掉重建，不去猜它是不是「还活着」：
+          # 2026-11-06 连挂四次的根源就是 tag 被删过重建后留下一个脱钩的同名 Release，
+          # `gh release view` 返回 0、upload 也报成功，可下载路径一直 404。
+          # `gh release delete --yes` 不带 --cleanup-tag，只删 Release 对象、绝不动 tag。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "同名 Release 已存在，删掉重建（保留 tag）"
+            gh release delete "$TAG" --yes
           fi
 
-          if [ -z "$REL" ]; then
-            if [ -n "$NOTES" ]; then
-              gh release create "$TAG" --title "LEIMAOTV v$VERSION" --notes "$NOTES" --verify-tag
-            else
-              gh release create "$TAG" --title "LEIMAOTV v$VERSION" --generate-notes --verify-tag
-            fi
-            echo "Release 已创建：$TAG"
+          # create 时直接带 6 个附件：这条路径在 v0.5.6.4 的 13:09 那次 run 里完整通过过。
+          # 不要再拆成「建空 Release + 单独 upload」—— 拆开后 gh api 的 tags 端点在 tag
+          # 刚重建时会短暂查不到，上传与自检跟着一起挂（11-07 补发第 10 步就是这么失败的）。
+          if [ -n "$NOTES" ]; then
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --title "LEIMAOTV v$VERSION" --notes "$NOTES" --verify-tag
           else
-            echo "Release 已存在，覆盖附件"
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --title "LEIMAOTV v$VERSION" --generate-notes --verify-tag
           fi
 
-          # 新建的 Release 在 API 侧偶有秒级延迟，upload 之前先等到可见
-          for i in 1 2 3 4 5 6; do
-            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null 2>&1; then break; fi
+          # 后面一律按 release id 取附件，不用 releases/tags/<tag>：前者只看对象本身，
+          # 后者要求 tag 与 Release 仍然关联，恰恰是这次要绕开的那个坑。
+          JQ='.[] | select(.tag_name == "'"$TAG"'") | .id'
+          RID=""
+          for i in 1 2 3 4 5; do
+            RID=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "$JQ" 2>/dev/null || true)
+            if [ -n "$RID" ]; then break; fi
             echo "Release 还没在 API 侧可见，等 3 秒（第 $i 次）"
             sleep 3
           done
+          if [ -z "$RID" ]; then
+            echo "::error::发布后查不到 Release 对象（tag=$TAG）。"
+            exit 1
+          fi
+          echo "release_id=$RID" >> "$GITHUB_OUTPUT"
 
-          gh release upload "$TAG" "${ASSETS[@]}" --clobber
-
-          # 上传完立刻按 API 清单自检：缺一个附件就别往下走，免得第 11 步报一堆看不懂的 404
-          LIST=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.assets[].name')
+          # 按 id 自检附件清单：缺一个就停，不让下一步报一堆看不懂的 404
+          LIST=""
+          for i in 1 2 3 4 5 6; do
+            LIST=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID/assets?per_page=100" \
+              --jq '.[].name' 2>/dev/null || true)
+            if [ "$(grep -c . <<<"$LIST")" -ge 6 ]; then break; fi
+            echo "附件清单还没齐（第 $i 次），等 3 秒"
+            sleep 3
+          done
           for A in "${ASSETS[@]}"; do
             if ! grep -qxF "$A" <<<"$LIST"; then
               echo "::error::Release 里缺附件 $A。当前清单："
@@ -273,6 +279,7 @@ jobs:
       - name: 回下载比对（防上传截断）
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.publish.outputs.release_id }}
           ARM64: ${{ steps.verify.outputs.arm64 }}
           V7A: ${{ steps.verify.outputs.v7a }}
           UNIVERSAL: ${{ steps.verify.outputs.universal }}
@@ -280,19 +287,20 @@ jobs:
           set -euo pipefail
 
           TAG="$GITHUB_REF_NAME"
-          API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+          # 按 release id 列附件，不碰 releases/tags/<tag>（tag 脱钩时那个端点会 404）
+          API="repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100"
 
           # 刚上传完 assets 列表偶有秒级延迟，先等 6 个附件都在 API 侧可见
           LIST=""
           for i in 1 2 3 4 5 6; do
-            LIST=$(gh api "$API" --jq '.assets[] | [.name, .url, (.size|tostring)] | @tsv' 2>/dev/null || true)
+            LIST=$(gh api "$API" --jq '.[] | [.name, .url, (.size|tostring)] | @tsv' 2>/dev/null || true)
             if [ "$(grep -c . <<<"$LIST")" -ge 6 ]; then break; fi
             echo "附件清单还没齐（第 $i 次），等 5 秒"
             sleep 5
           done
           if [ "$(grep -c . <<<"$LIST")" -lt 6 ]; then
             echo "::error::Release 里只有 $(grep -c . <<<"$LIST") 个附件，应为 6 个。"
-            gh api "$API" --jq '{tag_name, draft, assets: [.assets[].name]}' || true
+            gh api "$API" --jq '.[].name' || true
             exit 1
           fi
 

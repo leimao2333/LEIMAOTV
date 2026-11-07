@@ -413,6 +413,10 @@
 7. **屏幕常亮（SET-13）**：进播放页后停留超过电视的息屏时长（多数机器默认 15 分钟）不黑屏；
    设置里关掉「屏幕常亮」后恢复按电视自己的策略息屏；按 Home 退到桌面后电视能正常待机
    —— 常亮不得泄漏到后台。
+8. **后台静音（PLAY-17）**：播放中按 Home / 退出应用 / 锁屏 / 切到别的应用，
+   声音必须在离开前台的那一刻停住，隔一会儿再听也不能自己响回来；回到应用不自动续播，
+   由用户按 OK 继续。播放器是 Application 级单例，`finish()` 停不住它 ——
+   这条必须每次发版都实测，不能只看代码里有没有 `onStop`。
 
 **实测工具固定用 SDK 自带的 adb**：`$ANDROID_HOME/platform-tools/adb.exe`。
 PATH 里可能还有另一份 adb（WinGet / 别的工具链装的），两者抢 5037 端口时的症状极具误导性 ——
@@ -651,8 +655,9 @@ tag 是「版本号 ↔ 提交」的唯一可追溯锚点，少了它，事后�
 **补发时不要反复删 tag 重打**（2026-11-06 的教训）。GitHub 在 tag 被删除又重建后，
 可能留下一个同名但已和 tag 脱钩的 Release：`gh release view` 仍返回成功、`gh release upload`
 也报成功，可 `releases/download/<tag>/...` 一路 404，Releases 页上还看不到这一版。
-因此流水线要显式用 API 读 Release 对象（`draft` / `tag_name` / `assets`），
-异常就只删 Release 对象重建，**绝不用 `gh release delete --cleanup-tag`（会连 tag 一起删）**。
+因此流水线**同名 Release 一律删掉重建**（`gh release delete --yes`，不带 `--cleanup-tag`），
+create 时直接带上 6 个附件；后续清单自检与回下载都按 **release id / asset id** 走 API，
+不再依赖 tag 与 Release 的关联。
 补发只重打一次 tag，让它指向含修复的提交 —— `push: tags` 触发的 workflow 取自
 **tag 指向的那个 commit**，光把修复推到 `main` 而不动 tag，CI 跑的还是旧 workflow。
 

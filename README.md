@@ -11,6 +11,17 @@
 <img alt="status" src="https://img.shields.io/badge/status-M0%20skeleton%20done-3DDC84?style=flat-square">
 </p>
 
+<details>
+<summary>❤️ 赞赏支持</summary>
+
+这个项目是业余时间一个人写的，电视端的焦点、按键、起播这些细节都得自己一格一格磨。如果你觉得它替你省了时间，可以请我喝一杯：
+
+**[→ 爱发电赞赏（支持微信 / 支付宝）](https://ifdian.net/a/leimao)**
+
+赞赏纯属自愿，也**不影响任何功能** —— 应用本身不收费、不插广告、不靠打赏解锁任何东西。不给钱照样能用全部功能。
+
+</details>
+
 ---
 
 ## 为什么做这个

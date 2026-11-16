@@ -1,8 +1,14 @@
 package com.leimao.tv
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -27,8 +33,11 @@ import com.leimao.tv.core.model.appearance.FontScale
 import com.leimao.tv.core.model.appearance.ThemeMode
 import com.leimao.tv.core.model.appearance.shouldUseDarkTheme
 import com.leimao.tv.core.model.startup.StartDestination
+import com.leimao.tv.core.player.HostPlaybackAction
+import com.leimao.tv.core.player.playbackActionOnHostChange
 import com.leimao.tv.debug.DebugSeed
 import com.leimao.tv.ui.LeimaoTvApp
+import kotlin.system.exitProcess
 
 /**
  * 电脑键盘 → 遥控器的按键映射。
@@ -117,33 +126,120 @@ class MainActivity : ComponentActivity() {
     private val menuSignal = mutableIntStateOf(0)
 
     /**
-     * 电视端禁止后台播放（2026-11-07 用户反馈：「退出后还以为真退了，突然在后台响起声音」）。
+     * 电视端「离前台即终止进程」（2026-11-16 用户二次反馈后明确要求）。
      *
-     * 播放器是 Application 容器里的单例（架构设计 §2），**不随 Activity 销毁**。
-     * 而 `finish()` 只结束 Activity，电视上进程往往还活着 —— 没有这两行的话，
-     * ExoPlayer / libVLC 会继续解码音频：按 HOME、按「退出」、锁屏、切到别的应用，
-     * 声音都留在后台。影视页只有「按返回」那条路径自己调了 `stop()`，其余全是漏的。
+     * 用户原话：「直播退出还是会在后台响，而且我直接关机它还响。我想要只要这个软件
+     * 到后台就直接杀死后台，而且不是保留。」
      *
-     * 交给编排器而不是在这里直接 `player.stop()`：控制器还要挡住后台期间所有
-     * 异步起播（重连、换线、下一集、延迟的 resume），光停一次拦不住它们。
-     * 回前台**不自动续播**，等用户按 OK —— 回来自己响起来同样会吓到人。
+     * 11-07 那版只在 onStart/onStop 里 `setHostForeground(false)` → 编排器 `stop()`，
+     * 进程仍然活着，三条漏点让它挡不住：
+     * 1. 播放器是 Application 容器里的单例（架构设计 §2），`finish()` 只结束 Activity；
+     *    libVLC 的 native 音频线程在 `stop()` 之后还可能把缓冲吐完。
+     * 2. 编排器 `stop()` 没清 `currentRequest`，primary 迟到一拍的 Failed 会在
+     *    `onPrimaryState` 里绕过闸门把兜底内核重新拉起来（已在编排器侧堵死）。
+     * 3. 电视按电源键「关机」多数只是待机：系统只发 ACTION_SCREEN_OFF，
+     *    Activity 可能连 onPause 都收不到，生命周期钩子完全没机会跑。
+     *
+     * 所以这一层的规则是：**离前台就把整个进程杀掉，不留后台**。
+     * 策略常量在 core 里（[playbackActionOnHostChange]），宿主层与编排器共用同一条规则，
+     * 免得以后有人改了一边忘了另一边。
      */
+    private var hostTerminationStarted = false
+
+    /** 待机 / 关机广播：ACTION_SCREEN_OFF 只能动态注册，静态 manifest 收不到。 */
+    private val powerReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action ?: return
+                if (action == Intent.ACTION_SCREEN_OFF || action == ACTION_SHUTDOWN) {
+                    terminateHostProcess("系统待机/关机：$action")
+                }
+            }
+        }
+
     override fun onStart() {
         super.onStart()
-        // debug 包靠这两行验「离前台到底停没停」；release 由 R8 裁掉 Log.d
+        // debug 包靠这些行验「离前台到底收没收干净」；release 由 R8 裁掉 Log.d
         Log.d("LeimaoPlay", "宿主进前台（不自动续播）")
-        (application as LeimaoTvApplication).container.player.setHostForeground(true)
+        player().setHostForeground(true)
+    }
+
+    override fun onPause() {
+        // 先断流再走 super：待机、锁屏、系统弹层这些只走 onPause 的路径，
+        // 窗口一失去焦点就该静音，不能等 onStop（部分 ROM 压根不发 onStop）。
+        Log.d("LeimaoPlay", "宿主失焦：立刻停流")
+        player().setHostForeground(false)
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 短暂失焦（系统音量条 / 弹层）只走 onPause → onResume，不走 onStart。
+        // 真离前台那条路径已经在 onStop 把进程杀了，能走到这里的必然没离前台，
+        // 必须把闸门重新打开，否则用户回来后点台会被 play() 全部拒绝。
+        player().setHostForeground(true)
     }
 
     override fun onStop() {
-        // 先断流再走 super：窗口一失去前台就该静音，不该等系统慢慢收拾
-        Log.d("LeimaoPlay", "宿主离前台：停流")
-        (application as LeimaoTvApplication).container.player.setHostForeground(false)
+        player().setHostForeground(false)
         super.onStop()
+        // 配置变更（横竖屏 / uiMode）不 recreate Activity，这里几乎不会命中；
+        // 真遇到也不能杀 —— 切个主题应用就没了。
+        if (!isChangingConfigurations && shouldTerminateOnBackground()) {
+            terminateHostProcess("宿主离前台")
+        }
     }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(powerReceiver) }
+        super.onDestroy()
+    }
+
+    /**
+     * 把整个进程收掉，不留任何后台。顺序不能换：
+     *
+     * 1. 编排器 `setHostForeground(false)` → `stop()`：先断流，并挡住杀进程前那一瞬的
+     *    异步自愈（重连 / 换线 / 兜底内核切内核）；
+     * 2. `release()`：释放 ExoPlayer 与 libVLC，含 native 音频线程。只 `stop()` 不够 ——
+     *    libVLC 停了之后音频线程仍可能把缓冲吐完，用户听到的就是「退出后还响一下」；
+     * 3. `finishAndRemoveTask()`：让 AMS 认为任务已正常结束而不是崩溃，
+     *    否则系统可能把刚 kill 的 Activity 重新拉起来，陷入「杀了又起」的循环；
+     * 4. `Process.killProcess`：SIGKILL 整个进程，native 线程一起没。
+     *    `exitProcess(0)` 是兜底（killProcess 通常不会返回）。
+     */
+    private fun terminateHostProcess(reason: String) {
+        if (hostTerminationStarted) return
+        hostTerminationStarted = true
+        val player = player()
+        runCatching { player.setHostForeground(false) }
+        runCatching { player.release() }
+        Log.d("LeimaoPlay", "宿主离前台：终止进程（$reason）")
+        runCatching { finishAndRemoveTask() }
+        Process.killProcess(Process.myPid())
+        exitProcess(0)
+    }
+
+    private fun player() = (application as LeimaoTvApplication).container.player
+
+    /** 与编排器共用同一条规则，避免「策略改了、宿主没跟着改」。 */
+    private fun shouldTerminateOnBackground(): Boolean =
+        playbackActionOnHostChange(hostForeground = false) == HostPlaybackAction.TERMINATE_PROCESS
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // SCREEN_OFF 与 SHUTDOWN 必须动态注册：前者静态注册收不到，后者系统关机前
+        // 发得太晚，manifest 组件未必来得及被拉起。API 33+ 要求显式声明不导出，
+        // 这类广播只有系统发得进来，NOT_EXPORTED 正好。
+        val powerFilter =
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(ACTION_SHUTDOWN)
+            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(powerReceiver, powerFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(powerReceiver, powerFilter)
+        }
         val container = (application as LeimaoTvApplication).container
         applyStartupWindowBackground(container)
         // 屏幕常亮（SET-13）必须在 setContent 之前定下来：用户按下开机键→应用起来→
@@ -195,10 +291,9 @@ class MainActivity : ComponentActivity() {
                             startDestination = resolved,
                             menuSignal = menuSignal.intValue,
                             onExitApp = {
-                                // 显式断一次流：部分 TV launcher 会把整个任务直接移走，
-                                // 不保证走到 onStop。「退出」在电视上必须是真的停。
-                                container.player.setHostForeground(false)
-                                finish()
+                                // 「退出」不是 finish() 留个进程在后台，而是整个进程终止
+                                // （用户 2026-11-16 明确要求「直接杀死，不是保留」）。
+                                terminateHostProcess("用户确认退出")
                             },
                         )
                 }
@@ -313,6 +408,9 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val TAG = "KeyRemap"
+
+        /** 系统关机广播。用字面量而非 Intent.ACTION_SHUTDOWN：不同 API 上该常量可见性不一致 */
+        const val ACTION_SHUTDOWN = "android.intent.action.ACTION_SHUTDOWN"
 
         /** 会被换成遥控器键的那几个主键盘数字（1~6、8），只有它们需要避让文字输入 */
         fun isRemappedNumberKey(keyCode: Int): Boolean =

@@ -201,6 +201,12 @@ class FallbackPlayerController(
     }
 
     override fun stop() {
+        // 必须清掉请求：这里是后台自愈最大的漏点。原先 stop() 只停内核，
+        // currentRequest 还挂着；primary 迟到一拍的 Failed 会在 onPrimaryState 里
+        // 直接 soft.play(currentRequest!!) 把 VLC 在后台拉起来 —— 那条路径绕过了
+        // play() 的 hostForeground 闸门，于是「明明停了，过两秒又响」。
+        currentRequest = null
+        fallbackUsed = false
         primary.stop()
         fallbackInstance?.stop()
         active = primary
@@ -209,12 +215,15 @@ class FallbackPlayerController(
     }
 
     /**
-     * 宿主前后台切换。进后台立刻 `stop()`（含两个内核、watchdog、统计轮询）；
+     * 宿主前后台切换。进后台立刻 `stop()`（含两个内核、watchdog、统计轮询、待自愈请求）；
      * 回前台**刻意不自动恢复** —— 见 [HostPlaybackAction.NO_AUTO_RESUME]。
+     *
+     * 编排器这一层只能做到「停流 + 关死所有后台起播」；[HostPlaybackAction.TERMINATE_PROCESS]
+     * 里「把进程杀掉」那半件事由宿主层（MainActivity）执行 —— core 模块不碰 Android 进程 API。
      */
     override fun setHostForeground(foreground: Boolean) {
         hostForeground = foreground
-        if (playbackActionOnHostChange(foreground) == HostPlaybackAction.STOP_ALL) stop()
+        if (playbackActionOnHostChange(foreground) == HostPlaybackAction.TERMINATE_PROCESS) stop()
     }
 
     override fun seekTo(positionMs: Long) = active.seekTo(positionMs)
@@ -229,6 +238,7 @@ class FallbackPlayerController(
         primaryJob?.cancel()
         fallbackJob?.cancel()
         scope.cancel()
+        currentRequest = null
         primary.release()
         fallbackInstance?.release()
         _state.value = PlaybackState.Idle
@@ -239,15 +249,20 @@ class FallbackPlayerController(
     override fun disableTracks(kind: TrackKind) = active.disableTracks(kind)
 
     private fun onPrimaryState(s: PlaybackState) {
+        // 后台一律不吃内核状态。原本这里没有这道检查：宿主已经离前台，primary 迟到一拍的
+        // Failed 照样走下面的自愈分支，直接 soft.play(currentRequest!!) 把 VLC 拉起来，
+        // 而这条路径没经过带闸门的 play() —— 「退出后过两秒又响」就是这么来的。
+        if (!hostForeground) return
         if (active !== primary) return
-        if (s is PlaybackState.Failed && !fallbackUsed && currentRequest != null) {
+        if (s is PlaybackState.Failed && !fallbackUsed) {
+            val pending = currentRequest ?: return
             fallbackUsed = true
             val soft = fallback()
             active = soft
             // 这一行是「有声音没画面」类问题的唯一线索：换内核后 UI 必须靠 surfaceToken
             // 重建画面出口，日志里看到这行而画面没恢复，问题就在渲染侧而不在解码侧
             onKernelSwitch("硬解", "软解", s.reason)
-            soft.play(currentRequest!!)
+            soft.play(pending)
             _state.value = soft.state.value
             _tracks.value = soft.tracks.value
         } else {
@@ -257,6 +272,7 @@ class FallbackPlayerController(
     }
 
     private fun onFallbackState(s: PlaybackState) {
+        if (!hostForeground) return
         val soft = fallbackInstance ?: return
         if (active !== soft) return
         _state.value = s

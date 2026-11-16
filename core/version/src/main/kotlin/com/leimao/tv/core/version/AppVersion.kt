@@ -77,7 +77,7 @@ data class AppVersionNumber(
  * [CHANGELOG] 必须与仓库根 `CHANGELOG.md` 的条目版本、日期、顺序一致（同样有单测）。
  */
 object AppVersion {
-    const val CURRENT_VERSION: String = "0.5.6.4"
+    const val CURRENT_VERSION: String = "0.5.7.0"
 
     /**
      * 应用内「关于 → 更新日志」读的就是它。
@@ -86,6 +86,16 @@ object AppVersion {
      */
     val CHANGELOG: List<VersionEntry> =
         listOf(
+            VersionEntry(
+                version = "0.5.7.0",
+                date = "2026-11-16",
+                changes =
+                    listOf(
+                        "修复：退出 / 按 Home / 待机之后声音还在后台响 —— 现在只要离开前台就整个退出，不留后台进程",
+                        "修复：停流之后又被异步回调把声音拉回来（备用内核那条路径绕过了后台闸门）",
+                        "变更：从桌面重新打开会正常起播；短暂失焦回来不自动续播，按 OK 继续",
+                    ),
+            ),
             VersionEntry(
                 version = "0.5.6.4",
                 date = "2026-11-06",

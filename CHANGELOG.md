@@ -6,6 +6,42 @@
 - **规则变更**（RULES.md 的任何修改）必须单独成节，写清「改了什么」与「为什么」。
 - 日志里不得出现任何真实源地址、频道名、站点名（见 RULES.md §2）。
 
+## v0.5.7.0（2026-11-16）
+
+**修复**
+
+- **「直播退出还是会在后台响，而且我直接关机它还响」—— 上一版只停流，没把进程收掉**。
+  11-07 那版在 `onStop` 里让编排器 `stop()`，进程却仍然活着，三条漏点让它挡不住：
+  ① 播放器是 Application 级单例，`finish()` 只结束 Activity，libVLC 的 native 音频线程
+  在 `stop()` 之后还可能把缓冲吐完；② 编排器 `stop()` 没清 `currentRequest`；
+  ③ 电视按电源键「关机」多数只是待机，系统只发 `ACTION_SCREEN_OFF`，Activity 可能
+  连 `onPause` 都收不到，生命周期钩子完全没机会跑。
+  现在按用户要求改成**离前台就杀死整个进程，不保留**：`onStop` / 退出确认 /
+  `ACTION_SCREEN_OFF` / `ACTION_SHUTDOWN` 统一走「停流 → `release()` 两个内核 →
+  `finishAndRemoveTask()` → `killProcess()`」；`onPause` 先立刻静音，
+  `onResume` 把闸门重新打开（短暂失焦只走 pause→resume，不重开的话回来点台全被拒）。
+- **停流之后声音还会被异步回调拉回来**。`FallbackPlayerController.stop()` 原来不清
+  `currentRequest`，primary 迟到一拍的 `Failed` 会在 `onPrimaryState` 里直接
+  `soft.play(currentRequest!!)` 把备用内核在后台拉起来 —— 这条路径没走带闸门的 `play()`，
+  表现就是「明明退出了，过两秒又响」。现在 `stop()` 清请求、后台一律不处理内核状态，
+  两个内核的 `stop()` 也各自清 `request`，晚到的失败回调 / 看门狗由 `request ?: return` 挡住。
+
+**变更**
+
+- `HostPlaybackAction.STOP_ALL` 改名 `TERMINATE_PROCESS`：规则从「进后台停流」升级为
+  「进后台终止进程」，编排器与宿主层共用同一个纯函数，避免改了一边忘另一边。
+- 回前台仍**不自动续播**；从桌面重新打开是冷启动，按 §6.6 直达播放页起播（用户主动打开）。
+- 设备实测（真源，1080p 出画后）：按 HOME、按 POWER 待机、菜单「退出」三条路径
+  日志都走到「终止进程」、`pidof` 立即为空、静置 25 秒不回来且零起流；
+  退出后桌面干净，没有「应用已停止」崩溃框。`HostPlaybackGuardTest` 6 条 → 8 条。
+
+**规则变更（RULES.md §9.2 第 8 条）**
+
+- 原「后台静音」验收要求升级为「离前台即终止进程」：除听声音外，还要验进程消失、
+  静置不回来、退出后不弹崩溃框，且必须每次发版实测 HOME / 退出确认 / 待机三条路径。
+  为什么改：只 `stop()` 留着进程，libVLC 的 native 音频线程与异步自愈都能把声音带回来，
+  用户二次反馈已经证明不够。
+
 ## v0.5.6.4（2026-11-06）
 
 **修复**

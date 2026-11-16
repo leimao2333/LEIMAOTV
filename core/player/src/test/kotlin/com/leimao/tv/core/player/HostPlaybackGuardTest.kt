@@ -44,8 +44,11 @@ class HostPlaybackGuardTest {
         )
 
     @Test
-    fun `策略 进后台彻底停 回前台不自动恢复`() {
-        assertEquals(HostPlaybackAction.STOP_ALL, playbackActionOnHostChange(hostForeground = false))
+    fun `策略 进后台必须终止进程 回前台不自动恢复`() {
+        assertEquals(
+            HostPlaybackAction.TERMINATE_PROCESS,
+            playbackActionOnHostChange(hostForeground = false),
+        )
         assertEquals(
             HostPlaybackAction.NO_AUTO_RESUME,
             playbackActionOnHostChange(hostForeground = true),
@@ -141,6 +144,52 @@ class HostPlaybackGuardTest {
         controller.release()
     }
 
+    @Test
+    fun `后台期间 primary 迟到的 Failed 不得把兜底内核拉起来`() {
+        val primary = RecordingPlayer()
+        val fallback = RecordingPlayer()
+        val controller = newController(primary, fallback)
+
+        controller.play(httpRequest)
+        controller.setHostForeground(false)
+        assertEquals(0, fallback.playCount)
+
+        // 宿主已经离前台，内核的异步失败回调才姗姗来迟。旧实现会在这里
+        // soft.play(currentRequest!!) 把 VLC 在后台拉起来 —— 就是「退出后过两秒又响」。
+        primary.emit(failedState())
+
+        assertEquals(0, fallback.playCount)
+        assertEquals(PlaybackState.Idle, controller.state.value)
+        controller.release()
+    }
+
+    @Test
+    fun `stop 清掉待自愈请求 回前台后迟到的 Failed 也不拿旧请求起播`() {
+        val primary = RecordingPlayer()
+        val fallback = RecordingPlayer()
+        val controller = newController(primary, fallback)
+
+        controller.play(httpRequest)
+        controller.setHostForeground(false)
+        controller.setHostForeground(true)
+        primary.emit(failedState())
+
+        // 闸门重开了，但 currentRequest 已被 stop() 清掉，不能拿旧请求自愈。
+        assertEquals(0, fallback.playCount)
+        assertEquals(PlaybackState.Idle, controller.state.value)
+        controller.release()
+    }
+
+    /** 模拟内核停流之后才到的那条失败状态，用来戳自愈路径 */
+    private fun failedState(): PlaybackState.Failed =
+        PlaybackState.Failed(
+            url = httpRequest.url,
+            item = httpRequest.item,
+            reason = "late failure",
+            lineIndex = 0,
+            lineCount = 1,
+        )
+
     private fun newController(
         primary: RecordingPlayer,
         fallback: RecordingPlayer = RecordingPlayer(),
@@ -168,6 +217,10 @@ class HostPlaybackGuardTest {
             private set
         var switchCount = 0
             private set
+
+        fun emit(state: PlaybackState) {
+            _state.value = state
+        }
 
         override fun selectTrack(trackId: String) = Unit
 

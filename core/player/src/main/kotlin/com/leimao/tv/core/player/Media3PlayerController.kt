@@ -458,6 +458,10 @@ class Media3PlayerController(
     override fun stop() {
         stopWatchdog()
         stopStatsTicker()
+        // 清请求是「停了就别再自愈」的关键：晚到的失败回调 / 看门狗 / 播放器事件
+        // 都会落到 handleFailure 与 startCurrentLine，两者开头都是 `request ?: return`。
+        // 不清的话宿主已经离前台，异步路径还能再建一条流出来。
+        request = null
         videoPlayer.stop()
         clearTracks()
         _state.value = PlaybackState.Idle

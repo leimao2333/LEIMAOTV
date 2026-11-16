@@ -164,6 +164,9 @@ class VlcPlayerController(
 
     override fun stop() {
         stopWatchdog()
+        // 与 Media3 同口径：停了就别再自愈。native 的 EncounteredError 事件可能
+        // 比 stop() 晚到一拍，request 还在的话 onError() 会重新 startCurrentLine()。
+        request = null
         mediaPlayer.stop()
         _state.value = PlaybackState.Idle
     }

@@ -515,15 +515,21 @@
         CCTV1 的 20 条在本机 `curl` 全超时 —— 那是源不可达，不是判据判错
   - [ ] 在确实有可用线路的台上复验「几秒内自动换线」（本机 CCTV5 全部候选均不可用，
         仅验到「走完一轮后落失败面板」）
-- [x] **PLAY-17** 电视端禁止后台播放 ｜ P0（v0.5.6.4）
-  - [x] 根因：播放器是 Application 级单例，`finish()` / HOME 都停不住它；影视页只有
-        「按返回」那条路径自己 `stop()` 了，其余退出路径全漏
-  - [x] `HostPlaybackPolicy` 纯函数：进后台 `STOP_ALL`（用 `stop()` 而非 `pause()` ——
-        后者会被异步自愈路径里的 `play()` 重新打开）、回前台 `NO_AUTO_RESUME`
-  - [x] `PlayerController.setHostForeground` + `FallbackPlayerController` 闸门：
-        进后台两个内核一起停，后台的 `play` / `retry` / `switchLine` / `resume` 一律拒绝
-  - [x] `MainActivity.onStart/onStop` 与「退出应用」两处显式断流；`HostPlaybackGuardTest` 6 条
-  - [ ] 真机盒子复验：播放中按 HOME 后静置 30 秒无声音、回前台不自动响（RULES §9.2 第 8 条）
+- [x] **PLAY-17** 离前台即终止进程（电视端无后台）｜ P0（v0.5.7.0 升级）
+  - [x] 根因：播放器是 Application 级单例，`finish()` / HOME 都停不住它；只 `stop()`
+        留着进程仍会响（libVLC native 音频线程、绕过闸门的异步自愈）
+  - [x] `HostPlaybackPolicy` 纯函数：进后台 `TERMINATE_PROCESS`（编排器停流 + 宿主杀进程，
+        两层共用同一条规则）、回前台 `NO_AUTO_RESUME`
+  - [x] `FallbackPlayerController.stop()` 清 `currentRequest`、后台不吃内核状态；
+        两个内核 `stop()` 各自清 `request`，堵住「迟到一拍的 Failed 把 VLC 拉起来」
+  - [x] `MainActivity.onPause` 立刻静音 / `onResume` 重开闸门 / `onStop` 与退出确认
+        统一终止进程；动态注册 `ACTION_SCREEN_OFF` + `ACTION_SHUTDOWN` 覆盖待机与关机
+  - [x] 终止顺序：编排器停流 → `release()` → `finishAndRemoveTask()` → `killProcess()`，
+        不留 native 线程，也不让 AMS 判成崩溃把 Activity 拉回来
+  - [x] 模拟器实测（真源 1080p 出画后）：HOME / POWER 待机 / 菜单退出三条路径
+        `pidof` 立即为空、静置 25 秒不回来且零起流、退出后桌面无崩溃框；
+        `HostPlaybackGuardTest` 8 条
+  - [ ] 真机盒子复验三条路径（RULES §9.2 第 8 条）
 - [x] **SET-03** 补：导入去重 + 导入后自动刷新 ｜ P0（未发版）
   - [x] `SourceJson.filterNew` 按**地址**去重（含文件内部重复）；`importJson` 返回 `SourceImportSummary`
   - [x] 源管理页导入后自动刷新增的直播源，状态行报「导入 N 个源（M 个已存在，跳过）；刷新完成…」
